@@ -1,5 +1,35 @@
 # uapkg
 
+## 1.5.0
+
+### Minor Changes
+
+- [`9315a6f`](https://github.com/uapkg/uapkg/commit/9315a6fd6f7d56723563dc45c22f278a464aa8f5) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Move the `uapkg` command to a native Rust launcher with exact game-project CLI
+  pins, isolated version caches, GitHub and npm engine sources, and explicit
+  installation-aware launcher updates. The npm CLI package no longer registers a
+  command. New game project manifests record their CLI version automatically.
+
+  Add `uapkg --debug-info` for copyable system and version-selection diagnostics.
+
+### Patch Changes
+
+- [`8ff492a`](https://github.com/uapkg/uapkg/commit/8ff492a897ff738d15c609f148f122e00ac7e843) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Point trusted publishing recovery to package settings and keep request recovery in the CLI after removing the standalone account pages.
+
+- Updated dependencies [[`9315a6f`](https://github.com/uapkg/uapkg/commit/9315a6fd6f7d56723563dc45c22f278a464aa8f5)]:
+  - @uapkg/config@1.5.0
+  - @uapkg/package-manifest-schema@1.5.0
+  - @uapkg/common@1.5.0
+  - @uapkg/common-schema@1.5.0
+  - @uapkg/diagnostics@1.5.0
+  - @uapkg/diagnostics-format@1.5.0
+  - @uapkg/installer@1.5.0
+  - @uapkg/log@1.5.0
+  - @uapkg/pack@1.5.0
+  - @uapkg/package-claims@1.5.0
+  - @uapkg/package-manifest@1.5.0
+  - @uapkg/registry-core@1.5.0
+  - @uapkg/registry-schema@1.5.0
+
 ## 1.4.0
 
 ### Patch Changes

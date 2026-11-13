@@ -1,5 +1,20 @@
 # @uapkg/installer
 
+## 1.5.0
+
+### Patch Changes
+
+- Updated dependencies [[`9315a6f`](https://github.com/uapkg/uapkg/commit/9315a6fd6f7d56723563dc45c22f278a464aa8f5)]:
+  - @uapkg/config@1.5.0
+  - @uapkg/package-manifest-schema@1.5.0
+  - @uapkg/common@1.5.0
+  - @uapkg/common-schema@1.5.0
+  - @uapkg/diagnostics@1.5.0
+  - @uapkg/package-claims@1.5.0
+  - @uapkg/package-manifest@1.5.0
+  - @uapkg/registry-core@1.5.0
+  - @uapkg/registry-schema@1.5.0
+
 ## 1.4.0
 
 ### Patch Changes

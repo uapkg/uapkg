@@ -1,5 +1,13 @@
 # @uapkg/registry-schema
 
+## 1.5.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/common-schema@1.5.0
+  - @uapkg/diagnostics@1.5.0
+
 ## 1.4.0
 
 ### Minor Changes
