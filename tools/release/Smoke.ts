@@ -4,7 +4,59 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readJson, runChecked } from '../../packages/uapkg/build/EnginePackage.ts';
+import { smokePackagedTerminal } from './PackagedTerminalSmoke.ts';
 import { safeEngineCommand, type EngineDescriptor } from './ReleaseArtifacts.ts';
+
+/** Capture each frame even in CI, and wait for observable rendering/input readiness. */
+export function renderInkSmoke(): string {
+  return `const {PassThrough} = await import('node:stream');
+const React = (await import(pathToFileURL(require.resolve('react')).href)).default;
+const {render, Text, useInput} = await import(pathToFileURL(require.resolve('ink')).href);
+const input = new PassThrough();
+const output = new PassThrough();
+const errors = new PassThrough();
+const rawModes = [];
+const initialFrame = Promise.withResolvers();
+const updatedFrame = Promise.withResolvers();
+const inputReady = Promise.withResolvers();
+input.isTTY = true; input.setRawMode = value => {rawModes.push(value); return input;};
+input.ref = () => input; input.unref = () => input;
+output.isTTY = true; output.columns = 80; output.rows = 24;
+let rendered = '';
+output.on('data', data => {
+  rendered += data.toString();
+  if (rendered.includes('release-render-ready')) initialFrame.resolve();
+  if (rendered.includes('release-input-ok')) updatedFrame.resolve();
+});
+function Probe() {
+  const [text, setText] = React.useState('release-render-ready');
+  useInput(value => {if (value === 'x') setText('release-input-ok');});
+  React.useEffect(() => {inputReady.resolve();}, []);
+  return React.createElement(Text, null, text);
+}
+async function waitForProbe(promise, phase) {
+  let timer;
+  try {
+    await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Timed out waiting for Ink ' + phase)), 5000);
+    })]);
+  } finally {clearTimeout(timer);}
+}
+// Ink normally suppresses intermediate frames in CI. Its supported debug mode
+// records every frame so both the first render and input-driven update are tested.
+const screen = render(React.createElement(Probe), {stdin:input,stdout:output,stderr:errors,debug:true,exitOnCtrlC:false,patchConsole:false});
+try {
+  await waitForProbe(Promise.all([initialFrame.promise, inputReady.promise]), 'initial render and input setup');
+  input.write('x');
+  await waitForProbe(updatedFrame.promise, 'input-driven render');
+} finally {
+  screen.unmount();
+  await screen.waitUntilExit();
+}
+assert.match(rendered, /release-render-ready/); assert.match(rendered, /release-input-ok/);
+assert.equal(rawModes.includes(true), true); assert.equal(rawModes.at(-1), false);
+`;
+}
 
 export function renderRuntimeSmoke(engineRoot: string, keyring: boolean, virtual = false): string {
   return `import assert from 'node:assert/strict';
@@ -12,8 +64,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { PassThrough } from 'node:stream';
-import { setTimeout as delay } from 'node:timers/promises';
 import { execFileSync } from 'node:child_process';
 const engineRoot = ${virtual ? 'import.meta.dirname' : JSON.stringify(engineRoot)};
 const require = createRequire(path.join(engineRoot, 'package.json'));
@@ -38,21 +88,7 @@ const browser = await import(pathToFileURL(require.resolve('open')).href);
 assert.equal(typeof browser.default, 'function');
 if (process.platform === 'linux') assert.equal(fs.existsSync(path.join(path.dirname(require.resolve('open')), 'xdg-open')), true);
 if (process.env.UAPKG_SEA_OPEN_HELPER) assert.match(execFileSync(process.env.UAPKG_SEA_OPEN_HELPER, ['--version'], {encoding:'utf8'}), /xdg-open/);
-const React = (await import(pathToFileURL(require.resolve('react')).href)).default;
-const {render, Text, useInput} = await import(pathToFileURL(require.resolve('ink')).href);
-const input = new PassThrough();
-const output = new PassThrough();
-const errors = new PassThrough();
-const rawModes = [];
-input.isTTY = true; input.setRawMode = value => {rawModes.push(value); return input;};
-input.ref = () => input; input.unref = () => input;
-output.isTTY = true; output.columns = 80; output.rows = 24;
-let rendered = ''; output.on('data', data => {rendered += data.toString();});
-function Probe() {const [text,setText]=React.useState('release-render-ready'); useInput(value=>{if(value==='x')setText('release-input-ok');}); return React.createElement(Text, null, text);}
-const screen = render(React.createElement(Probe), {stdin:input,stdout:output,stderr:errors,exitOnCtrlC:false,patchConsole:false});
-await delay(100); input.write('x'); await delay(100); screen.unmount(); await screen.waitUntilExit();
-assert.match(rendered, /release-render-ready/); assert.match(rendered, /release-input-ok/);
-assert.equal(rawModes.includes(true), true); assert.equal(rawModes.at(-1), false);
+${renderInkSmoke()}
 execFileSync('git', ['init', '--quiet'], {cwd:process.cwd(), stdio:'pipe'});
 assert.equal(execFileSync('git',['rev-parse','--is-inside-work-tree'],{cwd:process.cwd(),encoding:'utf8'}).trim(),'true');
 if (${JSON.stringify(keyring)}) await new api.CredentialStore(undefined, 'uapkg.cli.release-smoke').assertAvailable();
@@ -122,6 +158,7 @@ export function smokeEngine(root: string, options: { keyring?: boolean; native?:
       writeFileSync(probe, renderRuntimeSmoke(engineRoot, options.keyring ?? false));
       process.stdout.write(runChecked(command.executable, [probe], cwd, env));
     }
+    if (options.native) smokePackagedTerminal(engineRoot);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

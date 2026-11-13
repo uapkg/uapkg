@@ -13,6 +13,7 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
   const sourcePackage = path.join(repository, 'packages', 'uapkg');
   const sourceManifest = JSON.parse(fs.readFileSync(path.join(sourcePackage, 'package.json'), 'utf8')) as {
     version: string;
+    dependencies: Record<string, string>;
   };
   const metadata = createBuildMetadata('development', sourceManifest.version);
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'uapkg-native-development-'));
@@ -23,13 +24,19 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
     fs.mkdirSync(enginePackage, { recursive: true });
     fs.copyFileSync(path.join(sourcePackage, 'package.json'), path.join(enginePackage, 'package.json'));
     fs.cpSync(path.join(sourcePackage, 'dist'), path.join(enginePackage, 'dist'), { recursive: true });
-    // Dependencies remain read-only in the actual checkout. The engine wrapper
-    // and its build stamp are copied, so this never restamps the real build.
-    fs.symlinkSync(
-      path.join(sourcePackage, 'node_modules'),
-      path.join(enginePackage, 'node_modules'),
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
+    // Resolve each dependency before linking it. Linking node_modules wholesale
+    // can reinterpret pnpm's relative workspace links against this temporary
+    // checkout on Windows, especially when it is on another drive.
+    // Dependencies remain read-only; only the copied engine is restamped.
+    for (const dependency of Object.keys(sourceManifest.dependencies)) {
+      const destination = path.join(enginePackage, 'node_modules', dependency);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.symlinkSync(
+        fs.realpathSync(path.join(sourcePackage, 'node_modules', dependency)),
+        destination,
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+    }
     fs.writeFileSync(
       path.join(enginePackage, 'dist', 'build', 'BuildMetadata.js'),
       renderBuildMetadataModule(metadata),

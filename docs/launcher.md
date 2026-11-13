@@ -141,6 +141,8 @@ profile to repair an engine: it also contains configuration and authentication
 metadata.
 
 GitHub downloads require a signed release descriptor and matching artifact hash.
+The [release signing public key](release-signing.pub) is also available for manual
+verification with `minisign -Vm release.json -p release-signing.pub`.
 The archive contains `engine.json`, which records the exact CLI version, platform,
 runtime executable, and arguments. The signed archive hash authenticates this
 execution metadata before extraction or execution.
@@ -236,6 +238,8 @@ and frozen dependency closure used for npm. The published engine carries
 `npm ci`, because npm 12 no longer consumes published shrinkwrap files.
 
 Each native runner tests a private-runtime bundle and a Node SEA candidate.
+The runtime checks exercise the packaged launcher and CLI in a real terminal,
+including interactive initialization, Ctrl+C, and exit-status preservation.
 CI selects SEA only when all six candidates pass, including their credential-store
 tests. Otherwise it selects private-runtime bundles for every platform. The
 selection is recorded in `packaging-evidence.json`; installed launchers do not
