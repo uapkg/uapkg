@@ -57,7 +57,10 @@ jobs:
       - run: vp run launcher:test
       - name: Test development launcher
         run: vp run launcher:test -- --features development
-      - run: vp run build -- --production
+      - name: Build workspace libraries
+        run: vp run --cache -w pack:libraries
+      - name: Build production CLI
+        run: vp run --cache -w cli:build -- --production
       - name: Exercise isolated native development installation
         run: vp run launcher:smoke-development -- --launcher launcher/target/debug/${{ matrix.executable }}
       - name: Build release launcher

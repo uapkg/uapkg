@@ -16,8 +16,11 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
     dependencies: Record<string, string>;
   };
   const metadata = createBuildMetadata('development', sourceManifest.version);
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'uapkg-native-development-'));
-  assert.equal(path.dirname(scratch), path.resolve(os.tmpdir()));
+  // Hosted Windows runners can expose TEMP through an 8.3 alias while CMD and
+  // the native launcher report its long path. Give the fixture one identity.
+  const temporaryRoot = fs.realpathSync.native(os.tmpdir());
+  const scratch = fs.mkdtempSync(path.join(temporaryRoot, 'uapkg-native-development-'));
+  assert.equal(path.dirname(scratch), temporaryRoot);
   try {
     const workspace = path.join(scratch, 'checkout with spaces');
     const enginePackage = path.join(workspace, 'packages', 'uapkg');
@@ -127,7 +130,12 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
       ] as const) {
         const result = run(shell, [...args]);
         const lines = result.stdout.trim().split(/\r?\n/);
-        assert.equal(lines[0]?.toLowerCase(), installation.executablePath.toLowerCase(), `${shell} resolution`);
+        assert.ok(lines[0], `${shell} did not resolve the launcher`);
+        assert.equal(
+          fs.realpathSync.native(lines[0]).toLowerCase(),
+          fs.realpathSync.native(installation.executablePath).toLowerCase(),
+          `${shell} resolution`,
+        );
         assert.equal(lines.at(-1), displayVersion, `${shell} version`);
         assert.match(result.stderr, /DEVELOPMENT BUILD/, `${shell} banner`);
       }
