@@ -258,6 +258,10 @@ the npm packages through Changesets, and attaches native assets to the exact
 `@uapkg/cli@<version>` release. It never uses GitHub's unfiltered latest-release
 endpoint. The launcher has its own version; a launcher-only fix currently travels
 with a CLI patch release. Existing versioned assets must not be overwritten.
+Attachment checks the exact npm version up to 31 times, ten seconds apart, to
+allow five minutes for registry propagation. Other lookup errors fail immediately.
+If the version remains unavailable, the workflow fails with instructions to
+confirm publication and retry with the retained artifacts.
 Attachment can resume after a partial upload: it verifies existing assets and
 uploads only missing files, with the signed catalog last. Retry using the retained
 `native-release` build artifact. If rebuilding changes published bytes, use the

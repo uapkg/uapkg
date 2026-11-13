@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { npmCliPath } from './NativeBuild.ts';
 import { assertExactVersion } from './ReleaseArtifacts.ts';
@@ -32,6 +33,33 @@ export interface CommandResult {
 
 type Execute = (command: string, args: string[]) => CommandResult;
 
+/** npm may accept publication before its public registry serves the version. */
+export async function waitForNpmPublication(
+  version: string,
+  isPublished: (version: string) => boolean,
+  {
+    pause = delay,
+    progress = (message: string) => process.stdout.write(`${message}\n`),
+  }: {
+    pause?: (milliseconds: number) => Promise<void>;
+    progress?: (message: string) => void;
+  } = {},
+): Promise<void> {
+  assertExactVersion(version);
+  const attempts = 31;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // The adapter returns false only for E404; authentication, network, and
+    // malformed-response errors propagate without an additional attempt.
+    if (isPublished(version)) return;
+    if (attempt === attempts) break;
+    progress(`Waiting for @uapkg/cli@${version} on npm (${attempt}/${attempts}); retrying in 10 seconds.`);
+    await pause(10_000);
+  }
+  throw new Error(
+    `@uapkg/cli@${version} is still absent from https://registry.npmjs.org/ after 31 checks and five minutes of waiting. Confirm npm publication, then retry release attachment with the original retained native artifacts.`,
+  );
+}
+
 /** All network operations are injectable; tests never contact or modify a release. */
 export function createAttachmentAdapter(
   repository: string,
@@ -59,6 +87,9 @@ export function createAttachmentAdapter(
         'version',
         '--json',
         '--registry=https://registry.npmjs.org/',
+        '--prefer-online',
+        '--fetch-retries=0',
+        '--fetch-timeout=10000',
       ]);
       if (!result.error && result.status !== 0 && /\bE404\b/.test(`${result.stdout}\n${result.stderr}`)) return false;
       if (result.error || result.status !== 0)
@@ -93,7 +124,11 @@ export function attachReleaseAssets(directory: string, version: string, adapter:
   assertExactVersion(version);
   const catalog = verifyReleasePayloads(directory);
   if (catalog.cliVersion !== version) throw new Error('Release metadata does not match the current CLI version.');
-  if (!adapter.isPublished(version)) return [];
+  if (!adapter.isPublished(version)) {
+    throw new Error(
+      `Cannot attach native assets: @uapkg/cli@${version} is not published at https://registry.npmjs.org/. Complete npm publication, then rerun release attachment.`,
+    );
+  }
   const tag = `@uapkg/cli@${version}`;
   const release = adapter.getRelease(tag);
   if (release.tagName !== tag || release.isDraft || !Array.isArray(release.assets))
@@ -152,7 +187,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       process.env.GITHUB_REPOSITORY ?? '',
       process.env.UAPKG_RELEASE_PUBLIC_KEY?.trim() ?? '',
     );
-    const uploaded = attachReleaseAssets(directory, version, adapter);
+    await waitForNpmPublication(version, adapter.isPublished);
+    // Reuse the exact version confirmed above rather than adding a lookup
+    // outside the bounded visibility check. Other callers retain the guard.
+    const uploaded = attachReleaseAssets(directory, version, {
+      ...adapter,
+      isPublished: (requested) => requested === version,
+    });
     process.stdout.write(`Attached ${uploaded.length} missing release assets.\n`);
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

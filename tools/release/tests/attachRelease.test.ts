@@ -3,11 +3,64 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
-import { attachReleaseAssets, createAttachmentAdapter, type AttachmentAdapter } from '../attachRelease.ts';
+import {
+  attachReleaseAssets,
+  createAttachmentAdapter,
+  waitForNpmPublication,
+  type AttachmentAdapter,
+} from '../attachRelease.ts';
 
 const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+describe('npm publication visibility', () => {
+  it('continues after transient missing-version responses without a real delay', async () => {
+    const probe = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+    const pause = vi.fn(async (_milliseconds: number) => {});
+    const progress = vi.fn();
+    await waitForNpmPublication('1.5.1', probe, { pause, progress });
+    expect(probe.mock.calls).toEqual([['1.5.1'], ['1.5.1'], ['1.5.1']]);
+    expect(pause.mock.calls).toEqual([[10_000], [10_000]]);
+    expect(progress).toHaveBeenCalledTimes(2);
+  });
+
+  it('limits visibility checks to 31 attempts and five minutes of waiting', async () => {
+    const probe = vi.fn(() => false);
+    const pause = vi.fn(async (_milliseconds: number) => {});
+    const progress = vi.fn();
+    await expect(waitForNpmPublication('1.5.1', probe, { pause, progress })).rejects.toThrow(
+      '@uapkg/cli@1.5.1 is still absent from https://registry.npmjs.org/ after 31 checks and five minutes of waiting',
+    );
+    expect(probe).toHaveBeenCalledTimes(31);
+    expect(pause).toHaveBeenCalledTimes(30);
+    expect(pause.mock.calls.every(([milliseconds]) => milliseconds === 10_000)).toBe(true);
+    expect(progress).toHaveBeenCalledTimes(30);
+  });
+
+  it('fails immediately on an npm authentication error', async () => {
+    const execute = vi.fn(() => ({ status: 1, stdout: '', stderr: 'npm error E401 authentication failed' }));
+    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
+    const pause = vi.fn(async (_milliseconds: number) => {});
+    const progress = vi.fn();
+    await expect(waitForNpmPublication('1.5.1', adapter.isPublished, { pause, progress })).rejects.toThrow(
+      'E401 authentication failed',
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(pause).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it('does not pause or report a wait for an already visible version', async () => {
+    const probe = vi.fn(() => true);
+    const pause = vi.fn(async (_milliseconds: number) => {});
+    const progress = vi.fn();
+    await waitForNpmPublication('1.5.1', probe, { pause, progress });
+    expect(probe).toHaveBeenCalledOnce();
+    expect(pause).not.toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+  });
 });
 
 function fixture(version = '2.0.0') {
@@ -97,12 +150,20 @@ describe('retry-safe release attachment', () => {
     expect(test.uploads).toEqual([]);
   });
 
-  it('skips unpublished npm versions and rejects incorrect or draft release identities', () => {
+  it('fails on an unpublished exact npm version before looking up or modifying a GitHub release', () => {
     const test = fixture();
     test.adapter.isPublished = () => false;
-    expect(attachReleaseAssets(test.directory, test.version, test.adapter)).toEqual([]);
+    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow(
+      '@uapkg/cli@2.0.0 is not published at https://registry.npmjs.org/. Complete npm publication',
+    );
     expect(test.adapter.getRelease).not.toHaveBeenCalled();
-    test.adapter.isPublished = () => true;
+    expect(test.adapter.download).not.toHaveBeenCalled();
+    expect(test.adapter.sign).not.toHaveBeenCalled();
+    expect(test.adapter.upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects incorrect or draft release identities', () => {
+    const test = fixture();
     test.adapter.getRelease = () => ({ tagName: '@uapkg/cli@1.0.0', isDraft: false, assets: [] });
     expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow('Expected the published');
     test.adapter.getRelease = (tagName) => ({ tagName, isDraft: true, assets: [] });
@@ -122,6 +183,9 @@ describe('retry-safe release attachment', () => {
     const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
     expect(adapter.isPublished('2.0.0-rc.1')).toBe(true);
     expect(execute.mock.calls[0]![1]).toContain('--registry=https://registry.npmjs.org/');
+    expect(execute.mock.calls[0]![1]).toEqual(
+      expect.arrayContaining(['--prefer-online', '--fetch-retries=0', '--fetch-timeout=10000']),
+    );
     const tag = '@uapkg/cli@2.0.0-rc.1';
     expect(adapter.getRelease(tag).tagName).toBe(tag);
     adapter.download(tag, 'release.json', 'directory with spaces');
