@@ -1,5 +1,26 @@
 # uapkg
 
+## 1.5.1
+
+### Patch Changes
+
+- [`627762b`](https://github.com/uapkg/uapkg/commit/627762b1a8986122d2389b7071f82f2d76ff1d4a) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Wait for npm publication to become visible before attaching signed native release
+  assets, and report a failure if publication remains unavailable.
+- Updated dependencies []:
+  - @uapkg/common@1.5.1
+  - @uapkg/common-schema@1.5.1
+  - @uapkg/config@1.5.1
+  - @uapkg/diagnostics@1.5.1
+  - @uapkg/diagnostics-format@1.5.1
+  - @uapkg/installer@1.5.1
+  - @uapkg/log@1.5.1
+  - @uapkg/pack@1.5.1
+  - @uapkg/package-claims@1.5.1
+  - @uapkg/package-manifest@1.5.1
+  - @uapkg/package-manifest-schema@1.5.1
+  - @uapkg/registry-core@1.5.1
+  - @uapkg/registry-schema@1.5.1
+
 ## 1.5.0
 
 ### Minor Changes
