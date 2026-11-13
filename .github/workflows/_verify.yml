@@ -4,11 +4,14 @@ on:
   workflow_call:
 
 jobs:
+  native:
+    uses: ./.github/workflows/_native.yml
+
   verify:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
       - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
           node-version-file: .node-version
@@ -25,6 +28,8 @@ jobs:
         run: vp run build -- --production
       - name: Verify the production CLI
         run: vp -C packages/uapkg run verify:production-build
+      - name: Prepare locked npm engine
+        run: vp run release:prepare
       - name: Pack workspace packages for runtime smoke tests
         shell: bash
         run: |
@@ -34,7 +39,7 @@ jobs:
             vp -C "$package_directory" pm pack --pack-destination "$RUNNER_TEMP/uapkg-packages"
           done
       - name: Upload packed workspace packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: uapkg-workspace-packages
           path: ${{ runner.temp }}/uapkg-packages/*.tgz
@@ -48,22 +53,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        node: ['26.0.0', '26.13.1']
 
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: uapkg-workspace-packages
           path: ${{ runner.temp }}/uapkg-packages
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ matrix.node }}
       - name: Install and run the packed CLI
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/uapkg-smoke"
-          npm install --prefix "$RUNNER_TEMP/uapkg-smoke" "$RUNNER_TEMP/uapkg-packages/"*.tgz
+          npm install --ignore-scripts --prefix "$RUNNER_TEMP/uapkg-smoke" "$RUNNER_TEMP/uapkg-packages/"*.tgz
           expected_version="$(node -p "require('./packages/uapkg/package.json').version")"
-          actual_version="$("$RUNNER_TEMP/uapkg-smoke/node_modules/.bin/uapkg" --version)"
+          actual_version="$(node "$RUNNER_TEMP/uapkg-smoke/node_modules/@uapkg/cli/dist/cli.js" --version)"
           test "$actual_version" = "$expected_version"
+          test ! -e "$RUNNER_TEMP/uapkg-smoke/node_modules/.bin/uapkg"

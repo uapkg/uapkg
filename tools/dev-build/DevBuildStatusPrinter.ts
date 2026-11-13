@@ -1,7 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import type { UAPKGBuildMode } from '@uapkg/common';
-import type { CurrentGlobalUapkgState, GlobalUapkgSnapshot } from './types.ts';
+import type { NativeInstallStatus } from './types.ts';
 
 export type UapkgProfileRoots = Readonly<Record<UAPKGBuildMode, string>>;
 
@@ -12,116 +13,62 @@ export function resolveUapkgProfileRoots(homeDirectory = os.homedir()): UapkgPro
   };
 }
 
+export function resolveUapkgCommands(): string[] {
+  const command = process.platform === 'win32' ? 'where.exe' : 'which';
+  const results = spawnSync(command, ['uapkg'], { encoding: 'utf8', windowsHide: true });
+  const paths = (results.stdout ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (process.platform === 'win32') {
+    const powershell = spawnSync(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', '(Get-Command uapkg -ErrorAction SilentlyContinue).Source'],
+      { encoding: 'utf8', windowsHide: true },
+    );
+    const selected = powershell.stdout?.trim();
+    if (selected) paths.unshift(selected);
+  }
+  return [...new Set(paths)];
+}
+
 export class DevBuildStatusPrinter {
   private readonly profileRoots: UapkgProfileRoots;
+  private readonly resolveCommands: () => string[];
 
-  constructor(profileRoots = resolveUapkgProfileRoots()) {
+  constructor(profileRoots = resolveUapkgProfileRoots(), resolveCommands = resolveUapkgCommands) {
     this.profileRoots = profileRoots;
+    this.resolveCommands = resolveCommands;
   }
 
-  printLinkStart(force: boolean) {
-    console.log(`[dev-build] build:link started${force ? ' (force)' : ''}`);
-  }
-
-  printSnapshotPreserved(snapshotPath: string) {
-    console.log(`[dev-build] Snapshot already exists; preserving restore state: ${snapshotPath}`);
-  }
-
-  printSnapshotCreated(snapshotPath: string) {
-    console.log(`[dev-build] Saved global uapkg snapshot: ${snapshotPath}`);
-  }
-
-  printAlreadyLinkedToWorkspace() {
-    console.log('[dev-build] uapkg is already linked to this workspace; preserving existing snapshot.');
-  }
-
-  printExternalLinkDetected(path: string) {
-    console.log('[dev-build] Global uapkg is currently linked to another development checkout.');
-    console.log(`[dev-build] Previous external link recorded for diagnostics only: ${path}`);
-  }
-
-  printExternalLinkNotRestored(path: string) {
-    console.log('[dev-build] Previous global uapkg was another development link.');
-    console.log(`[dev-build] Previous link path: ${path}`);
-    console.log('[dev-build] External development links are not restored automatically.');
-    console.log('[dev-build] Restore manually if needed:');
-    console.log(`[dev-build]   cd ${path}`);
-    console.log('[dev-build]   vp exec pnpm add --global .');
-  }
-
-  printUnlinkRefusedWithoutForce() {
-    console.log('[dev-build] No snapshot found and current global uapkg is not this workspace.');
-    console.log('[dev-build] Refusing to remove global uapkg. Re-run with --force to override.');
-  }
-
-  printSnapshotRetainedAfterFailure(snapshotPath: string) {
-    console.log('[dev-build] Restore failed. Snapshot was retained so you can retry.');
-    console.log(`[dev-build] Snapshot: ${snapshotPath}`);
-  }
-
-  printSnapshotRemoved(snapshotPath: string) {
-    console.log(`[dev-build] Snapshot removed: ${snapshotPath}`);
-  }
-
-  printGlobalShimUpdated(shimPath: string) {
-    console.log(`[dev-build] Updated global uapkg shim: ${shimPath}`);
-  }
-
-  printStatus(args: {
-    snapshotPath: string;
-    snapshot: GlobalUapkgSnapshot | null;
-    current: CurrentGlobalUapkgState;
-    isLinkedToWorkspace: boolean;
-    binaryPath: string | null;
-    globalBinDir: string | null;
-    isGlobalBinOnPath: boolean;
-    workspaceShimPath: string | null;
-  }) {
-    const devMode = args.isLinkedToWorkspace ? 'ACTIVE' : 'INACTIVE';
-    console.log(`Dev Mode: ${devMode}`);
+  printStatus(status: NativeInstallStatus): void {
+    console.log(`Dev Mode: ${status.owned ? 'ACTIVE' : 'INACTIVE'}`);
     console.log(`Production Profile Root: ${this.profileRoots.production}`);
     console.log(`Development Profile Root: ${this.profileRoots.development}`);
-    console.log(`Snapshot: ${args.snapshot ? args.snapshotPath : 'none'}`);
-    console.log(`Current: ${this.describeCurrent(args.current)}`);
-
-    if (args.snapshot) {
-      console.log(`Previous: ${this.describePrevious(args.snapshot)}`);
-    } else {
-      console.log('Previous: unavailable (no snapshot)');
+    console.log(`Native Launcher: ${status.installed ? status.executablePath : 'not installed'}`);
+    console.log(`Install Receipt: ${status.receiptPath}`);
+    console.log(`Restore Snapshot: ${status.snapshotPath}`);
+    if (status.receipt) {
+      console.log(`Checkout: ${status.receipt.development.checkoutPath}`);
+      console.log(`Local Engine: ${status.receipt.development.enginePath}`);
+      console.log(`Node: ${status.receipt.development.nodePath}`);
     }
-
-    console.log(`Global Bin: ${args.globalBinDir ?? 'unknown'}`);
-    console.log(`Global Bin In PATH: ${args.isGlobalBinOnPath ? 'yes' : 'no'}`);
-    console.log(`Workspace Shim: ${args.workspaceShimPath ?? 'not found'}`);
-    console.log(`Binary: ${args.binaryPath ?? 'not found on PATH'}`);
-
-    if (args.globalBinDir && !args.isGlobalBinOnPath) {
-      console.log(`[dev-build] Add this to PATH and open a new terminal: ${args.globalBinDir}`);
+    const normalize = (value: string) =>
+      process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+    const onPath = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .filter(Boolean)
+      .some((value) => normalize(value) === normalize(status.binDirectory));
+    const pathEntry = onPath ? (status.installed ? 'yes' : 'yes (directory entry only; launcher not installed)') : 'no';
+    console.log(`Launcher Directory In PATH: ${pathEntry}`);
+    const commands = this.resolveCommands();
+    console.log(`Resolved Command: ${commands[0] ?? 'not found'}`);
+    if (status.installed && !onPath)
+      console.log('[dev-build] Run vp run build:link to check the user PATH, then open a new terminal.');
+    if (status.installed && commands[0] && normalize(commands[0]) !== normalize(status.executablePath)) {
+      console.log(
+        `[dev-build] Another command takes precedence: ${commands[0]}. Put the native launcher directory first in PATH.`,
+      );
     }
-  }
-
-  private describeCurrent(current: CurrentGlobalUapkgState) {
-    if (current.kind === 'none') {
-      return 'uapkg: none';
-    }
-
-    if (current.kind === 'published') {
-      return `uapkg: published version=${current.version}`;
-    }
-
-    return `uapkg: linked path=${current.path}`;
-  }
-
-  private describePrevious(snapshot: GlobalUapkgSnapshot) {
-    const previous = snapshot.previous;
-    if (previous.kind === 'none') {
-      return 'kind=none';
-    }
-
-    if (previous.kind === 'published') {
-      return `kind=published version=${previous.version}`;
-    }
-
-    return `kind=external-link path=${previous.path} restorePolicy=${previous.restorePolicy}`;
   }
 }

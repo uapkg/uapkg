@@ -8,6 +8,8 @@ ATCTests.generated.xml
 /uapkg
 /uapkg.cmd
 .pnpm-store/
+/launcher/target/
+/packages/uapkg/package/
 
 # Created by https://www.toptal.com/developers/gitignore/api/node
 # Edit at https://www.toptal.com/developers/gitignore?templates=node

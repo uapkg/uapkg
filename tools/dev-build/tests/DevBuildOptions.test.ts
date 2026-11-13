@@ -47,15 +47,12 @@ describe('parseDevBuildOptions', () => {
     );
   });
 
-  it('preserves the force option for link and unlink', () => {
+  it('allows explicit replacement during linking but never bypasses unlink ownership', () => {
     expect(parseDevBuildOptions('link', ['--force'])).toEqual({
       force: true,
       buildMode: 'development',
     });
-    expect(parseDevBuildOptions('unlink', ['--force'])).toEqual({
-      force: true,
-      buildMode: 'development',
-    });
+    expect(() => parseDevBuildOptions('unlink', ['--force'])).toThrow('Unsupported option for unlink: --force');
   });
 
   it('rejects options that do not belong to the command', () => {

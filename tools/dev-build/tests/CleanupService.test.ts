@@ -25,6 +25,19 @@ describe('CleanupService', () => {
     const packageDist = path.join(packageRoot, 'dist');
     const packageCache = path.join(packageRoot, '.cache', 'retained.txt');
     const rootDist = path.join(workspaceRoot, 'dist', 'retained.txt');
+    const rustTarget = path.join(workspaceRoot, 'launcher', 'target');
+    const rustSource = path.join(workspaceRoot, 'launcher', 'src', 'main.rs');
+    const generatedReleases = ['native', 'native-artifacts', 'release'].map((name) =>
+      path.join(workspaceRoot, 'dist', name),
+    );
+    const packagedEngine = path.join(packageRoot, 'package');
+    for (const directory of [...generatedReleases, packagedEngine]) {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(path.join(directory, 'generated.txt'), 'generated');
+    }
+    fs.mkdirSync(rustTarget, { recursive: true });
+    fs.mkdirSync(path.dirname(rustSource), { recursive: true });
+    fs.writeFileSync(rustSource, 'fn main() {}');
     fs.mkdirSync(path.dirname(packageBuildSource), { recursive: true });
     fs.mkdirSync(path.dirname(rootBuildSource), { recursive: true });
     fs.mkdirSync(packageDist, { recursive: true });
@@ -46,6 +59,9 @@ describe('CleanupService', () => {
     new CleanupService(runner, workspaceRoot).cleanBuildArtifacts();
 
     expect(fs.existsSync(packageDist)).toBe(false);
+    expect(fs.existsSync(rustTarget)).toBe(false);
+    expect(fs.readFileSync(rustSource, 'utf8')).toBe('fn main() {}');
+    for (const directory of [...generatedReleases, packagedEngine]) expect(fs.existsSync(directory)).toBe(false);
     expect(fs.readFileSync(packageBuildSource, 'utf8')).toBe('export {};\n');
     expect(fs.readFileSync(rootBuildSource, 'utf8')).toBe('export {};\n');
     expect(fs.readFileSync(packageCache, 'utf8')).toBe('retained\n');

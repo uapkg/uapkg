@@ -16,6 +16,10 @@ export class UAPKGCommandLineParser {
           .scriptName('uapkg')
           .usage('$0 <command> [args]')
           .version(UAPKG_BUILD_METADATA.displayVersion)
+          .option('debug-info', {
+            type: 'boolean',
+            describe: 'Print diagnostic information without running a command',
+          })
           .demandCommand(1)
           .strict()
           .help(),

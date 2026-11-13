@@ -258,7 +258,7 @@ describe('build wiring', () => {
     expect(packageJson.scripts?.build).not.toContain('vp node');
     expect(packageJson.scripts?.['verify:production-build']).toBe('vp exec node build/verifyProductionBuild.ts');
     expect(packageJson.scripts?.prepack).toBe(
-      'vp run -w --cache cli:build -- --production && vp run verify:production-build',
+      'vp run -w --cache cli:build -- --production && vp exec node build/prepareEnginePackage.ts',
     );
   });
 });

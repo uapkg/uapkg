@@ -2,15 +2,16 @@
   "name": "@uapkg/cli",
   "version": "1.4.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=26.0.0",
+    "npm": ">=11.12.1"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/MaximDevoir/uapkg.git",
     "directory": "packages/uapkg"
   },
-  "bin": {
-    "uapkg": "./dist/cli.js"
+  "publishConfig": {
+    "directory": "package"
   },
   "files": [
     "dist",
@@ -28,7 +29,8 @@
   "scripts": {
     "uapkg": "vp run -w --cache cli:build -- --development && vp exec node dist/cli.js",
     "build": "node build/runCliBuild.ts",
-    "prepack": "vp run -w --cache cli:build -- --production && vp run verify:production-build",
+    "prepack": "vp run -w --cache cli:build -- --production && vp exec node build/prepareEnginePackage.ts",
+    "build:engine": "vp exec node build/prepareEnginePackage.ts",
     "build:watch": "vp pack --watch --on-success \"vp exec node build/finalizeCliBuild.ts --development\"",
     "verify:production-build": "vp exec node build/verifyProductionBuild.ts"
   },
@@ -49,6 +51,7 @@
     "@uapkg/package-manifest-schema": "workspace:^",
     "@uapkg/registry-core": "workspace:^",
     "@uapkg/registry-schema": "workspace:^",
+    "envinfo": "7.21.0",
     "esbuild": "0.28.0",
     "ink": "6.8.0",
     "ink-select-input": "6.2.0",
@@ -61,6 +64,7 @@
     "zod": "4.3.6"
   },
   "devDependencies": {
+    "@types/envinfo": "7.8.4",
     "@types/react": "19.2.14",
     "tar": "7.5.13"
   },

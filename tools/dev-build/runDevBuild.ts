@@ -51,9 +51,9 @@ if (mode === 'build') {
 } else if (mode === 'link') {
   orchestrator.link(options);
 } else if (mode === 'watch') {
-  orchestrator.watch();
+  await orchestrator.watch();
 } else if (mode === 'unlink') {
-  orchestrator.unlink(options);
+  orchestrator.unlink();
 } else if (mode === 'status') {
   orchestrator.status();
 } else if (mode === 'clean') {

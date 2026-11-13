@@ -2,14 +2,23 @@
 
 A plugin manager for Unreal Engine plugins.
 
+The native `uapkg` launcher selects the CLI version pinned by a game project's
+`uapkg.json`. Download the launcher and its bundled CLI from a CLI release on
+[GitHub Releases](https://github.com/MaximDevoir/uapkg/releases). See
+[installation, version selection, and updates](docs/launcher.md).
+
+`@uapkg/cli` is the TypeScript engine package. It does not register a command;
+installing it globally with npm does not install the launcher.
+
 ## Prerequisites
 
 - [Git](https://git-scm.com/)
 - [Vite+ (`vp`)](https://viteplus.dev/guide/) installed globally
+- [Rustup](https://rustup.rs/) for building the native launcher
 
 Node.js and pnpm do not need separate global installations. During the initial
 `vp install --frozen-lockfile`, global `vp` reads `.node-version` and
-`packageManager`, provisions Node.js 26.7.0 and pnpm 11.22.0, and performs the
+`packageManager`, provisions Node.js 26.13.1 and pnpm 11.22.0, and performs the
 install. After that, `vp` automatically uses the repository's local Vite+
 toolchain.
 
@@ -33,6 +42,9 @@ the selected local tool versions.
 ```sh
 vp check
 vp test run
+vp run launcher:format:check
+vp run launcher:lint
+vp run launcher:test
 ```
 
 `vp check` runs Oxfmt, Oxlint, and type-aware TypeScript checks. The pre-commit
@@ -40,9 +52,9 @@ hook runs `vp staged`, limiting fixable checks to staged files.
 
 ## Builds
 
-The root build preserves UAPKG's generated CLI launcher, build metadata,
-executable permissions, and artifact verification while using `vp pack`
-underneath for package compilation. It defaults to a development-stamped build:
+The root build compiles the TypeScript engine and Rust launcher. It preserves
+build metadata, profile isolation, and artifact verification while using
+`vp pack` for package compilation. It defaults to a development-stamped build:
 
 ```sh
 vp run build

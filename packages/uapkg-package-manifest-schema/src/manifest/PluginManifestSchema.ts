@@ -8,6 +8,7 @@ import { BaseManifestSchema } from '#package-manifest-schema/manifest/BaseManife
  */
 export const PluginManifestSchema = BaseManifestSchema.extend({
   kind: z.literal('plugin'),
+  uapkgVersion: z.never().optional(),
 }).refine((data) => !('overrides' in data && data.overrides !== undefined), {
   message: 'Overrides are not allowed in plugin manifests',
   path: ['overrides'],

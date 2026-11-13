@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
       - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
           node-version-file: .node-version
@@ -29,13 +29,43 @@ jobs:
       - run: vp install --frozen-lockfile
       - run: vp run build -- --production
       - run: vp -C packages/uapkg run verify:production-build
+      - run: vp run release:prepare
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: native-*
+          path: dist/native-artifacts
+      - name: Assemble verified native release
+        shell: bash
+        run: |
+          launcher_version="$(node -e 'const fs = require("node:fs"); const toml = fs.readFileSync("launcher/Cargo.toml", "utf8"); console.log(toml.match(/^version\s*=\s*"([^"]+)"/m)[1]);')"
+          vp run release:assemble -- --input dist/native-artifacts --output dist/release --launcher-version "$launcher_version"
+      - name: Install pinned Minisign
+        shell: bash
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/minisign.tar.gz" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          echo "9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  $RUNNER_TEMP/minisign.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/minisign-linux/x86_64" >> "$GITHUB_PATH"
 
       - name: Create Release Pull Request or Release
+        id: changesets
         uses: changesets/action@v1
         with:
           publish: vp run release
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+          UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
           # The artifacts were built and verified above. Avoid concurrent pnpm publish
           # hooks rebuilding and cleaning the same workspace package outputs.
           PNPM_CONFIG_IGNORE_SCRIPTS: 'true'
+      - name: Attach native assets to the CLI release
+        # A retry may find npm already published. Version-PR runs must not attach
+        # new source builds to the previous package version's release.
+        if: steps.changesets.outputs.hasChangesets != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+          UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
+        run: vp exec node tools/release/attachRelease.ts

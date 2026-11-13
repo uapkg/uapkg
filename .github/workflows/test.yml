@@ -2,6 +2,8 @@ name: Test
 
 on:
   push:
+    branches-ignore:
+      - main # Release runs the same verification workflow for main.
   pull_request:
 
 jobs:

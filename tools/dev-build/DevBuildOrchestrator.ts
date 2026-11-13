@@ -2,15 +2,14 @@ import type { UAPKGBuildMode } from '@uapkg/common';
 import { BuildService } from './BuildService.ts';
 import { CleanupService } from './CleanupService.ts';
 import { DevBuildStatusPrinter } from './DevBuildStatusPrinter.ts';
-import { GlobalCommandShimService } from './GlobalCommandShimService.ts';
-import { GlobalUapkgDevModeService } from './GlobalUapkgDevModeService.ts';
-import { GlobalUapkgSnapshotStore } from './GlobalUapkgSnapshotStore.ts';
-import { GlobalUapkgStateService } from './GlobalUapkgStateService.ts';
+import { watchDevelopmentSources } from './DevBuildWatcher.ts';
+import { NativeDevInstallation } from './NativeDevInstallation.ts';
 import { ProcessRunner } from './ProcessRunner.ts';
 
 export class DevBuildOrchestrator {
   private readonly buildService: BuildService;
-  private readonly devModeService: GlobalUapkgDevModeService;
+  private readonly installation: NativeDevInstallation;
+  private readonly statusPrinter: DevBuildStatusPrinter;
   private readonly cleanupService: CleanupService;
   private readonly workspaceRoot: string;
 
@@ -20,17 +19,8 @@ export class DevBuildOrchestrator {
     this.buildService = new BuildService(runner, this.workspaceRoot);
     this.cleanupService = new CleanupService(runner, this.workspaceRoot);
 
-    const stateService = new GlobalUapkgStateService(runner, this.workspaceRoot);
-    const snapshotStore = new GlobalUapkgSnapshotStore(this.workspaceRoot);
-    const statusPrinter = new DevBuildStatusPrinter();
-    const shimService = new GlobalCommandShimService(runner, this.workspaceRoot);
-    this.devModeService = new GlobalUapkgDevModeService(
-      this.buildService,
-      stateService,
-      snapshotStore,
-      statusPrinter,
-      shimService,
-    );
+    this.installation = new NativeDevInstallation(this.workspaceRoot);
+    this.statusPrinter = new DevBuildStatusPrinter();
   }
 
   buildAll(mode: UAPKGBuildMode) {
@@ -38,19 +28,27 @@ export class DevBuildOrchestrator {
   }
 
   link(options: { force: boolean }) {
-    this.devModeService.link(options);
+    this.buildService.buildCliWithDependencies();
+    this.reportPathChange(this.installation.link(this.buildService.launcherPath('development'), options.force));
+    this.status();
   }
 
-  watch() {
-    this.buildService.watchCliAndDependents();
+  async watch() {
+    this.link({ force: false });
+    await watchDevelopmentSources(this.workspaceRoot, async ({ typescript, rust }) => {
+      this.buildService.rebuildDevelopment(typescript, rust);
+      this.reportPathChange(this.installation.link(this.buildService.launcherPath('development')));
+      console.log('[dev-build] Development launcher and engine are ready.');
+    });
   }
 
-  unlink(options: { force: boolean }) {
-    this.devModeService.unlink(options);
+  unlink() {
+    this.reportPathChange(this.installation.unlink());
+    this.status();
   }
 
   status() {
-    this.devModeService.printStatus();
+    this.statusPrinter.printStatus(this.installation.status());
   }
 
   clean() {
@@ -58,7 +56,11 @@ export class DevBuildOrchestrator {
   }
 
   cleanAll() {
-    this.devModeService.unlink({ force: true });
+    this.reportPathChange(this.installation.unlink());
     this.cleanupService.cleanAll();
+  }
+
+  private reportPathChange(changed: boolean) {
+    if (changed) console.log('[dev-build] User PATH updated. Open a new terminal to use the updated PATH.');
   }
 }

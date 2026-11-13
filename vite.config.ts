@@ -133,7 +133,14 @@ const testProject = (name: string, relativeRoot: string, options: TestProjectOpt
 
 export default defineConfig({
   fmt: {
-    ignorePatterns: ['**/node_modules/**', '**/.pnpm-store/**', '**/dist/**', '**/coverage/**', '**/__snapshots__/**'],
+    ignorePatterns: [
+      '**/node_modules/**',
+      '**/.pnpm-store/**',
+      '**/dist/**',
+      '**/coverage/**',
+      '**/__snapshots__/**',
+      'launcher/target/**',
+    ],
     useTabs: false,
     tabWidth: 2,
     printWidth: 120,
@@ -145,7 +152,14 @@ export default defineConfig({
     insertFinalNewline: true,
   },
   lint: {
-    ignorePatterns: ['**/node_modules/**', '**/.pnpm-store/**', '**/dist/**', '**/coverage/**', '**/__snapshots__/**'],
+    ignorePatterns: [
+      '**/node_modules/**',
+      '**/.pnpm-store/**',
+      '**/dist/**',
+      '**/coverage/**',
+      '**/__snapshots__/**',
+      'launcher/target/**',
+    ],
     categories: { correctness: 'error' },
     plugins: ['eslint', 'oxc', 'typescript', 'unicorn', 'node', 'react'],
     jsPlugins: [{ name: 'vite-plus', specifier: 'vite-plus/oxlint-plugin' }],
@@ -207,6 +221,7 @@ export default defineConfig({
       testProject('consumer-bundle-tools', './tools/consumer-bundle'),
       testProject('dev-build-tools', './tools/dev-build'),
       testProject('import-policy-tools', './tools/import-policy'),
+      testProject('release-tools', './tools/release', { hookTimeout: 30_000, testTimeout: 30_000 }),
     ],
   },
   run: {

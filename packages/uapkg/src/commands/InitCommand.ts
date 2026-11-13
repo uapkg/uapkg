@@ -3,6 +3,7 @@ import { PackageNameSchema, PackageVersionSchema } from '@uapkg/common-schema';
 import { ManifestReader, ManifestWriter } from '@uapkg/package-manifest';
 import type { Manifest, ManifestKind } from '@uapkg/package-manifest-schema';
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
+import { UAPKG_BUILD_METADATA } from '#cli/build/BuildMetadata.ts';
 import type { ProjectContextDetector } from '#cli/prompts/ProjectContextDetector.ts';
 import type { PromptService } from '#cli/prompts/PromptService.ts';
 import type { Command } from '#cli/commands/Command.ts';
@@ -79,6 +80,11 @@ export class InitCommand implements Command {
     if (kind === 'plugin') {
       return { name, version, kind: 'plugin' };
     }
-    return { name, version, kind: 'project' };
+    return {
+      name,
+      version,
+      kind: 'project',
+      uapkgVersion: PackageVersionSchema.parse(UAPKG_BUILD_METADATA.packageVersion),
+    };
   }
 }

@@ -36,7 +36,12 @@ export class CleanupService {
   }
 
   private getRootBuildTargets() {
-    return [path.join(this.workspaceRoot, 'coverage')];
+    return [
+      path.join(this.workspaceRoot, 'coverage'),
+      path.join(this.workspaceRoot, 'launcher', 'target'),
+      path.join(this.workspaceRoot, 'packages', 'uapkg', 'package'),
+      ...['native', 'native-artifacts', 'release'].map((name) => path.join(this.workspaceRoot, 'dist', name)),
+    ];
   }
 
   private getWorkspacePackageDirectories() {

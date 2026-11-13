@@ -1,5 +1,5 @@
 import { resolveUapkgBuildMode } from '@uapkg/common';
-import { RegistryURLSchema } from '@uapkg/common-schema';
+import { PackageVersionSchema, RegistryURLSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 
 const DEVELOPMENT_REGISTRY_URL = 'https://github.com/uapkg/registry-dev-tmp';
@@ -9,6 +9,15 @@ const PRODUCTION_REGISTRY_URL = 'https://github.com/uapkg/registry';
 // omitted — uapkg commands must remain non-interactive.
 const postInstallPolicySchema = z.enum(['allow', 'deny']);
 const registryUrlConfigSchema = RegistryURLSchema.transform((value): string => value);
+
+// The native launcher reads only this subtree in the active global profile.
+// Normal CLI config resolution still supports project-local overrides.
+const launcherConfigSchema = z
+  .object({
+    cliSource: z.enum(['github-releases', 'npm']),
+    defaultCliVersion: PackageVersionSchema.optional(),
+  })
+  .strict();
 
 const registryRefSchema = z
   .object({
@@ -54,6 +63,7 @@ export const configSchema = z
   .object({
     registry: z.string().min(1),
     registries: z.record(z.string(), registryConfigSchema),
+    launcher: launcherConfigSchema,
     git: z.string().min(1),
     editor: z.string().min(1),
     exec: z
@@ -105,6 +115,7 @@ export const partialConfigSchema = z
   .object({
     registry: z.string().min(1).optional(),
     registries: z.record(z.string(), partialRegistryConfigSchema).optional(),
+    launcher: launcherConfigSchema.partial().optional(),
     git: z.string().min(1).optional(),
     editor: z.string().min(1).optional(),
     exec: z
@@ -181,6 +192,9 @@ export function getDefaultConfig(): ResolvedConfig {
     resolveUapkgBuildMode() === 'development' ? DEVELOPMENT_REGISTRY_URL : PRODUCTION_REGISTRY_URL;
   const defaults: ResolvedConfig = {
     registry: 'default',
+    launcher: {
+      cliSource: 'github-releases',
+    },
     registries: {
       default: {
         url: registryUrlConfigSchema.parse(defaultRegistryUrl),

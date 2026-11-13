@@ -37,7 +37,7 @@ function getAllowedFlags(command: DevBuildMode) {
     return BUILD_MODE_FLAGS;
   }
 
-  if (command === 'link' || command === 'unlink') {
+  if (command === 'link') {
     return new Set(['--force']);
   }
 

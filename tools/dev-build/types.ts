@@ -1,4 +1,5 @@
 import type { UAPKGBuildMode } from '@uapkg/common';
+import type { DevelopmentPathSnapshot } from './DevelopmentPath.ts';
 
 export type DevBuildMode = 'build' | 'link' | 'watch' | 'unlink' | 'status' | 'clean' | 'cleanAll';
 
@@ -7,19 +8,36 @@ export interface DevBuildOptions {
   buildMode: UAPKGBuildMode;
 }
 
-export type CurrentGlobalUapkgState =
-  | { kind: 'none' }
-  | { kind: 'published'; version: string }
-  | { kind: 'link'; path: string };
+export interface DevelopmentInstallReceipt {
+  schemaVersion: 1;
+  installMethod: 'development';
+  defaultCliVersion: string;
+  development: {
+    enginePath: string;
+    nodePath: string;
+    checkoutPath: string;
+  };
+}
 
-export type SavedGlobalUapkgState =
-  | { kind: 'none' }
-  | { kind: 'published'; version: string }
-  | { kind: 'external-link'; path: string; restorePolicy: 'do-not-restore' };
+export interface NativeLinkSnapshot {
+  schemaVersion: 2;
+  checkoutPath: string;
+  binDirectory: string;
+  previousBinary: boolean;
+  previousReceipt: boolean;
+  previousBinaryHash: string | null;
+  previousReceiptHash: string | null;
+  installedBinaryHash: string;
+  installedReceiptHash: string;
+  path: DevelopmentPathSnapshot;
+}
 
-export interface GlobalUapkgSnapshot {
-  createdAt: string;
-  workspaceRoot: string;
-  packageName: '@uapkg/cli' | 'uapkg';
-  previous: SavedGlobalUapkgState;
+export interface NativeInstallStatus {
+  binDirectory: string;
+  executablePath: string;
+  receiptPath: string;
+  snapshotPath: string;
+  installed: boolean;
+  owned: boolean;
+  receipt: DevelopmentInstallReceipt | null;
 }

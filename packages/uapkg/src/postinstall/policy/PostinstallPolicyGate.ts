@@ -69,6 +69,7 @@ export class PostinstallPolicyGate {
  * from arbitrary callers that might pass a partial config.
  */
 const FALLBACK_RESOLVED_CONFIG: ResolvedConfig = {
+  launcher: { cliSource: 'github-releases' },
   registry: '',
   registries: {},
   git: 'git',

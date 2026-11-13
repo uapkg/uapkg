@@ -1,0 +1,146 @@
+name: Native launcher and CLI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            executable: uapkg.exe
+          - platform: win32-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            executable: uapkg.exe
+          - platform: darwin-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            executable: uapkg
+          - platform: darwin-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            executable: uapkg
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            executable: uapkg
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            executable: uapkg
+    env:
+      UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+      CARGO_BUILD_WARNINGS: deny
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - name: Install pinned Rust toolchain
+        working-directory: launcher
+        run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
+      - run: vp run launcher:format:check
+      - run: vp run launcher:lint
+      - run: vp run launcher:test
+      - name: Test development launcher
+        run: vp run launcher:test -- --features development
+      - run: vp run build -- --production
+      - name: Exercise isolated native development installation
+        run: vp run launcher:smoke-development -- --launcher launcher/target/debug/${{ matrix.executable }}
+      - name: Build release launcher
+        working-directory: launcher
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - run: vp run release:prepare
+      - run: vp run release:smoke-npm -- --package packages/uapkg/package
+      - name: Test minimum supported npm
+        if: matrix.platform == 'linux-x64'
+        run: vp run release:smoke-npm -- --package packages/uapkg/package --npm-version 11.12.1
+      - name: Build native archives
+        run: vp run release:native -- --format node --output dist/native/node --launcher launcher/target/${{ matrix.target }}/release/${{ matrix.executable }}
+      - name: Prepare Linux credential-store service
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus-x11 libsecret-1-0
+      - name: Exercise standalone runtime on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "%s" "uapkg-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets
+            vp run release:smoke-native -- --engine dist/native/node/cli --keyring
+          '
+      - name: Exercise standalone runtime
+        if: runner.os != 'Linux'
+        run: vp run release:smoke-native -- --engine dist/native/node/cli --keyring
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: candidate-node-${{ matrix.platform }}
+          path: |
+            dist/native/node/*.tar.gz
+            dist/native/node/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Build SEA candidate
+        id: sea-build
+        continue-on-error: true
+        run: vp run release:native -- --format sea --output dist/native/sea --launcher launcher/target/${{ matrix.target }}/release/${{ matrix.executable }}
+      - name: Qualify SEA on Linux
+        id: sea-linux
+        if: steps.sea-build.outcome == 'success' && runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            printf "%s" "uapkg-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets
+            vp run release:smoke-native -- --engine dist/native/sea/cli --keyring
+          '
+      - name: Qualify SEA
+        id: sea-other
+        if: steps.sea-build.outcome == 'success' && runner.os != 'Linux'
+        continue-on-error: true
+        run: vp run release:smoke-native -- --engine dist/native/sea/cli --keyring
+      - uses: actions/upload-artifact@v7.0.2
+        if: steps.sea-build.outcome == 'success' && (steps.sea-linux.outcome == 'success' || steps.sea-other.outcome == 'success')
+        with:
+          name: candidate-sea-${{ matrix.platform }}
+          path: |
+            dist/native/sea/*.tar.gz
+            dist/native/sea/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  select-format:
+    name: Select one qualified format for all platforms
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: candidate-*
+          path: dist/native/candidates
+      - run: vp run release:select-native -- --input dist/native/candidates --output dist/native/selected
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: native-release
+          path: dist/native/selected/*
+          if-no-files-found: error
+          retention-days: 7
