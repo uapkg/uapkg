@@ -6,7 +6,7 @@ use std::{
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const REPOSITORY: &str = "MaximDevoir/uapkg";
+pub const REPOSITORY: &str = "uapkg/uapkg";
 
 pub fn platform() -> Result<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {

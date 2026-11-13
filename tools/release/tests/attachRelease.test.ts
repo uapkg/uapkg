@@ -119,7 +119,7 @@ describe('retry-safe release attachment', () => {
           : '{"tagName":"@uapkg/cli@2.0.0-rc.1","isDraft":false,"assets":[]}',
       stderr: '',
     }));
-    const adapter = createAttachmentAdapter('MaximDevoir/uapkg', 'public-key', execute);
+    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
     expect(adapter.isPublished('2.0.0-rc.1')).toBe(true);
     expect(execute.mock.calls[0]![1]).toContain('--registry=https://registry.npmjs.org/');
     const tag = '@uapkg/cli@2.0.0-rc.1';
@@ -133,14 +133,14 @@ describe('retry-safe release attachment', () => {
       tag,
       'archive with spaces.tar.gz',
       '--repo',
-      'MaximDevoir/uapkg',
+      'uapkg/uapkg',
     ]);
     expect(execute.mock.calls.flatMap((call) => call[1])).not.toContain('--clobber');
   });
 
   it('only treats npm E404 as an unpublished version', () => {
     const execute = vi.fn(() => ({ status: 1, stdout: '', stderr: 'npm error E404 version not found' }));
-    const adapter = createAttachmentAdapter('MaximDevoir/uapkg', 'public-key', execute);
+    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
     expect(adapter.isPublished('2.0.0')).toBe(false);
     execute.mockReturnValue({ status: 1, stdout: '', stderr: 'npm error E401 authentication failed' });
     expect(() => adapter.isPublished('2.0.0')).toThrow('Could not confirm npm publication');

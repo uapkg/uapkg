@@ -6,7 +6,7 @@ package operations and authentication remain implemented in TypeScript.
 ## Install
 
 Choose an `@uapkg/cli@<version>` release on
-[GitHub Releases](https://github.com/MaximDevoir/uapkg/releases) and download the
+[GitHub Releases](https://github.com/uapkg/uapkg/releases) and download the
 full bundle for your platform. Supported targets are Windows, macOS, and glibc
 Linux, each on x64 and ARM64. Alpine/musl Linux is not a supported target.
 

@@ -160,7 +160,7 @@ describe('runtime closure discovery', () => {
 describe('publish-shaped bundle identity', () => {
   const data: ConsumerBundleManifestData = {
     schemaVersion: 1,
-    repository: 'MaximDevoir/uapkg',
+    repository: 'uapkg/uapkg',
     requestedRef: 'main',
     commit: '1'.repeat(40),
     dirty: false,
@@ -401,31 +401,29 @@ describe('Git source identity', () => {
       cwd: repository,
     });
     execFileSync('git', ['config', 'user.name', 'Bundle Test'], { cwd: repository });
-    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/MaximDevoir/uapkg.git'], {
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/uapkg/uapkg.git'], {
       cwd: repository,
     });
     writeFileSync(path.join(repository, 'tracked.txt'), 'committed\n');
     execFileSync('git', ['add', 'tracked.txt'], { cwd: repository });
     execFileSync('git', ['commit', '-m', 'fixture'], { cwd: repository });
 
-    const clean = computeGitIdentity(repository, 'MaximDevoir/uapkg');
+    const clean = computeGitIdentity(repository, 'uapkg/uapkg');
     expect(clean.dirty).toBe(false);
     expect(clean.dirtyContentDigest).toBeNull();
     expect(() => assertSourcePolicy(clean, { ci: true, expectedCommit: clean.commit })).not.toThrow();
 
     writeFileSync(path.join(repository, 'tracked.txt'), 'changed\n');
-    const trackedDirty = computeGitIdentity(repository, 'MaximDevoir/uapkg');
+    const trackedDirty = computeGitIdentity(repository, 'uapkg/uapkg');
     expect(trackedDirty.dirty).toBe(true);
     expect(trackedDirty.dirtyContentDigest).toMatch(/^[a-f0-9]{64}$/);
-    expect(computeGitIdentity(repository, 'MaximDevoir/uapkg').dirtyContentDigest).toBe(
-      trackedDirty.dirtyContentDigest,
-    );
+    expect(computeGitIdentity(repository, 'uapkg/uapkg').dirtyContentDigest).toBe(trackedDirty.dirtyContentDigest);
     expect(() => assertSourcePolicy(trackedDirty, { ci: true, expectedCommit: trackedDirty.commit })).toThrow(
       'requires a clean',
     );
 
     writeFileSync(path.join(repository, 'untracked.txt'), 'new content\n');
-    const untrackedDirty = computeGitIdentity(repository, 'MaximDevoir/uapkg');
+    const untrackedDirty = computeGitIdentity(repository, 'uapkg/uapkg');
     expect(untrackedDirty.dirtyContentDigest).not.toBe(trackedDirty.dirtyContentDigest);
     expect(() => assertSourcePolicy(clean, { ci: true, expectedCommit: 'not-a-sha' })).toThrow('40-character');
     expect(() => computeGitIdentity(repository, 'someone-else/uapkg')).toThrow(

@@ -254,7 +254,7 @@ export async function prepareNpmPackage(): Promise<string> {
   cpSync(path.join(WORKSPACE_ROOT, 'LICENSE'), path.join(destination, 'LICENSE'));
   writeFileSync(
     path.join(destination, 'README.md'),
-    '# UAPKG CLI engine\n\nThis package is downloaded and run by the UAPKG launcher. Install the launcher from the [UAPKG releases](https://github.com/MaximDevoir/uapkg/releases).\n',
+    '# UAPKG CLI engine\n\nThis package is downloaded and run by the UAPKG launcher. Install the launcher from the [UAPKG releases](https://github.com/uapkg/uapkg/releases).\n',
   );
   return destination;
 }

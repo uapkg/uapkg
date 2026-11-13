@@ -4,7 +4,7 @@ A plugin manager for Unreal Engine plugins.
 
 The native `uapkg` launcher selects the CLI version pinned by a game project's
 `uapkg.json`. Download the launcher and its bundled CLI from a CLI release on
-[GitHub Releases](https://github.com/MaximDevoir/uapkg/releases). See
+[GitHub Releases](https://github.com/uapkg/uapkg/releases). See
 [installation, version selection, and updates](docs/launcher.md).
 
 `@uapkg/cli` is the TypeScript engine package. It does not register a command;
@@ -25,7 +25,7 @@ toolchain.
 ## Setup
 
 ```sh
-git clone https://github.com/MaximDevoir/uapkg.git
+git clone https://github.com/uapkg/uapkg.git
 cd uapkg
 vp install --frozen-lockfile
 vp hooks status
