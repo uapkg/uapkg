@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "product": "launcher",
+  "version": "0.2.0",
+  "publishedAt": "2026-11-16T04:35:39Z",
+  "tag": "uapkg-launcher@0.2.0",
+  "files": [
+    "win32-x64",
+    "win32-arm64",
+    "darwin-x64",
+    "darwin-arm64",
+    "linux-x64",
+    "linux-arm64"
+  ]
+}
