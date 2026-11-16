@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 use uapkg_launcher::{
     archive,
     model::VERSION,
@@ -61,6 +65,112 @@ fn replaces_a_running_executable_and_removes_transaction_state() {
                 "uapkg.backup"
             })
             .exists()
+    );
+}
+
+#[test]
+fn rejected_replacement_child() {
+    let Some(staged) = std::env::var_os("UAPKG_TEST_REJECTED_STAGE") else {
+        return;
+    };
+    let executable = std::env::current_exe().unwrap();
+    let previous_sha256 = archive::sha256(&executable).unwrap();
+    let context = ContextPaths {
+        home: executable.parent().unwrap().join("profile"),
+        executable,
+        receipt: None,
+    };
+    let version = std::env::var("UAPKG_TEST_REJECTED_STAGE_VERSION").unwrap();
+    let expected_error = std::env::var("UAPKG_TEST_REJECTED_STAGE_ERROR").unwrap();
+    let error = updater::replace_staged(&context, &PathBuf::from(staged), &version)
+        .expect_err("A failed staged check must not replace the running launcher.");
+    assert!(error.to_string().contains(&expected_error), "{error:#}");
+    assert_eq!(
+        archive::sha256(&context.executable).unwrap(),
+        previous_sha256
+    );
+}
+
+fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_error: &str) {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory
+        .path()
+        .join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
+    fs::copy(std::env::current_exe().unwrap(), &target).unwrap();
+    let previous_sha256 = archive::sha256(&target).unwrap();
+    let staged = directory.path().join(if cfg!(windows) {
+        "staged.exe"
+    } else {
+        "staged"
+    });
+    if let Some(source) = source {
+        fs::copy(source, &staged).unwrap();
+    } else {
+        fs::write(&staged, b"not an executable image").unwrap();
+        // On Unix, exercise a bad executable image rather than a missing mode bit.
+        fs::set_permissions(&staged, fs::metadata(&target).unwrap().permissions()).unwrap();
+    }
+    let staged_sha256 = archive::sha256(&staged).unwrap();
+    let output = Command::new(&target)
+        .args(["--exact", "rejected_replacement_child", "--nocapture"])
+        .env("UAPKG_TEST_REJECTED_STAGE", &staged)
+        .env("UAPKG_TEST_REJECTED_STAGE_VERSION", version)
+        .env("UAPKG_TEST_REJECTED_STAGE_ERROR", expected_error)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(archive::sha256(&target).unwrap(), previous_sha256);
+    assert_eq!(archive::sha256(&staged).unwrap(), staged_sha256);
+    assert!(!directory.path().join("uapkg-update.json").exists());
+    assert!(
+        !directory
+            .path()
+            .join(if cfg!(windows) {
+                "uapkg.exe.backup.exe"
+            } else {
+                "uapkg.backup"
+            })
+            .exists()
+    );
+    // The original executable must remain runnable after the rejecting process exits.
+    assert!(
+        Command::new(&target)
+            .args(["--exact", "rejected_replacement_child"])
+            .env_remove("UAPKG_TEST_REJECTED_STAGE")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn rejects_an_unstartable_staged_executable() {
+    assert_rejected_staged_check(None, VERSION, "Could not start the staged launcher.");
+}
+
+#[test]
+fn rejects_a_staged_executable_that_fails_the_version_command() {
+    // The native Rust test harness rejects `launcher --version` with a nonzero exit.
+    assert_rejected_staged_check(
+        Some(&std::env::current_exe().unwrap()),
+        VERSION,
+        "The staged launcher did not pass its version check.",
+    );
+}
+
+#[test]
+fn rejects_a_staged_executable_with_a_different_version() {
+    let expected_version = format!("{VERSION}-staged-mismatch");
+    assert_rejected_staged_check(
+        Some(Path::new(env!("CARGO_BIN_EXE_uapkg"))),
+        &expected_version,
+        "The staged launcher did not pass its version check.",
     );
 }
 
