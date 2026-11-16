@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "product": "cli",
+  "version": "1.6.0",
+  "publishedAt": "2026-11-16T04:53:23Z",
+  "tag": "@uapkg/cli@1.6.0",
+  "files": [
+    "win32-x64",
+    "win32-arm64",
+    "darwin-x64",
+    "darwin-arm64",
+    "linux-x64",
+    "linux-arm64"
+  ]
+}
