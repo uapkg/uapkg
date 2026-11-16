@@ -249,7 +249,13 @@ fn packaged_init_accepts_real_terminal_input_through_launcher() {
 fn packaged_interrupt_status_survives_launcher_delegation() {
     let installation = Installation::load();
     let args = ["init", "--type", "project"];
-    let actions: &[(&str, &[u8])] = &[("Package name", b"\x03")];
+    // Ink renders before useInput enables raw mode. Wait for an input round
+    // trip so Ctrl-C tests the same ready prompt in both processes, rather
+    // than racing the operating system's initial cooked-terminal SIGINT.
+    let actions: &[(&str, &[u8])] = &[
+        ("Package name", b"-interrupt-ready"),
+        ("input-project-interrupt-ready", b"\x03"),
+    ];
     let direct = run_terminal(&installation, false, &args, actions);
     let delegated = run_terminal(&installation, true, &args, actions);
     assert!(
@@ -260,8 +266,22 @@ fn packaged_interrupt_status_survives_launcher_delegation() {
         delegated.manifest.is_none(),
         "Interrupted init wrote a manifest"
     );
-    assert_eq!(delegated.status.exit_code(), direct.status.exit_code());
-    assert_eq!(delegated.status.signal(), direct.status.signal());
+    assert_eq!(
+        delegated.status.exit_code(),
+        direct.status.exit_code(),
+        "Direct: {:?}\n{}\nDelegated: {:?}\n{}",
+        direct.status,
+        direct.transcript,
+        delegated.status,
+        delegated.transcript
+    );
+    assert_eq!(
+        delegated.status.signal(),
+        direct.status.signal(),
+        "Direct: {}\nDelegated: {}",
+        direct.transcript,
+        delegated.transcript
+    );
 }
 
 #[test]
