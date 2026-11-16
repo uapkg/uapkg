@@ -81,17 +81,22 @@ fn rejected_replacement_child() {
         receipt: None,
     };
     let version = std::env::var("UAPKG_TEST_REJECTED_STAGE_VERSION").unwrap();
-    let expected_error = std::env::var("UAPKG_TEST_REJECTED_STAGE_ERROR").unwrap();
+    let expected_errors = std::env::var("UAPKG_TEST_REJECTED_STAGE_ERROR").unwrap();
     let error = updater::replace_staged(&context, &PathBuf::from(staged), &version)
         .expect_err("A failed staged check must not replace the running launcher.");
-    assert!(error.to_string().contains(&expected_error), "{error:#}");
+    assert!(
+        expected_errors
+            .lines()
+            .any(|expected| error.to_string() == expected),
+        "{error:#}"
+    );
     assert_eq!(
         archive::sha256(&context.executable).unwrap(),
         previous_sha256
     );
 }
 
-fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_error: &str) {
+fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_errors: &[&str]) {
     let directory = tempfile::tempdir().unwrap();
     let target = directory
         .path()
@@ -115,7 +120,10 @@ fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_e
         .args(["--exact", "rejected_replacement_child", "--nocapture"])
         .env("UAPKG_TEST_REJECTED_STAGE", &staged)
         .env("UAPKG_TEST_REJECTED_STAGE_VERSION", version)
-        .env("UAPKG_TEST_REJECTED_STAGE_ERROR", expected_error)
+        .env(
+            "UAPKG_TEST_REJECTED_STAGE_ERROR",
+            expected_errors.join("\n"),
+        )
         .output()
         .unwrap();
     assert!(
@@ -150,8 +158,16 @@ fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_e
 }
 
 #[test]
-fn rejects_an_unstartable_staged_executable() {
-    assert_rejected_staged_check(None, VERSION, "Could not start the staged launcher.");
+fn rejects_an_invalid_staged_executable() {
+    // Platforms can reject the image at spawn or return a child that exits unsuccessfully.
+    assert_rejected_staged_check(
+        None,
+        VERSION,
+        &[
+            "Could not start the staged launcher.",
+            "The staged launcher did not pass its version check.",
+        ],
+    );
 }
 
 #[test]
@@ -160,7 +176,7 @@ fn rejects_a_staged_executable_that_fails_the_version_command() {
     assert_rejected_staged_check(
         Some(&std::env::current_exe().unwrap()),
         VERSION,
-        "The staged launcher did not pass its version check.",
+        &["The staged launcher did not pass its version check."],
     );
 }
 
@@ -170,7 +186,7 @@ fn rejects_a_staged_executable_with_a_different_version() {
     assert_rejected_staged_check(
         Some(Path::new(env!("CARGO_BIN_EXE_uapkg"))),
         &expected_version,
-        "The staged launcher did not pass its version check.",
+        &["The staged launcher did not pass its version check."],
     );
 }
 
