@@ -30,51 +30,44 @@ afterEach(() => {
 });
 
 describe('shared launcher configuration', () => {
-  it('defaults to GitHub without inventing an exact CLI version or creating a profile', () => {
+  it('does not invent a CLI version or create a profile', () => {
     const { profile, project } = fixture();
     const config = createConfig({ cwd: project });
-    expect(config.get('launcher')).toEqual({ cliSource: 'github-releases' });
+    expect(config.get('launcher')).toEqual({});
     expect(config.get('launcher.defaultCliVersion')).toBeNull();
     expect(config.getDiagnostics()).toEqual([]);
     expect(fs.existsSync(profile)).toBe(false);
   });
 
-  it('preserves unrelated global values while setting either launcher field', () => {
+  it('preserves unrelated global values when setting a tracked CLI selector', () => {
     const { profile, project } = fixture();
     const file = path.join(profile, 'config.json');
     write(file, { term: { verbose: true }, launcher: { defaultCliVersion: '1.2.3' } });
     const config = createConfig({ cwd: project });
-    const source = config.set('launcher.cliSource', 'npm', { scope: 'global' });
-    expect(source.ok).toBe(true);
-    if (!source.ok) throw new Error('Expected a valid global source write');
-    expect(source.value.file).toBe(file);
-    expect(source.value.values).toEqual({
-      term: { verbose: true },
-      launcher: { defaultCliVersion: '1.2.3', cliSource: 'npm' },
-    });
-    write(file, source.value.values);
-    const version = config.set('launcher.defaultCliVersion', '2.0.0-rc.1+build.2', { scope: 'global' });
+    const version = config.set('launcher.defaultCliVersion', 'latest', { scope: 'global' });
     expect(version.ok).toBe(true);
-    if (!version.ok) throw new Error('Expected a valid global version write');
-    expect(version.value.values).toEqual({
-      term: { verbose: true },
-      launcher: { defaultCliVersion: '2.0.0-rc.1+build.2', cliSource: 'npm' },
-    });
+    if (!version.ok) throw new Error('Expected a valid global selector write');
+    expect(version.value.file).toBe(file);
+    expect(version.value.values).toEqual({ term: { verbose: true }, launcher: { defaultCliVersion: 'latest' } });
   });
 
   it('keeps normal CLI layering while global reads expose the values used by the launcher', () => {
     const { profile, project } = fixture();
-    write(path.join(profile, 'config.json'), { launcher: { cliSource: 'npm', defaultCliVersion: '1.2.3' } });
+    write(path.join(profile, 'config.json'), { launcher: { defaultCliVersion: '1.2.3' } });
     write(path.join(project, '.uapkg', 'config.json'), {
-      launcher: { cliSource: 'github-releases', defaultCliVersion: '3.0.0' },
+      launcher: { defaultCliVersion: '3.0.0' },
     });
     const config = createConfig({ cwd: project });
-    expect(config.get('launcher')).toEqual({ cliSource: 'github-releases', defaultCliVersion: '3.0.0' });
-    expect(config.get('launcher', { scope: 'global' })).toEqual({ cliSource: 'npm', defaultCliVersion: '1.2.3' });
-    expect(config.trace('launcher.cliSource').map(({ source }) => source)).toEqual(['default', 'global', 'local']);
+    expect(config.get('launcher')).toEqual({ defaultCliVersion: '3.0.0' });
+    expect(config.get('launcher', { scope: 'global' })).toEqual({ defaultCliVersion: '1.2.3' });
+    expect(config.trace('launcher.defaultCliVersion').map(({ source }) => source)).toEqual([
+      'default',
+      'global',
+      'local',
+    ]);
   });
 
-  it.each(['1.2.3', '2.0.0-rc.1', '1.2.3+build.2'])(
+  it.each(['1.2.3', '2.0.0-beta.1', '1.2.3+build.2', 'latest', '2.0.0-alpha', '2.0.0-beta'])(
     'supports setting an initially absent optional version through CLI schema introspection: %s',
     (version) => {
       expect(isLeafConfigPath('launcher.defaultCliVersion')).toBe(true);
@@ -89,19 +82,21 @@ describe('shared launcher configuration', () => {
     },
   );
 
-  it.each(['latest', '^1.2.3', 'v1.2.3', '1.2', '1.2.3-01', '', null, 123])(
+  it.each(['2.0.0-rc.1', 'nightly', '^1.2.3', 'v1.2.3', '1.2', '1.2.3-01', '', null, 123])(
     'rejects a non-exact configured CLI version: %s',
     (version) => {
       expect(partialConfigSchema.safeParse({ launcher: { defaultCliVersion: version } }).success).toBe(false);
-      expect(
-        configSchema.safeParse({ ...getDefaultConfig(), launcher: { cliSource: 'npm', defaultCliVersion: version } })
-          .success,
-      ).toBe(false);
+      expect(configSchema.safeParse({ ...getDefaultConfig(), launcher: { defaultCliVersion: version } }).success).toBe(
+        false,
+      );
     },
   );
 
-  it.each(['github', 'latest', 'winget', '', null, 123])('rejects unsupported CLI sources: %s', (cliSource) => {
-    expect(partialConfigSchema.safeParse({ launcher: { cliSource } }).success).toBe(false);
-    expect(configSchema.safeParse({ ...getDefaultConfig(), launcher: { cliSource } }).success).toBe(false);
-  });
+  it.each(['github-releases', 'npm', 'github', '', null, 123])(
+    'rejects the removed CLI source setting: %s',
+    (cliSource) => {
+      expect(partialConfigSchema.safeParse({ launcher: { cliSource } }).success).toBe(false);
+      expect(configSchema.safeParse({ ...getDefaultConfig(), launcher: { cliSource } }).success).toBe(false);
+    },
+  );
 });

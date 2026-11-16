@@ -1,0 +1,2 @@
+# Signature fixtures must retain their exact bytes on every checkout.
+tools/release/fixtures/** -text

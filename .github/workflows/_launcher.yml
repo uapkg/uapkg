@@ -1,0 +1,71 @@
+name: Native launcher
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  launcher:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            executable: uapkg.exe
+          - platform: win32-arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            executable: uapkg.exe
+          - platform: darwin-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            executable: uapkg
+          - platform: darwin-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            executable: uapkg
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            executable: uapkg
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            executable: uapkg
+    env:
+      UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+      UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
+      CARGO_BUILD_WARNINGS: deny
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - name: Install pinned Rust toolchain
+        working-directory: launcher
+        run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
+      - run: vp run launcher:format:check
+      - run: vp run launcher:lint
+      - run: vp run launcher:test
+      - run: vp run launcher:test -- --features development
+      - name: Build release launcher
+        working-directory: launcher
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package only the launcher
+        run: vp exec node tools/release/runRelease.ts build-launcher --output dist/native/launcher --launcher launcher/target/${{ matrix.target }}/release/${{ matrix.executable }}
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: native-launcher-${{ matrix.platform }}
+          path: |
+            dist/native/launcher/*.tar.gz
+            dist/native/launcher/*.json
+          if-no-files-found: error
+          retention-days: 7

@@ -4,12 +4,15 @@ import { ManifestSchema } from '../src/index.ts';
 const base = { name: 'example', version: '1.0.0' };
 
 describe('project CLI version', () => {
-  it.each(['1.2.3', '2.0.0-beta.1', '1.2.3+build.4'])('preserves the exact version %s', (uapkgVersion) => {
-    expect(ManifestSchema.parse({ ...base, kind: 'project', uapkgVersion }).uapkgVersion).toBe(uapkgVersion);
-  });
+  it.each(['1.2.3', '2.0.0-beta.1', '1.2.3+build.4', 'latest', '2.0.0-alpha', '2.0.0-beta'])(
+    'preserves the CLI selector %s',
+    (uapkgVersion) => {
+      expect(ManifestSchema.parse({ ...base, kind: 'project', uapkgVersion }).uapkgVersion).toBe(uapkgVersion);
+    },
+  );
 
-  it.each(['latest', '^1.2.3', '~1.2.3', '1.2', 'v1.2.3', '=1.2.3', '', ' 1.2.3 ', 123, null])(
-    'rejects a non-exact version %s',
+  it.each(['nightly', '2.0.0-rc.1', '^1.2.3', '~1.2.3', '1.2', 'v1.2.3', '=1.2.3', '', ' 1.2.3 ', 123, null])(
+    'rejects an unsupported CLI selector %s',
     (uapkgVersion) => {
       expect(ManifestSchema.safeParse({ ...base, kind: 'project', uapkgVersion }).success).toBe(false);
     },

@@ -41,43 +41,40 @@ describe('launcher settings through the normal config command', () => {
   it('writes and reads global launcher settings through the shared config file', async () => {
     const { file, profile, invoke } = fixture();
     expect(
-      await invoke({ action: 'set', pathToProperty: 'launcher.cliSource', rawValue: 'npm', scope: 'global' }),
-    ).toBe(0);
-    expect(
       await invoke({
         action: 'set',
         pathToProperty: 'launcher.defaultCliVersion',
-        rawValue: '2.0.0-rc.1+build.2',
+        rawValue: '2.0.0-beta.1+build.2',
         scope: 'global',
       }),
     ).toBe(0);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
       term: { verbose: true },
-      launcher: { cliSource: 'npm', defaultCliVersion: '2.0.0-rc.1+build.2' },
+      launcher: { defaultCliVersion: '2.0.0-beta.1+build.2' },
     });
     const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
-    expect(await invoke({ pathToProperty: 'launcher.cliSource', scope: 'global' })).toBe(0);
-    expect(log).toHaveBeenLastCalledWith('"npm"');
+    expect(await invoke({ pathToProperty: 'launcher.defaultCliVersion', scope: 'global' })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"2.0.0-beta.1+build.2"');
     expect(fs.existsSync(path.join(profile, 'launcher.json'))).toBe(false);
     expect(await invoke({ action: 'delete', pathToProperty: 'launcher.defaultCliVersion', scope: 'global' })).toBe(0);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
       term: { verbose: true },
-      launcher: { cliSource: 'npm' },
+      launcher: {},
     });
   });
 
   it('retains normal local write scope unless --global is selected', async () => {
     const { file, project, invoke } = fixture();
-    expect(await invoke({ action: 'set', pathToProperty: 'launcher.cliSource', rawValue: 'npm' })).toBe(0);
+    expect(await invoke({ action: 'set', pathToProperty: 'launcher.defaultCliVersion', rawValue: 'latest' })).toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(project, '.uapkg', 'config.json'), 'utf8'))).toEqual({
-      launcher: { cliSource: 'npm' },
+      launcher: { defaultCliVersion: 'latest' },
     });
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ term: { verbose: true } });
   });
 
   it.each([
     ['launcher.cliSource', 'winget'],
-    ['launcher.defaultCliVersion', 'latest'],
+    ['launcher.defaultCliVersion', 'nightly'],
     ['launcher.defaultCliVersion', '^1.2.3'],
   ])('rejects %s=%s without modifying global configuration', async (pathToProperty, rawValue) => {
     const { file, invoke } = fixture();

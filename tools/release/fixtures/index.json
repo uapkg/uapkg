@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "product": "cli",
+  "aliases": {
+    "latest": "2.0.0",
+    "2.0.0-alpha": "2.0.0",
+    "2.0.0-beta": "2.0.0",
+    "2.1.0-beta": "2.1.0-beta.10"
+  },
+  "releases": [
+    {
+      "version": "2.1.0-beta.10",
+      "date": "2026-11-12",
+      "files": [
+        "win32-x64",
+        "win32-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "linux-x64",
+        "linux-arm64"
+      ]
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-11-01",
+      "files": [
+        "win32-x64",
+        "win32-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "linux-x64",
+        "linux-arm64"
+      ]
+    }
+  ]
+}

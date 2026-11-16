@@ -1,71 +1,137 @@
 name: Release
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      product:
+        type: choice
+        options: [cli, launcher]
+        required: true
+      version:
+        description: Exact version already committed on main
+        type: string
+        required: true
+      smoke-launcher-version:
+        description: Existing launcher version for CLI qualification (publish launcher first)
+        type: string
+        default: ''
+
 permissions:
-  contents: write
-  id-token: write
-  pull-requests: write
-  actions: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.product }}-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
-  verify:
-    uses: ./.github/workflows/_verify.yml
-
-  release:
-    needs: verify
-    runs-on: ubuntu-latest
-
+  preflight:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      complete: ${{ steps.status.outputs.complete }}
+      current: ${{ steps.identity.outputs.current }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
           node-version-file: .node-version
-          cache: true
           run-install: false
-
       - run: vp install --frozen-lockfile
-      - run: vp run build -- --production
+      - run: vp check
+      - run: vp test run --project release-tools
+      - name: Check whether verified publication can resume without rebuilding
+        id: status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PRODUCT: ${{ inputs.product }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: vp exec node tools/release/publishNative.ts status "$RELEASE_PRODUCT" "$RELEASE_VERSION"
+      - name: Validate the committed product identity or completed-release retry
+        id: identity
+        env:
+          RELEASE_COMPLETE: ${{ steps.status.outputs.complete }}
+          RELEASE_PRODUCT: ${{ inputs.product }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SMOKE_LAUNCHER_VERSION: ${{ inputs.smoke-launcher-version }}
+          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+          UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
+        run: vp exec node tools/release/releaseIdentity.ts
+
+  cli:
+    needs: preflight
+    if: inputs.product == 'cli' && needs.preflight.outputs.complete != 'true'
+    uses: ./.github/workflows/_native.yml
+    with:
+      smoke-launcher-version: ${{ inputs.smoke-launcher-version }}
+
+  launcher:
+    needs: preflight
+    if: inputs.product == 'launcher' && needs.preflight.outputs.complete != 'true'
+    uses: ./.github/workflows/_launcher.yml
+
+  npm:
+    needs: preflight
+    if: inputs.product == 'cli' && needs.preflight.outputs.current == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - run: vp run --cache -w pack:libraries
+      - run: vp run --cache -w cli:build -- --production
       - run: vp -C packages/uapkg run verify:production-build
       - run: vp run release:prepare
-      - uses: actions/download-artifact@v8.0.2
+      - name: Publish npm packages independently of native assets
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PNPM_CONFIG_IGNORE_SCRIPTS: 'true'
+        run: vp run release
+
+  publish:
+    needs: [preflight, cli, launcher]
+    if: >-
+      always() && !cancelled() && needs.preflight.result == 'success' &&
+      (needs.preflight.outputs.complete == 'true' || needs.cli.result == 'success' || needs.launcher.result == 'success')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+      UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
+      RELEASE_PRODUCT: ${{ inputs.product }}
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
         with:
-          pattern: native-*
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.2
+        if: needs.preflight.outputs.complete != 'true'
+        with:
+          pattern: native-${{ inputs.product }}-*
           path: dist/native-artifacts
-      - name: Assemble verified native release
-        shell: bash
-        run: |
-          launcher_version="$(node -e 'const fs = require("node:fs"); const toml = fs.readFileSync("launcher/Cargo.toml", "utf8"); console.log(toml.match(/^version\s*=\s*"([^"]+)"/m)[1]);')"
-          vp run release:assemble -- --input dist/native-artifacts --output dist/release --launcher-version "$launcher_version"
+      - name: Assemble the selected product only
+        if: needs.preflight.outputs.complete != 'true'
+        run: vp run release:assemble -- --input dist/native-artifacts --output dist/release --product "$RELEASE_PRODUCT"
       - name: Install pinned Minisign
-        shell: bash
         run: |
           curl --fail --location --output "$RUNNER_TEMP/minisign.tar.gz" https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
           echo "9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  $RUNNER_TEMP/minisign.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/minisign.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/minisign-linux/x86_64" >> "$GITHUB_PATH"
-
-      - name: Create Release Pull Request or Release
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          publish: vp run release
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
-          UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
-          # The artifacts were built and verified above. Avoid concurrent pnpm publish
-          # hooks rebuilding and cleaning the same workspace package outputs.
-          PNPM_CONFIG_IGNORE_SCRIPTS: 'true'
-      - name: Attach native assets to the CLI release
-        # A retry may find npm already published. Version-PR runs must not attach
-        # new source builds to the previous package version's release.
-        if: steps.changesets.outputs.hasChangesets != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
-          UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
-        run: vp exec node tools/release/attachRelease.ts
+      - name: Configure authenticated catalog pushes
+        run: gh auth setup-git
+      - name: Publish immutable assets, verify GitHub bytes, then commit the catalog
+        run: vp exec node tools/release/publishNative.ts publish "$RELEASE_PRODUCT" "$RELEASE_VERSION" dist/release

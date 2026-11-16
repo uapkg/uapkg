@@ -4,6 +4,8 @@
 
 // Brand utility
 export type { Brand } from '#common-schema/brand/Brand.ts';
+export type { CliVersionSelector } from '#common-schema/primitives/CliVersionSelector.ts';
+export { CliVersionSelectorSchema } from '#common-schema/primitives/CliVersionSelector.ts';
 export type { AssetHash } from '#common-schema/primitives/AssetHash.ts';
 export { AssetHashSchema } from '#common-schema/primitives/AssetHash.ts';
 export type { ConcurrencyCount } from '#common-schema/primitives/ConcurrencyCount.ts';

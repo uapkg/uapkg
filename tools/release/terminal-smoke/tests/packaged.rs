@@ -10,33 +10,56 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use uapkg_launcher::model::{Engine, Receipt, platform, read_json, relative_path};
+fn read_json(path: &std::path::Path) -> Value {
+    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+}
+struct Engine {
+    version: String,
+    platform: String,
+    executable: String,
+    args: Vec<String>,
+}
+fn relative_path(value: &str) -> Result<PathBuf, &'static str> {
+    let path = PathBuf::from(value);
+    if path.is_absolute() || value.contains("..") || value.contains('\\') {
+        return Err("Unsafe engine path");
+    }
+    Ok(path)
+}
 
-struct Bundle {
+struct Installation {
     launcher: PathBuf,
     engine_root: PathBuf,
     engine: Engine,
 }
 
-impl Bundle {
+impl Installation {
     fn load() -> Self {
-        let root = PathBuf::from(
-            std::env::var_os("UAPKG_TEST_BUNDLE")
-                .expect("Set UAPKG_TEST_BUNDLE to the generated release bundle"),
+        let launcher = PathBuf::from(
+            std::env::var_os("UAPKG_TEST_LAUNCHER").expect("Expected verified launcher"),
         );
-        assert!(root.is_absolute(), "The bundle path must be absolute");
-        let receipt: Receipt = read_json(&root.join("uapkg-install.json")).unwrap();
-        assert_eq!(receipt.install_method, "standalone");
-        let engine_root = root.join(relative_path(&receipt.bundled_engine.unwrap()).unwrap());
-        let engine = Engine::read(
-            &engine_root,
-            receipt.default_cli_version.as_ref().unwrap(),
-            platform().unwrap(),
-        )
-        .unwrap();
-        assert!(matches!(engine.kind.as_str(), "node" | "sea"));
+        let engine_root =
+            PathBuf::from(std::env::var_os("UAPKG_TEST_ENGINE").expect("Expected CLI engine"));
+        assert!(launcher.is_absolute() && engine_root.is_absolute());
+        let descriptor = read_json(&engine_root.join("engine.json"));
+        assert_eq!(descriptor["schemaVersion"], 1);
+        assert!(matches!(
+            descriptor["kind"].as_str().unwrap(),
+            "node" | "sea"
+        ));
+        let engine = Engine {
+            version: descriptor["version"].as_str().unwrap().to_owned(),
+            platform: descriptor["platform"].as_str().unwrap().to_owned(),
+            executable: descriptor["executable"].as_str().unwrap().to_owned(),
+            args: descriptor["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|arg| arg.as_str().unwrap().to_owned())
+                .collect(),
+        };
         Self {
-            launcher: root.join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" }),
+            launcher,
             engine_root,
             engine,
         }
@@ -67,12 +90,37 @@ struct TerminalOutput {
 }
 
 fn run_terminal(
-    bundle: &Bundle,
+    installation: &Installation,
     delegated: bool,
     args: &[&str],
     actions: &[(&str, &[u8])],
 ) -> TerminalOutput {
     let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join(".uapkg");
+    let cached = home
+        .join("engines")
+        .join(&installation.engine.version)
+        .join(&installation.engine.platform);
+    fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+        fs::create_dir_all(to).unwrap();
+        for entry in fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let target = to.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &target);
+            } else {
+                fs::copy(entry.path(), target).unwrap();
+            }
+        }
+    }
+    copy_tree(&installation.engine_root, &cached);
+    fs::write(cached.join(".installed.json"), serde_json::json!({"schemaVersion":1,"version":installation.engine.version,"platform":installation.engine.platform}).to_string()).unwrap();
+    fs::write(
+        home.join("config.json"),
+        serde_json::json!({"launcher":{"defaultCliVersion":installation.engine.version}})
+            .to_string(),
+    )
+    .unwrap();
     let cwd = scratch.path().join("input-project");
     fs::create_dir(&cwd).unwrap();
     let pair = native_pty_system()
@@ -83,7 +131,7 @@ fn run_terminal(
             pixel_height: 0,
         })
         .unwrap();
-    let mut command = bundle.command(delegated);
+    let mut command = installation.command(delegated);
     command.args(args);
     command.cwd(&cwd);
     command.env("HOME", scratch.path());
@@ -175,18 +223,15 @@ fn run_terminal(
     TerminalOutput {
         status,
         transcript,
-        manifest: manifest_path
-            .exists()
-            .then(|| read_json(&manifest_path).unwrap()),
+        manifest: manifest_path.exists().then(|| read_json(&manifest_path)),
     }
 }
 
 #[test]
-#[ignore = "requires a built release bundle; invoked by release:smoke-native"]
 fn packaged_init_accepts_real_terminal_input_through_launcher() {
-    let bundle = Bundle::load();
+    let installation = Installation::load();
     let result = run_terminal(
-        &bundle,
+        &installation,
         true,
         &["init", "--type", "project"],
         &[("Package name", b"-typed"), ("input-project-typed", b"\r")],
@@ -197,17 +242,16 @@ fn packaged_init_accepts_real_terminal_input_through_launcher() {
         .expect("Interactive init must write uapkg.json");
     assert_eq!(manifest["name"], "input-project-typed");
     assert_eq!(manifest["kind"], "project");
-    assert_eq!(manifest["uapkgVersion"], bundle.engine.version);
+    assert_eq!(manifest["uapkgVersion"], installation.engine.version);
 }
 
 #[test]
-#[ignore = "requires a built release bundle; invoked by release:smoke-native"]
 fn packaged_interrupt_status_survives_launcher_delegation() {
-    let bundle = Bundle::load();
+    let installation = Installation::load();
     let args = ["init", "--type", "project"];
     let actions: &[(&str, &[u8])] = &[("Package name", b"\x03")];
-    let direct = run_terminal(&bundle, false, &args, actions);
-    let delegated = run_terminal(&bundle, true, &args, actions);
+    let direct = run_terminal(&installation, false, &args, actions);
+    let delegated = run_terminal(&installation, true, &args, actions);
     assert!(
         direct.manifest.is_none(),
         "Interrupted init wrote a manifest"
@@ -221,12 +265,11 @@ fn packaged_interrupt_status_survives_launcher_delegation() {
 }
 
 #[test]
-#[ignore = "requires a built release bundle; invoked by release:smoke-native"]
 fn packaged_nonzero_status_survives_launcher_delegation() {
-    let bundle = Bundle::load();
+    let installation = Installation::load();
     let args = ["release-smoke-unknown-command"];
-    let direct = run_terminal(&bundle, false, &args, &[]);
-    let delegated = run_terminal(&bundle, true, &args, &[]);
+    let direct = run_terminal(&installation, false, &args, &[]);
+    let delegated = run_terminal(&installation, true, &args, &[]);
     assert!(!direct.status.success(), "{}", direct.transcript);
     assert_eq!(delegated.status.exit_code(), direct.status.exit_code());
     assert_eq!(delegated.status.signal(), direct.status.signal());

@@ -2,24 +2,16 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
-/** Qualify the shipped launcher and engine together using a real OS terminal. */
-export function smokePackagedTerminal(engineRoot: string): void {
-  const bundle = path.resolve(engineRoot, '../bundle');
-  if (!existsSync(path.join(bundle, 'uapkg-install.json'))) {
-    throw new Error(`The packaged terminal smoke requires the adjacent release bundle: ${bundle}`);
-  }
-  const result = spawnSync(
-    'cargo',
-    ['test', '--locked', '--test', 'packaged_terminal', '--', '--ignored', '--test-threads=1'],
-    {
-      cwd: path.resolve(import.meta.dirname, '../../launcher'),
-      env: { ...process.env, UAPKG_TEST_BUNDLE: bundle },
-      stdio: 'inherit',
-      timeout: 180_000,
-      windowsHide: true,
-    },
-  );
-  if (result.error || result.status !== 0) {
+/** Build only the independent PTY harness, never the launcher being qualified. */
+export function smokePackagedTerminal(engineRoot: string, launcher: string): void {
+  if (!existsSync(path.resolve(launcher))) throw new Error('The verified release launcher is missing.');
+  const result = spawnSync('cargo', ['test', '--locked', '--', '--test-threads=1'], {
+    cwd: path.resolve(import.meta.dirname, 'terminal-smoke'),
+    env: { ...process.env, UAPKG_TEST_ENGINE: path.resolve(engineRoot), UAPKG_TEST_LAUNCHER: path.resolve(launcher) },
+    stdio: 'inherit',
+    timeout: 300_000,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0)
     throw new Error(`Packaged terminal qualification failed: ${result.error?.message ?? `exit ${result.status}`}`);
-  }
 }

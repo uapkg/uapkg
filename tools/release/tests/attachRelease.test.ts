@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,97 +5,43 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import {
   attachReleaseAssets,
   createAttachmentAdapter,
-  waitForNpmPublication,
+  verifyPublishedRelease,
   type AttachmentAdapter,
 } from '../attachRelease.ts';
-
+import { artifactName, PLATFORMS, releaseTag, type ReleaseProduct } from '../ReleaseContract.ts';
+import { inspectArtifact } from '../ReleaseArtifacts.ts';
 const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
-
-describe('npm publication visibility', () => {
-  it('continues after transient missing-version responses without a real delay', async () => {
-    const probe = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
-    const pause = vi.fn(async (_milliseconds: number) => {});
-    const progress = vi.fn();
-    await waitForNpmPublication('1.5.1', probe, { pause, progress });
-    expect(probe.mock.calls).toEqual([['1.5.1'], ['1.5.1'], ['1.5.1']]);
-    expect(pause.mock.calls).toEqual([[10_000], [10_000]]);
-    expect(progress).toHaveBeenCalledTimes(2);
-  });
-
-  it('limits visibility checks to 31 attempts and five minutes of waiting', async () => {
-    const probe = vi.fn(() => false);
-    const pause = vi.fn(async (_milliseconds: number) => {});
-    const progress = vi.fn();
-    await expect(waitForNpmPublication('1.5.1', probe, { pause, progress })).rejects.toThrow(
-      '@uapkg/cli@1.5.1 is still absent from https://registry.npmjs.org/ after 31 checks and five minutes of waiting',
-    );
-    expect(probe).toHaveBeenCalledTimes(31);
-    expect(pause).toHaveBeenCalledTimes(30);
-    expect(pause.mock.calls.every(([milliseconds]) => milliseconds === 10_000)).toBe(true);
-    expect(progress).toHaveBeenCalledTimes(30);
-  });
-
-  it('fails immediately on an npm authentication error', async () => {
-    const execute = vi.fn(() => ({ status: 1, stdout: '', stderr: 'npm error E401 authentication failed' }));
-    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
-    const pause = vi.fn(async (_milliseconds: number) => {});
-    const progress = vi.fn();
-    await expect(waitForNpmPublication('1.5.1', adapter.isPublished, { pause, progress })).rejects.toThrow(
-      'E401 authentication failed',
-    );
-    expect(execute).toHaveBeenCalledOnce();
-    expect(pause).not.toHaveBeenCalled();
-    expect(progress).not.toHaveBeenCalled();
-  });
-
-  it('does not pause or report a wait for an already visible version', async () => {
-    const probe = vi.fn(() => true);
-    const pause = vi.fn(async (_milliseconds: number) => {});
-    const progress = vi.fn();
-    await waitForNpmPublication('1.5.1', probe, { pause, progress });
-    expect(probe).toHaveBeenCalledOnce();
-    expect(pause).not.toHaveBeenCalled();
-    expect(progress).not.toHaveBeenCalled();
-  });
-});
-
-function fixture(version = '2.0.0') {
+function temporary() {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'uapkg-attachment-test-'));
   directories.push(directory);
-  const contents = Buffer.from('verified payload');
-  const artifacts = ['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64'].flatMap(
-    (platform) =>
-      ['cli', 'launcher', 'bundle'].map((kind) => {
-        const fileName = `${kind}-${platform}.tar.gz`;
-        writeFileSync(path.join(directory, fileName), contents);
-        return {
-          kind,
-          platform,
-          fileName,
-          sha256: createHash('sha256').update(contents).digest('hex'),
-          size: contents.length,
-        };
-      }),
-  );
-  writeFileSync(
-    path.join(directory, 'release.json'),
-    JSON.stringify({ schemaVersion: 1, cliVersion: version, launcherVersion: '1.0.0', artifacts }),
-  );
+  return directory;
+}
+function fixture(product: ReleaseProduct = 'cli') {
+  const directory = temporary();
+  const version = '2.0.0-beta.1';
+  const artifacts = PLATFORMS.map((platform) => {
+    const file = path.join(directory, artifactName(product, version, platform));
+    writeFileSync(file, `verified ${platform} payload`);
+    return inspectArtifact(file, platform);
+  });
+  writeFileSync(path.join(directory, 'build.json'), JSON.stringify({ schemaVersion: 1, product, version, artifacts }));
   const remote = new Map<string, Buffer>();
   const uploads: string[] = [];
+  const release = () => ({
+    tagName: releaseTag(product, version),
+    isDraft: false,
+    publishedAt: '2026-11-01T12:34:56Z',
+    assets: [...remote.keys()].map((name) => ({ name })),
+  });
   const adapter: AttachmentAdapter = {
-    isPublished: vi.fn(() => true),
-    getRelease: vi.fn((tag) => ({
-      tagName: tag,
-      isDraft: false,
-      assets: [...remote.keys()].map((name) => ({ name })),
-    })),
+    getRelease: vi.fn(release),
+    createRelease: vi.fn(release),
     download: vi.fn((_tag, name, output) => writeFileSync(path.join(output, name), remote.get(name)!)),
     verifySignature: vi.fn(),
-    sign: vi.fn(() => writeFileSync(path.join(directory, 'release.json.minisig'), 'new valid signature')),
+    sign: vi.fn(() => writeFileSync(path.join(directory, 'SHASUMS256.txt.minisig'), 'new valid signature')),
     upload: vi.fn((_tag, file) => {
       const name = path.basename(file);
       if (remote.has(name)) throw new Error('Already exists');
@@ -104,109 +49,68 @@ function fixture(version = '2.0.0') {
       remote.set(name, readFileSync(file));
     }),
   };
-  return { directory, version, artifacts, remote, uploads, adapter };
+  return { directory, version, product, artifacts, remote, uploads, adapter };
 }
-
-describe('retry-safe release attachment', () => {
-  it('resumes missing archives and publishes metadata last, with no second upload on retry', () => {
-    const test = fixture('2.0.0-rc.1');
+describe('immutable independent release attachment', () => {
+  it.each(['cli', 'launcher'] as const)('publishes %s without npm and retries without replacements', (product) => {
+    const test = fixture(product);
     const first = test.artifacts[0]!.fileName;
     test.remote.set(first, readFileSync(path.join(test.directory, first)));
-    expect(attachReleaseAssets(test.directory, test.version, test.adapter)).toHaveLength(19);
-    expect(test.adapter.getRelease).toHaveBeenCalledWith('@uapkg/cli@2.0.0-rc.1');
-    expect(test.uploads).not.toContain(first);
-    expect(test.uploads.slice(-2)).toEqual(['release.json', 'release.json.minisig']);
-    expect(attachReleaseAssets(test.directory, test.version, test.adapter)).toEqual([]);
+    expect(attachReleaseAssets(test.directory, test.adapter)).toHaveLength(7);
+    expect(test.adapter.getRelease).toHaveBeenCalledWith(releaseTag(product, test.version));
+    expect(test.uploads.slice(-2)).toEqual(['SHASUMS256.txt', 'SHASUMS256.txt.minisig']);
+    expect(attachReleaseAssets(test.directory, test.adapter)).toEqual([]);
     expect(test.adapter.sign).toHaveBeenCalledTimes(1);
+    const entry = verifyPublishedRelease(temporary(), product, test.version, test.adapter);
+    expect(entry.publishedAt).toBe('2026-11-01T12:34:56Z');
+    expect(entry.files).toHaveLength(6);
   });
-
-  it('checks all existing bytes before signing or uploading', () => {
+  it('checks every existing archive before any signing/upload', () => {
     const test = fixture();
-    test.remote.set(test.artifacts.at(-1)!.fileName, Buffer.from('different executable build'));
-    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow('immutable');
+    test.remote.set(test.artifacts.at(-1)!.fileName, Buffer.from('different build'));
+    expect(() => attachReleaseAssets(test.directory, test.adapter)).toThrow('immutable');
     expect(test.adapter.sign).not.toHaveBeenCalled();
     expect(test.uploads).toEqual([]);
   });
-
-  it('accepts an existing authenticated signature even when fresh signing would produce different bytes', () => {
+  it('retains the original signature bytes on retries', () => {
     const test = fixture();
-    test.remote.set('release.json.minisig', Buffer.from('valid signature with previous timestamp'));
-    attachReleaseAssets(test.directory, test.version, test.adapter);
+    test.remote.set('SHASUMS256.txt.minisig', Buffer.from('original signature'));
+    attachReleaseAssets(test.directory, test.adapter);
     expect(test.adapter.sign).not.toHaveBeenCalled();
-    expect(test.adapter.verifySignature).toHaveBeenCalledOnce();
-    expect(test.uploads).not.toContain('release.json.minisig');
+    expect(readFileSync(path.join(test.directory, 'SHASUMS256.txt.minisig'), 'utf8')).toBe('original signature');
   });
-
-  it('rejects conflicting metadata or invalid signatures without any uploads', () => {
+  it('does not accept partial, altered or badly signed remote releases as catalog input', () => {
     const test = fixture();
-    test.remote.set('release.json', Buffer.from('{}'));
-    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow('release.json');
-    test.remote.clear();
-    test.remote.set('release.json.minisig', Buffer.from('invalid'));
+    expect(() => verifyPublishedRelease(temporary(), test.product, test.version, test.adapter)).toThrow(
+      'missing required assets',
+    );
+    attachReleaseAssets(test.directory, test.adapter);
+    test.remote.set(test.artifacts[0]!.fileName, Buffer.from('altered remote archive'));
+    expect(() => verifyPublishedRelease(temporary(), test.product, test.version, test.adapter)).toThrow(
+      'checksum mismatch',
+    );
     test.adapter.verifySignature = () => {
       throw new Error('Invalid signature');
     };
-    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow('Invalid signature');
-    expect(test.uploads).toEqual([]);
-  });
-
-  it('fails on an unpublished exact npm version before looking up or modifying a GitHub release', () => {
-    const test = fixture();
-    test.adapter.isPublished = () => false;
-    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow(
-      '@uapkg/cli@2.0.0 is not published at https://registry.npmjs.org/. Complete npm publication',
+    expect(() => verifyPublishedRelease(temporary(), test.product, test.version, test.adapter)).toThrow(
+      'Invalid signature',
     );
-    expect(test.adapter.getRelease).not.toHaveBeenCalled();
-    expect(test.adapter.download).not.toHaveBeenCalled();
-    expect(test.adapter.sign).not.toHaveBeenCalled();
-    expect(test.adapter.upload).not.toHaveBeenCalled();
   });
-
-  it('rejects incorrect or draft release identities', () => {
-    const test = fixture();
-    test.adapter.getRelease = () => ({ tagName: '@uapkg/cli@1.0.0', isDraft: false, assets: [] });
-    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow('Expected the published');
-    test.adapter.getRelease = (tagName) => ({ tagName, isDraft: true, assets: [] });
-    expect(() => attachReleaseAssets(test.directory, test.version, test.adapter)).toThrow('Expected the published');
-    expect(test.uploads).toEqual([]);
-  });
-
-  it('uses exact argument arrays, fixed npm registry, and uploads without clobber', () => {
-    const execute = vi.fn((_command: string, args: string[]) => ({
-      status: 0,
-      stdout:
-        args.includes('view') && args[0] !== 'release'
-          ? '"2.0.0-rc.1"'
-          : '{"tagName":"@uapkg/cli@2.0.0-rc.1","isDraft":false,"assets":[]}',
-      stderr: '',
-    }));
-    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
-    expect(adapter.isPublished('2.0.0-rc.1')).toBe(true);
-    expect(execute.mock.calls[0]![1]).toContain('--registry=https://registry.npmjs.org/');
-    expect(execute.mock.calls[0]![1]).toEqual(
-      expect.arrayContaining(['--prefer-online', '--fetch-retries=0', '--fetch-timeout=10000']),
-    );
-    const tag = '@uapkg/cli@2.0.0-rc.1';
-    expect(adapter.getRelease(tag).tagName).toBe(tag);
-    adapter.download(tag, 'release.json', 'directory with spaces');
-    adapter.verifySignature('release.json', 'old signature.minisig');
-    adapter.upload(tag, 'archive with spaces.tar.gz');
-    expect(execute).toHaveBeenLastCalledWith('gh', [
+  it('never clobbers and does not translate authentication failures to missing releases', () => {
+    const execute = vi.fn(() => ({ status: 0, stdout: '', stderr: '' }));
+    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', 'a'.repeat(40), execute);
+    adapter.upload('uapkg-launcher@0.2.0', 'archive with spaces.tar.gz');
+    expect(execute).toHaveBeenCalledWith('gh', [
       'release',
       'upload',
-      tag,
+      'uapkg-launcher@0.2.0',
       'archive with spaces.tar.gz',
       '--repo',
       'uapkg/uapkg',
     ]);
-    expect(execute.mock.calls.flatMap((call) => call[1])).not.toContain('--clobber');
-  });
-
-  it('only treats npm E404 as an unpublished version', () => {
-    const execute = vi.fn(() => ({ status: 1, stdout: '', stderr: 'npm error E404 version not found' }));
-    const adapter = createAttachmentAdapter('uapkg/uapkg', 'public-key', execute);
-    expect(adapter.isPublished('2.0.0')).toBe(false);
-    execute.mockReturnValue({ status: 1, stdout: '', stderr: 'npm error E401 authentication failed' });
-    expect(() => adapter.isPublished('2.0.0')).toThrow('Could not confirm npm publication');
+    execute.mockReturnValue({ status: 1, stdout: '', stderr: 'HTTP 404' });
+    expect(adapter.getRelease('uapkg-launcher@0.2.0')).toBeNull();
+    execute.mockReturnValue({ status: 1, stdout: '', stderr: 'HTTP 403' });
+    expect(() => adapter.getRelease('uapkg-launcher@0.2.0')).toThrow('Could not read release');
   });
 });

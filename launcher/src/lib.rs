@@ -1,15 +1,15 @@
 pub mod archive;
+pub mod catalog;
 pub mod diagnostics;
 pub mod engines;
 pub mod github;
 pub mod model;
-pub mod npm;
 pub mod routing;
 pub mod storage;
 pub mod updater;
 
 use anyhow::{Context, Result, bail, ensure};
-use model::{Source, VERSION, exact_version};
+use model::VERSION;
 use routing::{Invocation, Scope};
 use std::{ffi::OsString, io::Write, process::Command};
 use storage::ContextPaths;
@@ -41,7 +41,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
                 .any(|arg| arg == "--help" || arg == "-h"))
     {
         println!(
-            "Launcher commands: launcher, version, self-update. See `uapkg launcher --help`.\nLauncher options: --cli-version <exact-version>, --offline. Place them anywhere after uapkg, before --.\n"
+            "Launcher commands: launcher, version, self-update. See `uapkg launcher --help`.\nLauncher options: --cli-version <version-selector>, --offline. Place them anywhere after uapkg, before --.\n"
         );
         std::io::stdout().flush()?;
     }
@@ -60,13 +60,28 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
     }
     let settings = context.settings()?;
     let cwd = std::env::current_dir()?;
-    let selection = routing::select(&invocation, &cwd, context.default_version(&settings))?;
-    let installed = engines::ensure_installed(
+    let mut selection = routing::select(&invocation, &cwd, context.default_version(&settings))?;
+    let mut resolution = catalog::resolve(
         &context,
-        settings.cli_source,
+        "cli",
         &selection.version,
         invocation.offline || debug_info,
+        false,
     )?;
+    if !debug_info {
+        resolution
+            .messages
+            .extend(catalog::launcher_notices(&context, invocation.offline)?);
+    }
+    selection.version.clone_from(&resolution.version);
+    let installed = engines::ensure_installed(
+        &context,
+        &resolution.version,
+        invocation.offline || debug_info,
+    )?;
+    if !debug_info {
+        catalog::activate(&context, "cli", &resolution)?;
+    }
     let diagnostic = diagnostics::for_release(
         &context,
         &invocation,
@@ -75,7 +90,13 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
         &installed.engine.kind,
         &cwd,
     );
-    engines::delegate(&context, &installed, &invocation.args, diagnostic.as_ref())
+    engines::delegate(
+        &context,
+        &installed,
+        &invocation.args,
+        diagnostic.as_ref(),
+        &resolution.messages,
+    )
 }
 
 fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i32> {
@@ -84,23 +105,25 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
     match (invocation.command.as_deref(), args.as_slice()) {
         (Some("launcher"), ["--help"] | ["-h"] | []) => {
             println!(
-                "UAPKG launcher\n\n  launcher --version\n  version install <exact-version|latest>\n  version list\n  version default [exact-version|latest]\n  version current\n  self-update [launcher-version]\n\nSettings use the CLI's config command, for example:\n  uapkg config set launcher.cliSource npm --global\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <exact-version>\n  uapkg --version --cli-version <exact-version>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
+                "UAPKG launcher\n\n  launcher --version\n  version install <version-selector>\n  version list\n  version default [version-selector]\n  version current\n  self-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
             );
         }
         (Some("version"), ["install", version]) => {
-            let source = context.settings()?.cli_source;
-            let version = resolve_requested_version(source, version, invocation.offline)?;
+            let resolution = catalog::resolve(context, "cli", version, invocation.offline, true)?;
+            catalog::emit(&resolution.messages);
             let installed =
-                engines::ensure_installed(context, source, &version, invocation.offline)?;
+                engines::ensure_installed(context, &resolution.version, invocation.offline)?;
+            catalog::activate(context, "cli", &resolution)?;
             println!(
                 "CLI {} is installed at {}.",
                 installed.engine.version,
                 installed.root.display()
             );
+            catalog::emit(&resolution.messages);
         }
         (Some("version"), ["list"]) => {
-            for (source, version, platform) in engines::list(context)? {
-                println!("{version}\t{source}\t{platform}");
+            for (version, platform) in engines::list(context)? {
+                println!("{version}\tgithub-releases\t{platform}");
             }
         }
         (Some("version"), ["default"]) => {
@@ -113,19 +136,15 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
             );
         }
         (Some("version"), ["default", version]) => {
-            let source = context.settings()?.cli_source;
-            let version = resolve_requested_version(source, version, invocation.offline)?;
+            let resolution = catalog::resolve(context, "cli", version, invocation.offline, true)?;
             let installed =
-                engines::ensure_installed(context, source, &version, invocation.offline)?;
-            ensure!(
-                context.settings()?.cli_source == source,
-                "CLI source changed while installing. Run the command again."
-            );
+                engines::ensure_installed(context, &resolution.version, invocation.offline)?;
+            catalog::activate(context, "cli", &resolution)?;
             let args = [
                 "config",
                 "set",
                 "launcher.defaultCliVersion",
-                &version,
+                version,
                 "--global",
             ]
             .map(OsString::from);
@@ -136,7 +155,7 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
             {
                 return delegate_development(context, &args, None);
             }
-            return engines::delegate(context, &installed, &args, None);
+            return engines::delegate(context, &installed, &args, None, &resolution.messages);
         }
         (Some("version"), ["current"]) => {
             let settings = context.settings()?;
@@ -164,10 +183,13 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
                     context.default_version(&settings),
                 )?
             };
-            println!("{version}");
+            let resolution = catalog::resolve(context, "cli", &version, invocation.offline, false)?;
+            catalog::emit(&resolution.messages);
+            println!("{}", resolution.version);
+            catalog::emit(&resolution.messages);
         }
         (Some("version"), ["--help"] | ["-h"] | []) => println!(
-            "Usage: uapkg version install <exact-version|latest> | list | default [exact-version|latest] | current"
+            "Usage: uapkg version install <version-selector> | list | default [version-selector] | current"
         ),
         (Some("self-update"), []) => {
             ensure!(
@@ -213,21 +235,6 @@ fn delegate_development(
         .args(args)
         .env("UAPKG_LAUNCHER_VERSION", VERSION)
         .env("UAPKG_LAUNCHER_EXECUTABLE", &context.executable);
+    catalog::apply_notices(&mut command, &[])?;
     engines::execute(command, diagnostic)
-}
-
-fn resolve_requested_version(source: Source, requested: &str, offline: bool) -> Result<String> {
-    if requested != "latest" {
-        exact_version(requested)?;
-        return Ok(requested.to_owned());
-    }
-    ensure!(
-        !offline,
-        "Resolving latest requires an online connection. Select an exact cached version while offline."
-    );
-    let client = github::client()?;
-    match source {
-        Source::Github => github::latest_version(&client),
-        Source::Npm => npm::latest_version(&client),
-    }
 }

@@ -2,34 +2,35 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { parse } from 'semver';
 import { CLI_ROOT, readJson, writeJson } from '../../packages/uapkg/build/EnginePackage.ts';
-
-export const PLATFORMS = [
-  'win32-x64',
-  'win32-arm64',
-  'darwin-x64',
-  'darwin-arm64',
-  'linux-x64',
-  'linux-arm64',
-] as const;
-export type ReleasePlatform = (typeof PLATFORMS)[number];
-export const ARTIFACT_KINDS = ['cli', 'launcher', 'bundle'] as const;
-export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
+import {
+  PLATFORMS,
+  artifactName,
+  assertExactVersion,
+  type ReleasePlatform,
+  type ReleaseProduct,
+} from './ReleaseContract.ts';
+export {
+  PLATFORMS,
+  artifactName,
+  assertExactVersion,
+  type ReleasePlatform,
+  type ReleaseProduct,
+} from './ReleaseContract.ts';
 
 export interface ReleaseArtifact {
-  kind: ArtifactKind;
   platform: ReleasePlatform;
   fileName: string;
   sha256: string;
   size: number;
 }
-
-export interface ReleaseCatalog {
+/** Internal build evidence only; never served as a client release descriptor. */
+export interface ReleaseBuild {
   schemaVersion: 1;
-  cliVersion: string;
-  launcherVersion: string;
+  product: ReleaseProduct;
+  version: string;
   artifacts: ReleaseArtifact[];
+  engineFormat?: 'node' | 'sea';
 }
 
 export interface EngineDescriptor {
@@ -64,19 +65,6 @@ export function currentPlatform(): ReleasePlatform {
   return platform as ReleasePlatform;
 }
 
-export function assertExactVersion(value: string): void {
-  const parsed = parse(value);
-  const canonical = parsed && `${parsed.version}${parsed.build.length ? `+${parsed.build.join('.')}` : ''}`;
-  if (canonical !== value) {
-    throw new Error(`Expected an exact version, received ${JSON.stringify(value)}.`);
-  }
-}
-
-export function artifactName(kind: ArtifactKind, version: string, platform: ReleasePlatform): string {
-  assertExactVersion(version);
-  return `uapkg-${kind}-${version}-${platform}.tar.gz`;
-}
-
 /** Archives contain files/directories only, matching the launcher's safe extractor. */
 export async function archiveDirectory(directory: string, output: string): Promise<void> {
   const files: string[] = [];
@@ -95,11 +83,10 @@ export async function archiveDirectory(directory: string, output: string): Promi
   );
 }
 
-export function inspectArtifact(file: string, kind: ArtifactKind, platform: ReleasePlatform): ReleaseArtifact {
+export function inspectArtifact(file: string, platform: ReleasePlatform): ReleaseArtifact {
   const info = lstatSync(file);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Expected a regular artifact file: ${file}`);
   return {
-    kind,
     platform,
     fileName: path.basename(file),
     sha256: createHash('sha256').update(readFileSync(file)).digest('hex'),
@@ -107,56 +94,54 @@ export function inspectArtifact(file: string, kind: ArtifactKind, platform: Rele
   };
 }
 
-export function assembleCatalog(
-  input: string,
-  output: string,
-  cliVersion: string,
-  launcherVersion: string,
-): ReleaseCatalog {
-  assertExactVersion(cliVersion);
-  assertExactVersion(launcherVersion);
+export function assembleRelease(input: string, output: string, product: ReleaseProduct, version: string): ReleaseBuild {
+  assertExactVersion(version);
   const source = path.resolve(input);
   const destination = path.resolve(output);
+  const files = readdirSync(source, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
   const candidateFiles = new Map<string, string>();
-  for (const entry of readdirSync(source, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.tar.gz')) continue;
+  for (const entry of files.filter((entry) => entry.name.endsWith('.tar.gz'))) {
     if (candidateFiles.has(entry.name)) throw new Error(`Duplicate release artifact ${entry.name}.`);
     candidateFiles.set(entry.name, path.join(entry.parentPath, entry.name));
   }
-  const catalog: ReleaseCatalog = { schemaVersion: 1, cliVersion, launcherVersion, artifacts: [] };
-  mkdirSync(destination, { recursive: true });
+  const build: ReleaseBuild = { schemaVersion: 1, product, version, artifacts: [] };
   for (const platform of PLATFORMS) {
-    const metadataFile = [...readdirSync(source, { recursive: true, withFileTypes: true })].find(
-      (entry) => entry.isFile() && entry.name === `release-${platform}.json`,
-    );
-    if (!metadataFile) throw new Error(`Missing build metadata for ${platform}.`);
-    const metadata = readJson<ReleaseCatalog>(path.join(metadataFile.parentPath, metadataFile.name));
-    if (metadata.cliVersion !== cliVersion || metadata.launcherVersion !== launcherVersion) {
-      throw new Error(`Release versions differ for ${platform}.`);
-    }
-    for (const kind of ARTIFACT_KINDS) {
-      const fileName = artifactName(kind, kind === 'launcher' ? launcherVersion : cliVersion, platform);
-      const file = candidateFiles.get(fileName);
-      if (!file) throw new Error(`Missing release artifact ${fileName}.`);
-      const artifact = inspectArtifact(file, kind, platform);
-      const recorded = metadata.artifacts.find((item) => item.kind === kind && item.platform === platform);
-      if (
-        !recorded ||
-        recorded.fileName !== fileName ||
-        recorded.sha256 !== artifact.sha256 ||
-        recorded.size !== artifact.size
-      ) {
-        throw new Error(`Artifact differs from build metadata: ${fileName}.`);
-      }
-      catalog.artifacts.push(artifact);
-      const target = path.join(destination, fileName);
-      if (path.resolve(file) !== target) cpSync(file, target);
-      candidateFiles.delete(fileName);
-    }
+    const metadataFiles = files.filter((entry) => entry.name === `build-${platform}.json`);
+    if (metadataFiles.length !== 1) throw new Error(`Expected one build record for ${platform}.`);
+    const record = metadataFiles[0]!;
+    const metadata = readJson<ReleaseBuild>(path.join(record.parentPath, record.name));
+    if (
+      metadata.schemaVersion !== 1 ||
+      metadata.product !== product ||
+      metadata.version !== version ||
+      metadata.artifacts.length !== 1
+    )
+      throw new Error(`Release identity differs for ${platform}.`);
+    const name = artifactName(product, version, platform);
+    const file = candidateFiles.get(name);
+    if (!file) throw new Error(`Missing release artifact ${name}.`);
+    const artifact = inspectArtifact(file, platform);
+    const recorded = metadata.artifacts[0]!;
+    if (
+      recorded.platform !== platform ||
+      recorded.fileName !== name ||
+      recorded.sha256 !== artifact.sha256 ||
+      recorded.size !== artifact.size
+    )
+      throw new Error(`Artifact differs from build metadata: ${name}.`);
+    build.artifacts.push(artifact);
+    candidateFiles.delete(name);
   }
-  if (candidateFiles.size > 0) throw new Error(`Unexpected artifacts: ${[...candidateFiles.keys()].join(', ')}`);
-  writeJson(path.join(destination, 'release.json'), catalog);
-  return catalog;
+  if (candidateFiles.size) throw new Error(`Unexpected artifacts: ${[...candidateFiles.keys()].join(', ')}`);
+  mkdirSync(destination, { recursive: true });
+  for (const artifact of build.artifacts) {
+    const record = files.find((entry) => entry.name === artifact.fileName)!;
+    const file = path.join(record.parentPath, record.name);
+    if (path.resolve(file) !== path.join(destination, artifact.fileName))
+      cpSync(file, path.join(destination, artifact.fileName));
+  }
+  writeJson(path.join(destination, 'build.json'), build);
+  return build;
 }
 
 export function safeEngineCommand(root: string, descriptor: EngineDescriptor): { executable: string; args: string[] } {
@@ -183,7 +168,6 @@ export interface PackagingEvidence {
   schemaVersion: 1;
   selectedFormat: 'node' | 'sea';
   cliVersion: string;
-  launcherVersion: string;
   sea: CandidateStatus[];
 }
 
@@ -191,75 +175,61 @@ function validateCandidate(
   directory: string,
   format: 'node' | 'sea',
   platform: ReleasePlatform,
-  cliVersion: string,
-  launcherVersion: string,
-): ReleaseCatalog {
-  const metadata = readJson<ReleaseCatalog & { engineFormat: string }>(
-    path.join(directory, `release-${platform}.json`),
-  );
+  version: string,
+): ReleaseBuild {
+  const metadata = readJson<ReleaseBuild>(path.join(directory, `build-${platform}.json`));
   if (
     metadata.schemaVersion !== 1 ||
+    metadata.product !== 'cli' ||
     metadata.engineFormat !== format ||
-    metadata.cliVersion !== cliVersion ||
-    metadata.launcherVersion !== launcherVersion
-  ) {
-    throw new Error(`Candidate identity or versions differ for ${format}/${platform}.`);
-  }
-  if (!Array.isArray(metadata.artifacts) || metadata.artifacts.length !== ARTIFACT_KINDS.length)
+    metadata.version !== version
+  )
+    throw new Error(`Candidate identity differs for ${format}/${platform}.`);
+  const name = artifactName('cli', version, platform);
+  if (
+    !Array.isArray(metadata.artifacts) ||
+    metadata.artifacts.length !== 1 ||
+    metadata.artifacts[0]!.fileName !== name ||
+    metadata.artifacts[0]!.platform !== platform
+  )
     throw new Error(`Incomplete ${format}/${platform} candidate.`);
-  for (const kind of ARTIFACT_KINDS) {
-    const expectedName = artifactName(kind, kind === 'launcher' ? launcherVersion : cliVersion, platform);
-    const expected = metadata.artifacts.find((artifact) => artifact.kind === kind && artifact.platform === platform);
-    if (!expected || expected.fileName !== expectedName)
-      throw new Error(`Missing ${kind} artifact for ${format}/${platform}.`);
-    const actual = inspectArtifact(path.join(directory, expectedName), kind, platform);
-    if (actual.sha256 !== expected.sha256 || actual.size !== expected.size)
-      throw new Error(`Changed ${format}/${platform}/${kind} artifact.`);
-  }
+  const actual = inspectArtifact(path.join(directory, name), platform);
+  const expected = metadata.artifacts[0]!;
+  if (actual.sha256 !== expected.sha256 || actual.size !== expected.size)
+    throw new Error(`Changed ${format}/${platform} artifact.`);
   return metadata;
 }
 
 /** Qualify SEA collectively; never mix engine formats across one release. */
-export function selectNativeCandidates(
-  input: string,
-  output: string,
-  cliVersion: string,
-  launcherVersion: string,
-): PackagingEvidence {
+export function selectNativeCandidates(input: string, output: string, cliVersion: string): PackagingEvidence {
   assertExactVersion(cliVersion);
-  assertExactVersion(launcherVersion);
   const source = path.resolve(input);
   const destination = path.resolve(output);
   if (source === destination || source.startsWith(`${destination}${path.sep}`))
     throw new Error('Selected artifacts need a separate output directory.');
   const sea: CandidateStatus[] = PLATFORMS.map((platform) => {
     try {
-      validateCandidate(path.join(source, `candidate-sea-${platform}`), 'sea', platform, cliVersion, launcherVersion);
+      validateCandidate(path.join(source, `candidate-sea-${platform}`), 'sea', platform, cliVersion);
       return { platform, qualified: true };
     } catch (error) {
       return { platform, qualified: false, reason: error instanceof Error ? error.message : String(error) };
     }
   });
   const selectedFormat = sea.every((candidate) => candidate.qualified) ? 'sea' : 'node';
-  // Validate every selected artifact before copying anything into the release directory.
   const selected = PLATFORMS.map((platform) => {
     const directory = path.join(source, `candidate-${selectedFormat}-${platform}`);
-    return {
-      directory,
-      platform,
-      metadata: validateCandidate(directory, selectedFormat, platform, cliVersion, launcherVersion),
-    };
+    return { directory, platform, metadata: validateCandidate(directory, selectedFormat, platform, cliVersion) };
   });
   mkdirSync(destination, { recursive: true });
   for (const candidate of selected) {
     for (const artifact of candidate.metadata.artifacts)
       cpSync(path.join(candidate.directory, artifact.fileName), path.join(destination, artifact.fileName));
     cpSync(
-      path.join(candidate.directory, `release-${candidate.platform}.json`),
-      path.join(destination, `release-${candidate.platform}.json`),
+      path.join(candidate.directory, `build-${candidate.platform}.json`),
+      path.join(destination, `build-${candidate.platform}.json`),
     );
   }
-  const evidence: PackagingEvidence = { schemaVersion: 1, selectedFormat, cliVersion, launcherVersion, sea };
+  const evidence: PackagingEvidence = { schemaVersion: 1, selectedFormat, cliVersion, sea };
   writeJson(path.join(destination, 'packaging-evidence.json'), evidence);
   return evidence;
 }

@@ -1,62 +1,55 @@
-import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { verifyReleasePayloads } from '../publishRelease.ts';
-
+import { PLATFORMS, artifactName, inspectArtifact, type ReleaseProduct } from '../ReleaseArtifacts.ts';
+import { verifyReleasePayloads, writeChecksums } from '../publishRelease.ts';
+import { parseChecksums } from '../ReleaseContract.ts';
+import { readFileSync } from 'node:fs';
 const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
-
-function fixture() {
+export function fixture(product: ReleaseProduct = 'cli') {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'uapkg-release-test-'));
   directories.push(directory);
-  const contents = Buffer.from('verified payload');
-  const artifacts = ['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64'].flatMap(
-    (platform) =>
-      ['cli', 'launcher', 'bundle'].map((kind) => {
-        const fileName = `${kind}-${platform}.tar.gz`;
-        writeFileSync(path.join(directory, fileName), contents);
-        return {
-          kind,
-          platform,
-          fileName,
-          sha256: createHash('sha256').update(contents).digest('hex'),
-          size: contents.length,
-        };
-      }),
-  );
-  const catalog = { schemaVersion: 1, cliVersion: '2.0.0', launcherVersion: '1.0.0', artifacts };
-  const save = () => writeFileSync(path.join(directory, 'release.json'), JSON.stringify(catalog));
+  const version = product === 'cli' ? '1.6.0' : '0.2.0';
+  const artifacts = PLATFORMS.map((platform) => {
+    const file = path.join(directory, artifactName(product, version, platform));
+    writeFileSync(file, `verified ${platform} payload`);
+    return inspectArtifact(file, platform);
+  });
+  const build = { schemaVersion: 1, product, version, artifacts };
+  const save = () => writeFileSync(path.join(directory, 'build.json'), JSON.stringify(build));
   save();
-  return { directory, catalog, save };
+  return { directory, build, save };
 }
-
-describe('release publication preflight', () => {
-  it('accepts a complete, verified six-platform release', () => {
-    const { directory } = fixture();
-    expect(verifyReleasePayloads(directory).artifacts).toHaveLength(18);
+describe('independent native publication preflight', () => {
+  it.each(['cli', 'launcher'] as const)('accepts a complete six-platform %s release', (product) => {
+    const { directory, build } = fixture(product);
+    expect(writeChecksums(directory).artifacts).toHaveLength(6);
+    expect(
+      parseChecksums(readFileSync(path.join(directory, 'SHASUMS256.txt'), 'utf8'), product, build.version, PLATFORMS),
+    ).toHaveLength(6);
   });
   it('rejects missing or duplicate targets', () => {
-    const { directory, catalog, save } = fixture();
-    catalog.artifacts.pop();
+    const { directory, build, save } = fixture();
+    build.artifacts.pop();
     save();
-    expect(() => verifyReleasePayloads(directory)).toThrow('missing required artifacts');
-    catalog.artifacts.push(catalog.artifacts[0]!);
+    expect(() => verifyReleasePayloads(directory)).toThrow('missing required platforms');
+    build.artifacts.push(build.artifacts[0]!);
     save();
-    expect(() => verifyReleasePayloads(directory)).toThrow('duplicate release artifact');
+    expect(() => verifyReleasePayloads(directory)).toThrow('duplicate');
   });
-  it('rejects modified archives before any publication', () => {
-    const { directory, catalog } = fixture();
-    writeFileSync(path.join(directory, catalog.artifacts[0]!.fileName), 'modified payload');
+  it('rejects modified archives', () => {
+    const { directory, build } = fixture();
+    writeFileSync(path.join(directory, build.artifacts[0]!.fileName), 'modified');
     expect(() => verifyReleasePayloads(directory)).toThrow('mismatch');
   });
-  it('rejects filenames that escape the release directory', () => {
-    const { directory, catalog, save } = fixture();
-    catalog.artifacts[0]!.fileName = '../outside.tar.gz';
+  it('rejects mismatched identities and path escapes', () => {
+    const { directory, build, save } = fixture();
+    build.artifacts[0]!.fileName = '../outside.tar.gz';
     save();
-    expect(() => verifyReleasePayloads(directory)).toThrow('archive basenames');
+    expect(() => verifyReleasePayloads(directory)).toThrow('Noncanonical');
   });
 });

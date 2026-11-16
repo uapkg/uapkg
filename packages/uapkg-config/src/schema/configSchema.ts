@@ -1,5 +1,5 @@
 import { resolveUapkgBuildMode } from '@uapkg/common';
-import { PackageVersionSchema, RegistryURLSchema } from '@uapkg/common-schema';
+import { CliVersionSelectorSchema, RegistryURLSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 
 const DEVELOPMENT_REGISTRY_URL = 'https://github.com/uapkg/registry-dev-tmp';
@@ -14,8 +14,7 @@ const registryUrlConfigSchema = RegistryURLSchema.transform((value): string => v
 // Normal CLI config resolution still supports project-local overrides.
 const launcherConfigSchema = z
   .object({
-    cliSource: z.enum(['github-releases', 'npm']),
-    defaultCliVersion: PackageVersionSchema.optional(),
+    defaultCliVersion: CliVersionSelectorSchema.optional(),
   })
   .strict();
 
@@ -192,9 +191,7 @@ export function getDefaultConfig(): ResolvedConfig {
     resolveUapkgBuildMode() === 'development' ? DEVELOPMENT_REGISTRY_URL : PRODUCTION_REGISTRY_URL;
   const defaults: ResolvedConfig = {
     registry: 'default',
-    launcher: {
-      cliSource: 'github-releases',
-    },
+    launcher: {},
     registries: {
       default: {
         url: registryUrlConfigSchema.parse(defaultRegistryUrl),

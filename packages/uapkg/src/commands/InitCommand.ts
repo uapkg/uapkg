@@ -1,5 +1,5 @@
 import type { PackageName, PackageVersion } from '@uapkg/common-schema';
-import { PackageNameSchema, PackageVersionSchema } from '@uapkg/common-schema';
+import { CliVersionSelectorSchema, PackageNameSchema, PackageVersionSchema } from '@uapkg/common-schema';
 import { ManifestReader, ManifestWriter } from '@uapkg/package-manifest';
 import type { Manifest, ManifestKind } from '@uapkg/package-manifest-schema';
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
@@ -84,7 +84,7 @@ export class InitCommand implements Command {
       name,
       version,
       kind: 'project',
-      uapkgVersion: PackageVersionSchema.parse(UAPKG_BUILD_METADATA.packageVersion),
+      uapkgVersion: CliVersionSelectorSchema.parse(UAPKG_BUILD_METADATA.packageVersion),
     };
   }
 }

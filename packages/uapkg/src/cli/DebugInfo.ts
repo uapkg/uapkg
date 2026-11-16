@@ -4,7 +4,7 @@ import path from 'node:path';
 import { isSea } from 'node:sea';
 import { stripVTControlCharacters } from 'node:util';
 import { resolveActiveUapkgProfileRoot } from '@uapkg/common';
-import { PackageVersionSchema } from '@uapkg/common-schema';
+import { CliVersionSelectorSchema, PackageVersionSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 import { UAPKG_BUILD_METADATA } from '#cli/build/BuildMetadata.ts';
 import {
@@ -14,14 +14,12 @@ import {
   type EnvironmentCollection,
 } from '#cli/cli/DebugEnvironment.ts';
 
-const nullableVersion = PackageVersionSchema.nullable();
-const sourceSchema = z.enum(['github-releases', 'npm']);
+const nullableVersion = CliVersionSelectorSchema.nullable();
 const launcherContextSchema = z.object({
   schemaVersion: z.literal(1),
   launcherVersion: PackageVersionSchema,
   launcherPath: z.string().min(1),
   installMethod: z.enum(['standalone', 'npm', 'winget', 'homebrew', 'scoop', 'development']),
-  cliSource: sourceSchema.nullable(),
   globalSettingsState: z.enum(['available', 'unavailable']),
   globalCliVersion: nullableVersion,
   projectCliVersion: nullableVersion,
@@ -29,7 +27,7 @@ const launcherContextSchema = z.object({
   overrideCliVersion: nullableVersion,
   selectedCliVersion: PackageVersionSchema,
   selectionReason: z.enum(['development', 'override', 'global-command', 'project-pin', 'global-default']),
-  engineKind: z.enum(['development', 'npm', 'node', 'sea']),
+  engineKind: z.enum(['development', 'node', 'sea']),
   offline: z.boolean(),
 });
 type LauncherContext = z.infer<typeof launcherContextSchema>;
@@ -70,17 +68,15 @@ function directGlobal(profile: string) {
     const values = fs.existsSync(file) ? readObject(file) : {};
     const launcher = z
       .object({
-        cliSource: sourceSchema.default('github-releases'),
-        defaultCliVersion: PackageVersionSchema.optional(),
+        defaultCliVersion: CliVersionSelectorSchema.optional(),
       })
       .parse(values.launcher === undefined ? {} : values.launcher);
     return {
-      cliSource: launcher.cliSource,
       globalCliVersion: launcher.defaultCliVersion ?? null,
       globalSettingsState: 'available',
     } as const;
   } catch {
-    return { cliSource: null, globalCliVersion: null, globalSettingsState: 'unavailable' } as const;
+    return { globalCliVersion: null, globalSettingsState: 'unavailable' } as const;
   }
 }
 
@@ -93,7 +89,7 @@ function directProject(cwd: string): Pick<LauncherContext, 'projectCliVersion' |
         if (manifest.kind === 'project') {
           return manifest.uapkgVersion === undefined
             ? { projectCliVersion: null, projectState: 'unpinned' }
-            : { projectCliVersion: PackageVersionSchema.parse(manifest.uapkgVersion), projectState: 'pinned' };
+            : { projectCliVersion: CliVersionSelectorSchema.parse(manifest.uapkgVersion), projectState: 'pinned' };
         }
         if (manifest.kind !== 'plugin') return { projectCliVersion: null, projectState: 'unavailable' };
       }
@@ -207,7 +203,6 @@ export async function renderDebugInfo(options: DebugInfoOptions = {}): Promise<s
     `  Launcher version: ${versionOr(selection.launcherVersion, 'unavailable')}`,
     `  Launcher path: ${cleanPath(selection.launcherPath)}`,
     `  Installation owner: ${versionOr(selection.installMethod, 'unavailable')}`,
-    `  CLI source: ${versionOr(selection.cliSource, 'unavailable')}`,
     `  Global settings: ${selection.globalSettingsState}`,
     `  Global CLI version: ${versionOr(selection.globalCliVersion, selection.globalSettingsState === 'unavailable' ? 'unavailable' : 'not configured')}`,
     `  Project CLI pin: ${project}`,

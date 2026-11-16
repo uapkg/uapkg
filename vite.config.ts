@@ -140,6 +140,8 @@ export default defineConfig({
       '**/coverage/**',
       '**/__snapshots__/**',
       'launcher/target/**',
+      'tools/release/fixtures/index.json',
+      'tools/release/fixtures/replacements.json',
     ],
     useTabs: false,
     tabWidth: 2,

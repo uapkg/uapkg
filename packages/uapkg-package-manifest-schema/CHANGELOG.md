@@ -1,5 +1,13 @@
 # @uapkg/package-manifest-schema
 
+## 1.6.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/common-schema@1.6.0
+  - @uapkg/diagnostics@1.6.0
+
 ## 1.5.1
 
 ### Patch Changes

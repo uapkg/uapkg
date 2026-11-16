@@ -1,130 +1,111 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, lstatSync, writeFileSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  CHECKSUM_FILE,
+  PLATFORMS,
+  artifactName,
+  assertExactVersion,
+  assertProduct,
+  parseChecksums,
+} from './ReleaseContract.ts';
+import type { ReleaseBuild } from './ReleaseArtifacts.ts';
 
-const PLATFORMS = ['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64'];
-const KINDS = ['cli', 'launcher', 'bundle'];
-
-interface ReleaseArtifact {
-  kind: string;
-  platform: string;
-  fileName: string;
-  sha256: string;
-  size: number;
-}
-
-interface ReleaseCatalog {
-  schemaVersion: number;
-  cliVersion: string;
-  launcherVersion: string;
-  artifacts: ReleaseArtifact[];
-}
-
-/** Refuse publication until all platform payloads exist and match the catalog. */
-export function verifyReleasePayloads(directory: string): ReleaseCatalog {
-  const catalog = JSON.parse(readFileSync(path.join(directory, 'release.json'), 'utf8')) as ReleaseCatalog;
-  if (
-    catalog.schemaVersion !== 1 ||
-    !catalog.cliVersion ||
-    !catalog.launcherVersion ||
-    !Array.isArray(catalog.artifacts)
-  ) {
-    throw new Error('Release metadata is missing its version identities or artifact list.');
-  }
-  const expected = new Set(PLATFORMS.flatMap((platform) => KINDS.map((kind) => `${platform}/${kind}`)));
-  const names = new Set<string>();
-  for (const artifact of catalog.artifacts) {
-    if (!expected.delete(`${artifact.platform}/${artifact.kind}`)) {
-      throw new Error(`Unexpected or duplicate release artifact: ${artifact.platform}/${artifact.kind}`);
-    }
-    if (
-      typeof artifact.fileName !== 'string' ||
-      !/^[a-zA-Z0-9][a-zA-Z0-9._+-]*\.tar\.gz$/.test(artifact.fileName) ||
-      names.has(artifact.fileName)
-    ) {
-      throw new Error('Release artifact filenames must be unique archive basenames.');
-    }
-    names.add(artifact.fileName);
+/** Internal build evidence gates signing; it is never published as client metadata. */
+export function verifyReleasePayloads(directory: string): ReleaseBuild {
+  const build = JSON.parse(readFileSync(path.join(directory, 'build.json'), 'utf8')) as ReleaseBuild;
+  if (build.schemaVersion !== 1 || !Array.isArray(build.artifacts)) throw new Error('Invalid native build evidence.');
+  assertProduct(build.product);
+  assertExactVersion(build.version);
+  const expected = new Set<string>(PLATFORMS);
+  for (const artifact of build.artifacts) {
+    if (!expected.delete(artifact.platform)) throw new Error('Unexpected or duplicate release platform.');
+    if (artifact.fileName !== artifactName(build.product, build.version, artifact.platform))
+      throw new Error('Noncanonical release archive name.');
     const archive = path.join(directory, artifact.fileName);
-    if (!statSync(archive).isFile() || statSync(archive).size !== artifact.size) {
+    const stat = lstatSync(archive);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== artifact.size)
       throw new Error(`Release artifact size mismatch: ${artifact.fileName}`);
-    }
-    const digest = createHash('sha256').update(readFileSync(archive)).digest('hex');
-    if (digest !== artifact.sha256) {
+    if (createHash('sha256').update(readFileSync(archive)).digest('hex') !== artifact.sha256)
       throw new Error(`Release artifact checksum mismatch: ${artifact.fileName}`);
-    }
   }
-  if (expected.size > 0) {
-    throw new Error(`Release is missing required artifacts: ${[...expected].join(', ')}`);
-  }
-  return catalog;
+  if (expected.size) throw new Error('Release is missing required platforms.');
+  return build;
+}
+
+export function writeChecksums(directory: string): ReleaseBuild {
+  const build = verifyReleasePayloads(directory);
+  const checksums = [...build.artifacts]
+    .sort((a, b) => a.fileName.localeCompare(b.fileName, 'en'))
+    .map((artifact) => `${artifact.sha256}  ${artifact.fileName}\n`)
+    .join('');
+  parseChecksums(checksums, build.product, build.version, PLATFORMS);
+  writeFileSync(path.join(directory, CHECKSUM_FILE), checksums);
+  return build;
 }
 
 function run(command: string, args: string[], cwd: string): void {
   const result = spawnSync(command, args, {
     cwd,
     stdio: 'inherit',
+    windowsHide: true,
     env: { ...process.env, UAPKG_RELEASE_SECRET_KEY: undefined },
   });
-  if (result.error || result.status !== 0) {
-    throw new Error(
-      `${command} failed${result.error ? `: ${result.error.message}` : ` with exit code ${result.status}`}`,
-    );
-  }
+  if (result.error || result.status !== 0)
+    throw new Error(`${command} failed: ${result.error?.message ?? `exit ${result.status}`}`);
 }
 
-export function signRelease(): ReleaseCatalog {
-  const workspace = fileURLToPath(new URL('../../', import.meta.url));
-  const directory = path.resolve(workspace, process.env.UAPKG_RELEASE_DIRECTORY ?? 'dist/release');
+export function signRelease(directory: string): ReleaseBuild {
   const publicKey = process.env.UAPKG_RELEASE_PUBLIC_KEY?.trim();
   const secretKey = process.env.UAPKG_RELEASE_SECRET_KEY;
-  if (!publicKey || !secretKey) {
-    throw new Error('Publishing requires UAPKG_RELEASE_PUBLIC_KEY and UAPKG_RELEASE_SECRET_KEY. See docs/launcher.md.');
-  }
-  const catalog = verifyReleasePayloads(directory);
-  const packageManifest = JSON.parse(readFileSync(path.join(workspace, 'packages/uapkg/package.json'), 'utf8')) as {
-    version: string;
-  };
-  if (catalog.cliVersion !== packageManifest.version) {
-    throw new Error('Release artifacts do not match the current CLI package version. Rebuild before publishing.');
-  }
-  const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), 'uapkg-release-signing-'));
+  if (!publicKey || !secretKey)
+    throw new Error('Signing requires UAPKG_RELEASE_PUBLIC_KEY and UAPKG_RELEASE_SECRET_KEY.');
+  const build = writeChecksums(directory);
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'uapkg-release-signing-'));
   try {
-    const keyFile = path.join(temporaryDirectory, 'minisign.key');
-    writeFileSync(keyFile, secretKey, { mode: 0o600 });
-    const metadata = path.join(directory, 'release.json');
-    run(
-      'minisign',
-      [
-        '-S',
-        '-s',
-        keyFile,
-        '-m',
-        metadata,
-        '-t',
-        `UAPKG CLI ${catalog.cliVersion}; launcher ${catalog.launcherVersion}`,
-      ],
-      workspace,
-    );
-    run('minisign', ['-V', '-H', '-P', publicKey, '-m', metadata], workspace);
+    const key = path.join(scratch, 'minisign.key');
+    writeFileSync(key, secretKey, { mode: 0o600 });
+    const checksums = path.join(directory, CHECKSUM_FILE);
+    run('minisign', ['-S', '-s', key, '-m', checksums, '-t', `UAPKG ${build.product} ${build.version}`], directory);
+    run('minisign', ['-V', '-H', '-P', publicKey, '-m', checksums], directory);
   } finally {
-    // This directory is created by mkdtemp above; it never comes from caller input.
-    rmSync(temporaryDirectory, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
   }
-  return catalog;
+  return build;
 }
 
+/** npm publication remains independent of native artifacts and their signing keys. */
 export function publishRelease(): void {
-  signRelease();
   const workspace = fileURLToPath(new URL('../../', import.meta.url));
-  // Changesets owns npm publication, tags, and its existing GitHub Release flow.
-  // Verification and signing deliberately happen before any publication.
-  run('vp', ['exec', 'changeset', 'publish'], workspace);
+  run('vp', ['exec', 'changeset', 'publish', '--no-git-tag'], workspace);
+  // Library tags remain useful, but native publication exclusively owns the CLI tag.
+  // Existing tags can point to an older commit when a library version did not change.
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const tags: string[] = [];
+    for (const entry of readdirSync(path.join(workspace, 'packages'), { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const manifest = JSON.parse(
+        readFileSync(path.join(workspace, 'packages', entry.name, 'package.json'), 'utf8'),
+      ) as { name: string; version: string; private?: boolean };
+      if (manifest.private || manifest.name === '@uapkg/cli') continue;
+      assertExactVersion(manifest.version);
+      const tag = `${manifest.name}@${manifest.version}`;
+      const existing = spawnSync('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`], {
+        cwd: workspace,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      if (existing.error || existing.status !== 0) throw new Error('Could not inspect existing library tags.');
+      if (existing.stdout.trim()) continue;
+      run('git', ['tag', tag], workspace);
+      tags.push(`refs/tags/${tag}`);
+    }
+    if (tags.length) run('git', ['push', 'origin', ...tags], workspace);
+  }
 }
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     publishRelease();

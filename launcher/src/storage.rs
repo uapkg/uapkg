@@ -1,4 +1,4 @@
-use crate::model::{Receipt, Settings, Source, exact_version, read_json, relative_path};
+use crate::model::{Receipt, Settings, exact_version, read_json, relative_path};
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 use std::{
@@ -65,10 +65,7 @@ impl ContextPaths {
                 );
             }
             if let Some(version) = &receipt.default_cli_version {
-                exact_version(version)?;
-            }
-            if let Some(engine) = &receipt.bundled_engine {
-                relative_path(engine)?;
+                crate::catalog::selector(version)?;
             }
         }
         let development = receipt
@@ -103,31 +100,26 @@ impl ContextPaths {
         let launcher = launcher
             .as_object()
             .with_context(|| format!("launcher in {} must be an object.", path.display()))?;
+        ensure!(
+            !launcher.contains_key("cliSource"),
+            "launcher.cliSource in {} is no longer supported. Remove that setting; launcher downloads use GitHub Releases through releases.uapkg.dev.",
+            path.display()
+        );
         let mut settings = Settings::default();
-        if let Some(source) = launcher.get("cliSource") {
-            let source = source.as_str().with_context(|| {
-                format!(
-                    "launcher.cliSource in {} must be github-releases or npm.",
-                    path.display()
-                )
-            })?;
-            settings.cli_source = Source::parse(source)
-                .with_context(|| format!("Invalid launcher.cliSource in {}.", path.display()))?;
-        }
         if let Some(version) = launcher.get("defaultCliVersion") {
             let version = version.as_str().with_context(|| {
                 format!(
-                    "launcher.defaultCliVersion in {} must be an exact version string.",
+                    "launcher.defaultCliVersion in {} must be a CLI version selector.",
                     path.display()
                 )
             })?;
-            exact_version(version).with_context(|| {
+            crate::catalog::selector(version).with_context(|| {
                 format!("Invalid launcher.defaultCliVersion in {}.", path.display())
             })?;
             settings.default_cli_version = Some(version.to_owned());
         }
         // The TypeScript config module owns validation and persistence of the
-        // full config tree. Routing reads only these two global values, never
+        // full config tree. Routing reads only the global selector, never
         // project config or unrelated settings introduced by another CLI.
         Ok(settings)
     }
@@ -140,18 +132,13 @@ impl ContextPaths {
         })
     }
 
-    pub fn cache_dir(&self, source: Source, version: &str, platform: &str) -> Result<PathBuf> {
+    pub fn cache_dir(&self, version: &str, platform: &str) -> Result<PathBuf> {
         exact_version(version)?;
         ensure!(
             relative_path(platform)?.components().count() == 1,
             "Invalid platform."
         );
-        Ok(self
-            .home
-            .join("engines")
-            .join(source.name())
-            .join(version)
-            .join(platform))
+        Ok(self.home.join("engines").join(version).join(platform))
     }
 
     pub fn ownership(&self) -> &str {

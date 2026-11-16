@@ -3,7 +3,7 @@ name: Test
 on:
   push:
     branches-ignore:
-      - main # Release runs the same verification workflow for main.
+      - catalog-release
   pull_request:
 
 jobs:

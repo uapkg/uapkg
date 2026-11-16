@@ -7,8 +7,7 @@ use std::{
 };
 use uapkg_launcher::{
     archive, diagnostics, engines, github,
-    model::{Source, exact_version, platform, relative_path},
-    npm,
+    model::{exact_version, platform, relative_path},
     routing::{Invocation, Scope, discover_project, select_version},
     storage::{ContextPaths, atomic_json, lock},
     updater::{self, Transaction},
@@ -197,7 +196,7 @@ fn invalid_or_duplicate_overrides_fail_even_after_the_command() {
         vec!["future", "--cli-version"],
         vec!["future", "--cli-version="],
         vec!["future", "--cli-version", ""],
-        vec!["future", "--cli-version", "latest"],
+        vec!["future", "--cli-version", "beta"],
         vec!["future", "--cli-version=^1.2.3"],
         vec!["future", "--cli-version", "--"],
         vec!["future", "--cli-version", "--offline"],
@@ -335,22 +334,16 @@ fn signed_release_metadata_rejects_tampering_and_wrong_version() {
     let bytes = include_bytes!("fixtures/release.payload");
     let signature = include_str!("fixtures/release.json.minisig");
     let public_key = include_str!("fixtures/release.pub");
-    assert_eq!(
-        github::verify_descriptor(bytes, signature, public_key, "1.2.3")
-            .unwrap()
-            .cli_version,
-        "1.2.3"
-    );
-    assert!(github::verify_descriptor(bytes, signature, public_key, "9.0.0").is_err());
+    github::verify(bytes, signature, public_key).unwrap();
     let mut tampered = bytes.to_vec();
     tampered[0] ^= 1;
-    assert!(github::verify_descriptor(&tampered, signature, public_key, "1.2.3").is_err());
-    assert!(github::verify_descriptor(bytes, "invalid", public_key, "1.2.3").is_err());
-    assert!(
-        github::asset_url("1.2.3", "release.json")
+    assert!(github::verify(&tampered, signature, public_key).is_err());
+    assert!(github::verify(bytes, "invalid", public_key).is_err());
+    assert_eq!(
+        github::url("cli", Some("1.2.3"), "SHASUMS256.txt")
             .unwrap()
-            .as_str()
-            .contains("%2F")
+            .as_str(),
+        "https://releases.uapkg.dev/cli/1.2.3/SHASUMS256.txt"
     );
 }
 
@@ -400,17 +393,6 @@ fn archive_validation_rejects_links_and_duplicate_paths() {
     );
 }
 
-#[test]
-fn npm_integrity_and_engine_ranges_are_enforced() {
-    let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("package.tgz");
-    fs::write(&file, b"hello").unwrap();
-    assert!(npm::verify_integrity(&file, "sha512-missing").is_err());
-    assert!(npm::verify_integrity(&file, "sha1-unsupported").is_err());
-    assert!(npm::satisfies("v26.13.1", ">=26 <27 || >=28").unwrap());
-    assert!(!npm::satisfies("v24.0.0", ">=26").unwrap());
-}
-
 fn context(root: &Path) -> ContextPaths {
     ContextPaths {
         home: root.join("profile"),
@@ -420,40 +402,38 @@ fn context(root: &Path) -> ContextPaths {
 }
 
 #[test]
-fn offline_cache_is_source_specific_and_partial_installations_never_run() {
+fn offline_partial_installations_never_run() {
     let dir = tempfile::tempdir().unwrap();
     let context = context(dir.path());
     let target = platform().unwrap();
-    let github = context.cache_dir(Source::Github, "1.2.3", target).unwrap();
+    let github = context.cache_dir("1.2.3", target).unwrap();
     fs::create_dir_all(&github).unwrap();
     fs::write(github.join("engine"), b"fixture").unwrap();
     write(
         &github.join("engine.json"),
         json!({"schemaVersion":1,"version":"1.2.3","platform":target,"kind":"sea","executable":"engine","args":[]}),
     );
-    assert!(engines::ensure_installed(&context, Source::Github, "1.2.3", true).is_err());
+    assert!(engines::ensure_installed(&context, "1.2.3", true).is_err());
     write(
         &github.join(".installed.json"),
-        json!({"schemaVersion":1,"source":"github-releases","version":"1.2.3","platform":target}),
+        json!({"schemaVersion":1,"version":"1.2.3","platform":target}),
     );
-    assert!(engines::ensure_installed(&context, Source::Github, "1.2.3", true).is_ok());
-    assert!(engines::ensure_installed(&context, Source::Npm, "1.2.3", true).is_err());
-    assert!(engines::ensure_installed(&context, Source::Github, "2.0.0", true).is_err());
+    assert!(engines::ensure_installed(&context, "1.2.3", true).is_ok());
+    assert!(engines::ensure_installed(&context, "2.0.0", true).is_err());
 }
 
 #[test]
 fn global_launcher_settings_are_read_without_changing_unrelated_configuration() {
     let dir = tempfile::tempdir().unwrap();
     let context = context(dir.path());
-    assert_eq!(context.settings().unwrap().cli_source, Source::Github);
+    assert!(context.settings().unwrap().default_cli_version.is_none());
     let path = context.home.join("config.json");
     write(
         &path,
-        json!({"launcher":{"cliSource":"npm","defaultCliVersion":"1.2.3","futureSetting":true},"registry":"team","term":{"quiet":true},"futureCliObject":{"arbitrary":[1,2,3]}}),
+        json!({"launcher":{"defaultCliVersion":"1.2.3","futureSetting":true},"registry":"team","term":{"quiet":true},"futureCliObject":{"arbitrary":[1,2,3]}}),
     );
     let original = fs::read(&path).unwrap();
     let settings = context.settings().unwrap();
-    assert_eq!(settings.cli_source, Source::Npm);
     assert_eq!(settings.default_cli_version.as_deref(), Some("1.2.3"));
     assert_eq!(fs::read(&path).unwrap(), original);
     assert!(!context.home.join("launcher.json").exists());
@@ -471,10 +451,8 @@ fn malformed_relevant_global_settings_fail_with_their_location() {
     for config in [
         json!([]),
         json!({"launcher":null}),
-        json!({"launcher":{"cliSource":null}}),
-        json!({"launcher":{"cliSource":"unrecognized"}}),
         json!({"launcher":{"defaultCliVersion":42}}),
-        json!({"launcher":{"defaultCliVersion":"latest"}}),
+        json!({"launcher":{"defaultCliVersion":"^1.2.3"}}),
         json!({"launcher":{"defaultCliVersion":null}}),
     ] {
         write(&path, config);
@@ -482,7 +460,7 @@ fn malformed_relevant_global_settings_fail_with_their_location() {
         assert!(format!("{error:#}").contains("config.json"), "{error:#}");
     }
     write(&path, json!({"launcher":{},"unrelated":"ignored"}));
-    assert_eq!(context.settings().unwrap().cli_source, Source::Github);
+    assert!(context.settings().unwrap().default_cli_version.is_none());
 }
 
 #[test]
@@ -620,4 +598,27 @@ fn startup_recovery_does_not_modify_package_manager_owned_installations() {
     assert!(backup.exists());
     assert!(dir.path().join("uapkg-update.json").exists());
     assert!(!dir.path().join("uapkg-update.lock").exists());
+}
+
+#[test]
+fn obsolete_source_settings_and_cached_npm_engines_are_rejected() {
+    let directory = tempfile::tempdir().unwrap();
+    let context = context(directory.path());
+    write(
+        &context.home.join("config.json"),
+        json!({"launcher":{"cliSource":"npm","defaultCliVersion":"1.2.3"},"registry":"preserved"}),
+    );
+    assert!(format!("{:#}", context.settings().unwrap_err()).contains("no longer supported"));
+    let target = platform().unwrap();
+    let root = context.cache_dir("1.2.3", target).unwrap();
+    write(
+        &root.join(".installed.json"),
+        json!({"schemaVersion":1,"version":"1.2.3","platform":target}),
+    );
+    write(
+        &root.join("engine.json"),
+        json!({"schemaVersion":1,"version":"1.2.3","platform":target,"kind":"npm","executable":"node","args":["cli.js"]}),
+    );
+    assert!(engines::ensure_installed(&context, "1.2.3", true).is_err());
+    assert!(engines::list(&context).unwrap().is_empty());
 }

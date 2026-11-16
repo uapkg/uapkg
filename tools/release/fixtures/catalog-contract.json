@@ -1,0 +1,156 @@
+{
+  "validVersions": ["0.2.0", "1.6.0", "2.0.0-alpha.0", "2.0.0-beta.10", "2.0.0-beta.1+build.2"],
+  "invalidVersions": [
+    "latest",
+    "v1.0.0",
+    "01.0.0",
+    "1.0",
+    "^1.0.0",
+    "1.0.0-alpha",
+    "1.0.0-beta",
+    "1.0.0-nightly.1",
+    "1.0.0-rc.1",
+    "1.0.0-alpha.01",
+    "2.0.0-alpha.1.2"
+  ],
+  "orderedVersions": ["1.0.0-alpha.2", "1.0.0-alpha.10", "1.0.0-beta.1", "1.0.0", "1.0.1"],
+  "entry": {
+    "schemaVersion": 1,
+    "product": "cli",
+    "version": "2.0.0",
+    "publishedAt": "2026-11-01T12:34:56Z",
+    "tag": "@uapkg/cli@2.0.0",
+    "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+  },
+  "index": {
+    "schemaVersion": 1,
+    "product": "cli",
+    "aliases": {
+      "latest": "2.0.0",
+      "2.0.0-alpha": "2.0.0",
+      "2.0.0-beta": "2.0.0",
+      "2.1.0-beta": "2.1.0-beta.10"
+    },
+    "releases": [
+      {
+        "version": "2.1.0-beta.10",
+        "date": "2026-11-12",
+        "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+      },
+      {
+        "version": "2.0.0",
+        "date": "2026-11-01",
+        "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+      }
+    ]
+  },
+  "replacements": {
+    "schemaVersion": 1,
+    "product": "cli",
+    "replacements": {
+      "2.0.0-alpha.1": "2.0.0",
+      "2.0.0-beta.2": "2.0.0"
+    }
+  },
+  "invalidIndexes": [
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {
+        "latest": "2.1.0-beta.10"
+      },
+      "releases": [
+        {
+          "version": "2.1.0-beta.10",
+          "date": "2026-11-12",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+        },
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {
+        "2.0.0-beta": "2.1.0-beta.10"
+      },
+      "releases": [
+        {
+          "version": "2.1.0-beta.10",
+          "date": "2026-11-12",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+        },
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {
+        "latest": "latest"
+      },
+      "releases": [
+        {
+          "version": "2.1.0-beta.10",
+          "date": "2026-11-12",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+        },
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {
+        "latest": "2.0.0",
+        "2.0.0-alpha": "2.0.0",
+        "2.0.0-beta": "2.0.0",
+        "2.1.0-beta": "2.1.0-beta.10"
+      },
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["linux-riscv64"]
+        }
+      ]
+    }
+  ],
+  "invalidReplacements": [
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "replacements": {
+        "2.0.0-beta.2": "2.1.0"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "replacements": {
+        "2.0.0": "2.1.0"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "replacements": {
+        "2.0.0-alpha.1": "2.0.0",
+        "2.0.0-beta.2": "2.0.0"
+      },
+      "retireAt": "2026-11-15T12:34:56Z"
+    }
+  ]
+}

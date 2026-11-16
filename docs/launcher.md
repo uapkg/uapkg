@@ -1,171 +1,160 @@
 # Installing and managing UAPKG
 
-`uapkg` is a native launcher. It selects and starts a versioned TypeScript CLI;
-package operations and authentication remain implemented in TypeScript.
+`uapkg` is a native launcher. It selects and starts the TypeScript CLI; package
+operations and authentication remain in the CLI.
 
 ## Install
 
-Choose an `@uapkg/cli@<version>` release on
-[GitHub Releases](https://github.com/uapkg/uapkg/releases) and download the
-full bundle for your platform. Supported targets are Windows, macOS, and glibc
-Linux, each on x64 and ARM64. Alpine/musl Linux is not a supported target.
+Choose a launcher version from [UAPKG releases](https://releases.uapkg.dev/launcher/).
+Download `uapkg-launcher-<version>-<platform>.tar.gz` and the accompanying
+`SHASUMS256.txt` and `SHASUMS256.txt.minisig`. Verify the checksum signature with
+[the artifact signing key](release-signing.pub), then verify the archive's SHA-256.
+For example, `minisign -Vm SHASUMS256.txt -p release-signing.pub` verifies the
+checksum list. The site redirects artifact downloads to GitHub Releases.
 
-Extract the entire archive into a user-writable directory and add that directory
-to `PATH`. Keep `uapkg` (`uapkg.exe` on Windows), `uapkg-install.json`, and the
-`cli` directory together. The bundle includes its default CLI and Node runtime,
-so it can run offline without installing Node, npm, or Rust.
+Supported platforms are `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`,
+`linux-x64`, and `linux-arm64`. Linux requires glibc; Alpine/musl is not supported.
+Extract the launcher into a user-writable directory and add that directory to
+`PATH`. Then choose the initial CLI:
 
-`@uapkg/cli` on npm contains the engine. It has no `bin` registration; `npm
-install -g @uapkg/cli` does not install the `uapkg` command. The launcher itself
-is distributed only through GitHub Releases in this version.
+```sh
+uapkg version default latest
+```
 
-## Pin a game project's CLI
+Launcher and CLI archives are separate. Each CLI archive includes its runtime;
+Node.js, npm, and Rust are not required on the user's machine. The launcher
+installs the CLI in `~/.uapkg/engines/<version>/<platform>/`.
 
-Add an exact CLI version to the game's `uapkg.json`:
+`@uapkg/cli` continues to be published to npm for package consumers. It has no
+`bin` registration, and npm is not a launcher download source.
+
+## Select a CLI
+
+A game's `uapkg.json` can select a CLI version:
 
 ```json
 {
   "name": "my-game",
   "version": "0.1.0",
   "kind": "project",
-  "uapkgVersion": "1.5.0"
+  "uapkgVersion": "1.6.0"
 }
 ```
 
-Use a published version in place of the example. Ranges such as `^1.5.0`,
-prefixes such as `v1.5.0`, and tags such as `latest` are not project pins.
-Explicit prereleases are allowed. `uapkg init` records the executing CLI version
-when it creates a game project; it does not add a pin to plugin manifests.
+Selectors accept exact stable versions, exact numbered alpha/beta versions,
+`latest`, and a base-scoped alias such as `2.0.0-alpha` or `2.0.0-beta`.
+Ranges, `v` prefixes, and unscoped `alpha`/`beta` are unsupported.
+`uapkg init` records the executing exact CLI version for new game projects.
 
-The launcher searches upward from the current directory for the nearest game
-project manifest. It passes over plugin manifests. A nearer project without a
-pin uses the global default, even if an outer project has a pin.
+The launcher searches upward for the nearest game project, skipping plugin
+manifests. An unpinned project uses the global default. One CLI handles the
+complete dependency graph; dependency manifests do not select another CLI.
 
-One selected CLI handles the game's complete dependency graph. Plugin and
-dependency manifests never choose another CLI. Pin discovery does not change
-the working directory or the command's existing package-root behavior.
-
-| Command                                    | CLI selection                         |
-| ------------------------------------------ | ------------------------------------- |
-| `login`, `logout`, `whoami`                | Global default                        |
-| Other commands, including unknown commands | Project pin, otherwise global default |
-| `--cli-version <exact>`                    | Explicit version                      |
-| Launcher/version management                | Handled by the Rust launcher          |
-
-Global authentication commands still read the normal CLI configuration, including
-project registry selection. `--global` on a configuration command refers to
-configuration scope, not CLI-version selection.
+| Command                              | CLI selection                                      |
+| ------------------------------------ | -------------------------------------------------- |
+| `login`, `logout`, `whoami`          | Global default                                     |
+| Other CLI commands                   | Nearest project selector, otherwise global default |
+| `--cli-version <selector>`           | Explicit override                                  |
+| `launcher`, `version`, `self-update` | Handled by the launcher                            |
 
 ```sh
+uapkg version install 1.6.0
+uapkg version install latest
+uapkg version default latest
 uapkg version current
-uapkg --cli-version 1.5.0 install
-uapkg install --cli-version 1.5.0
-uapkg --version --cli-version 1.5.0
+uapkg version list
+uapkg install --cli-version 2.0.0-alpha
 uapkg install --offline
 ```
 
-Place launcher options anywhere after `uapkg`, before or after the subcommand.
-Both `--cli-version <exact>` (also `--cli-version=<exact>`) and `--offline` are
-consumed by the launcher. Other arguments keep their order and values.
-A standalone `--` ends launcher option parsing: it and all following arguments
-are passed to the CLI unchanged. For example, `uapkg install -- --offline` passes
-the literal `--offline` argument to the CLI instead of enabling launcher offline mode.
-`uapkg --version` reports the selected CLI version; `uapkg launcher --version`
-reports the launcher version.
+Launcher options can appear before or after the command. `--cli-version=value`
+also works. A standalone `--` ends launcher option parsing and preserves all
+following arguments. `uapkg --version` reports the CLI version;
+`uapkg launcher --version` reports the launcher version.
 
-## Manage versions and sources
-
-```sh
-uapkg version install 1.5.0
-uapkg version install latest
-uapkg version list
-uapkg version default 1.5.0
-uapkg version default latest
-uapkg config get launcher.cliSource --global
-uapkg config set launcher.cliSource npm --global
-uapkg config set launcher.cliSource github-releases --global
-```
-
-`latest` resolves a stable version during that management command. The stored
-default remains an exact version. Normal commands do not advance it.
-`version default` installs the requested version, then asks the TypeScript CLI to
-save `launcher.defaultCliVersion` through its normal global configuration command.
-You can also set that exact version with `uapkg config set
-launcher.defaultCliVersion <version> --global`; its installation happens when needed.
-
-The default source, `github-releases`, installs standalone implementations with
-their own runtime. The optional `npm` source installs the exact engine package
-into a private cache. It requires Node `>=26.0.0` and npm `>=11.12.1`, subject to
-the selected engine's declared `engines` ranges. Cached npm engines need Node;
-npm is needed when installing or repairing them. Runtime versions are ranges,
-while the UAPKG CLI version remains exact.
-
-Each source has separate version/platform cache entries. Switching source keeps
-the selected version and obtains it from the new source. UAPKG never substitutes
-another source or version when the requested artifact is unavailable.
-
-Launcher settings are part of the shared `@uapkg/config` schema, under `launcher`
-in `~/.uapkg/config.json` (or `~/.uapkg-development/config.json` during development):
+`version default` installs the selected CLI and delegates the configuration
+write to that CLI. The global configuration preserves the requested selector:
 
 ```json
 {
   "launcher": {
-    "cliSource": "github-releases",
-    "defaultCliVersion": "1.5.0"
+    "defaultCliVersion": "latest"
   }
 }
 ```
 
-The launcher reads only this global object's values. It does not resolve local
-configuration files or project overrides. Normal TypeScript config commands keep
-their existing scope and layering rules; use `--global` to change the launcher's
-selection. If `cliSource` is absent, it uses `github-releases`. If
-`defaultCliVersion` is absent, it uses the installation bundle's default.
+The launcher reads `~/.uapkg/config.json`; local CLI configuration does not change
+this default. The installation receipt may supply a default when configuration
+has none. `--global` on a CLI configuration command controls configuration scope,
+not version selection.
 
-Configuration commands require a usable CLI. Before one is installed, edit the
-global JSON file manually or install a full bundle. Rust never writes this
-configuration, and there is no `uapkg launcher config` command. Installation
-ownership remains in the installation receipt.
+`latest` remembers an installed exact version separately. Ordinary commands
+continue to use it and report available stable updates. Run `uapkg version install
+latest` or `uapkg version default latest` to advance it explicitly.
+
+## Preview versions
+
+`2.0.0-alpha` follows the published alpha alias for that base version, and
+`2.0.0-beta` follows its beta alias. Exact previews such as `2.0.0-alpha.1` remain
+exact until the release site publishes a signed replacement mapping. A replacement
+can only select the stable version of the same base, such as `2.0.0`.
+
+The launcher never infers promotion from a missing release, a 404, or elapsed time.
+It uses the release site's published policy. A retired-preview notice displays
+both the requested and resolved version; project manifests are never rewritten.
+Update and promotion notices go to stderr at startup and normal CLI completion.
+Older CLIs may show only the startup notice. Forced termination cannot guarantee
+a completion notice.
 
 ## Offline execution and recovery
 
-Bundled and completely installed versions run without a metadata request.
-`--offline` forbids fetching an uncached version. Install required versions before
-disconnecting or preparing an offline CI environment.
+`--offline` (or `UAPKG_OFFLINE=1`) prohibits launcher network requests. Installed
+exact stable CLIs run locally. Preview and alias selection uses the last verified
+metadata and remembered resolution when the site is unavailable. Metadata does
+not expire because a local clock crosses a retirement deadline. If known metadata
+requires a replacement that is not installed, the launcher fails instead of
+running the retired preview. Install required versions before disconnecting.
 
-Downloads are staged, verified, and activated only when complete. Interrupted
-downloads do not replace working versions. If a cached installation is damaged,
-the error identifies its directory; remove that version's directory and rerun
-`uapkg version install <version>` while online. Do not delete the whole UAPKG
-profile to repair an engine: it also contains configuration and authentication
-metadata.
+The launcher verifies `index.json` and `replacements.json` with its embedded
+catalog key. It verifies each archive against `SHASUMS256.txt`, signed with a
+separate artifact key. Content-Length is optional and is not integrity evidence.
+Downloads and extraction have size bounds. Installation uses staging, per-version
+locks, and atomic activation; interrupted downloads leave existing versions intact.
 
-GitHub downloads require a signed release descriptor and matching artifact hash.
-The [release signing public key](release-signing.pub) is also available for manual
-verification with `minisign -Vm release.json -p release-signing.pub`.
-The archive contains `engine.json`, which records the exact CLI version, platform,
-runtime executable, and arguments. The signed archive hash authenticates this
-execution metadata before extraction or execution.
-npm downloads require matching tarball integrity and a frozen runtime lock.
-Installation does not execute npm lifecycle scripts. Credential-store access
-remains protected by the operating system; packaging adds no plaintext fallback.
+A damaged cache error identifies the version directory to remove and reinstall.
+Do not delete the whole profile: it also contains configuration and credentials.
+
+The old `launcher.cliSource` setting is unsupported; remove that one property
+from global configuration. Old source-specific `engines/npm` and
+`engines/github-releases` directories are ignored and may be removed manually.
+Cached npm engines and bundled-engine receipts are not migrated or executed.
+For the distribution cutover, install the new standalone launcher archive and
+select its default CLI; an older launcher cannot discover this distribution format.
+Keep unrelated configuration and authentication state.
 
 ## Update the launcher
 
 ```sh
 uapkg self-update
+uapkg self-update 0.2.0
+uapkg self-update 0.3.0-beta
 ```
 
-Launcher updates are explicit and leave project pins and the default CLI version
-unchanged. Installation ownership controls the update method. Standalone
-installations can replace themselves; package-manager-owned installations print
-the appropriate upgrade instruction. Choosing npm as the CLI source does not
-make npm the launcher owner.
+Self-update uses the independent launcher catalog and the same selector and
+published replacement rules. It leaves CLI defaults and project selectors intact.
+A `latest` self-update remembers tracking intent and later commands report newer
+launcher versions; installing them remains explicit.
 
-Windows updates retain a backup and recovery state during replacement. If an
-update fails, follow the reported recovery path. Re-extracting the same full
-bundle into its installation directory is also possible without deleting profile
-state. Do not copy an installation receipt from another distribution method.
+Standalone launchers can update themselves. npm-, WinGet-, Homebrew-, Scoop-,
+and development-owned installations must use their owner's update method.
+An installation receipt records ownership independently of artifact hosting.
+
+Updates verify the staged executable's version before replacement. A verified
+backup and transaction journal support recovery after interruption, including
+Windows executable replacement. If the normal executable is unavailable, run
+`uapkg.exe.backup.exe` on Windows or `uapkg.backup` on Unix, then retry the normal
+launcher. Re-extracting an authenticated launcher archive is also possible without
+removing profile state. Do not copy receipts from another distribution method.
 
 ## Development
 
@@ -202,8 +191,7 @@ The new tooling does not create or maintain command wrappers.
 
 Run `uapkg --debug-info` and copy its output into a bug report. It includes the
 executing CLI and launcher versions, build mode, installation owner, global CLI
-default, nearest project pin, explicit version override, selection reason, CLI
-source, and runtime. System details include OS, CPU, memory, shell, and relevant
+default, nearest project pin, explicit version override, selection reason, and runtime. System details include OS, CPU, memory, shell, and relevant
 tools found on PATH. The running Node version is reported separately from Node
 found on PATH, since standalone CLIs carry their own runtime.
 
@@ -232,55 +220,15 @@ marked in the report instead of preventing the rest from being collected.
 
 ## Release preparation
 
-The native workflow builds all six targets. It packages the same bundled engine
-and frozen dependency closure used for npm. The published engine carries
-`dist/runtime-lock.json`; the launcher stages it as `package-lock.json` for
-`npm ci`, because npm 12 no longer consumes published shrinkwrap files.
+CLI and launcher releases use independent version numbers, Git tags, archives,
+and signed checksums. A launcher change requires a new launcher version; a
+previously published product/version/platform archive is never rebuilt in place.
+CLI releases continue their normal npm publication separately from native release
+availability. The catalog publisher verifies artifacts and writes the public
+`catalog-release` branch. Registry infrastructure builds the signed releases site.
 
-Each native runner tests a private-runtime bundle and a Node SEA candidate.
-The runtime checks exercise the packaged launcher and CLI in a real terminal,
-including interactive initialization, Ctrl+C, and exit-status preservation.
-CI selects SEA only when all six candidates pass, including their credential-store
-tests. Otherwise it selects private-runtime bundles for every platform. The
-selection is recorded in `packaging-evidence.json`; installed launchers do not
-switch packaging formats or sources as a recovery mechanism.
-
-```sh
-vp run build -- --production
-vp run release:prepare
-vp run release:smoke-npm -- --package packages/uapkg/package
-vp run release:native -- --output dist/native --launcher <release-launcher-path>
-vp run release:smoke-native -- --engine dist/native/cli --keyring
-```
-
-The release workflow gathers verified artifacts, signs `release.json`, publishes
-the npm packages through Changesets, and attaches native assets to the exact
-`@uapkg/cli@<version>` release. It never uses GitHub's unfiltered latest-release
-endpoint. The launcher has its own version; a launcher-only fix currently travels
-with a CLI patch release. Existing versioned assets must not be overwritten.
-Attachment checks the exact npm version up to 31 times, ten seconds apart, to
-allow five minutes for registry propagation. Other lookup errors fail immediately.
-If the version remains unavailable, the workflow fails with instructions to
-confirm publication and retry with the retained artifacts.
-Attachment can resume after a partial upload: it verifies existing assets and
-uploads only missing files, with the signed catalog last. Retry using the retained
-`native-release` build artifact. If rebuilding changes published bytes, use the
-original artifacts or publish a new version; the retry refuses to overwrite them.
-
-Before publishing, configure:
-
-- Repository variable `UAPKG_RELEASE_PUBLIC_KEY`: the base64 Minisign public key.
-  It is embedded in every production launcher.
-- Repository secret `UAPKG_RELEASE_SECRET_KEY`: the matching unencrypted Minisign
-  secret-key file, protected by GitHub's secret storage and release permissions.
-- Existing npm publishing credentials (`NPM_TOKEN`).
-
-Generate the signing key outside the repository with Minisign `-G -W`; retain a
-secure backup. Do not put a private key in source or artifacts. Verification-only
-builds may omit the key, but those binaries cannot fetch signed GitHub releases.
-The publishing command refuses to publish without a complete six-target catalog,
-matching archive hashes, and a signature verified with the configured public key.
-
-Signing-key rotation requires a launcher release that trusts the replacement key
-before retiring the old one. No GitHub secrets or releases are changed by building
-or testing locally.
+Native release qualification exercises the actual packaged runtime in a terminal,
+including interactive input, Ctrl+C, and exit-status preservation. The release
+pipeline uses the private Node runtime unless the SEA candidate passes the
+required qualification across supported targets. Runtime selection is made at
+publication; the installed launcher never falls back to npm or another format.

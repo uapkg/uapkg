@@ -1,5 +1,5 @@
 use crate::{
-    model::{Settings, Source, VERSION},
+    model::{Settings, VERSION},
     routing::{Invocation, ProjectSelection, VersionSelection, discover_project},
     storage::ContextPaths,
 };
@@ -18,7 +18,6 @@ pub struct LauncherContext {
     launcher_version: &'static str,
     launcher_path: String,
     install_method: String,
-    cli_source: Option<Source>,
     global_settings_state: &'static str,
     global_cli_version: Option<String>,
     project_cli_version: Option<String>,
@@ -89,7 +88,6 @@ fn build(
         launcher_version: VERSION,
         launcher_path: context.executable.to_string_lossy().into_owned(),
         install_method: context.ownership().to_owned(),
-        cli_source: settings.map(|settings| settings.cli_source),
         global_settings_state: if settings.is_some() {
             "available"
         } else {

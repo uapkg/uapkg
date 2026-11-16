@@ -1,5 +1,28 @@
 # uapkg
 
+## 1.6.0
+
+### Minor Changes
+
+- Install and update native CLI and launcher versions through independent signed release catalogs. Keep npm library publication, remove the npm launcher provider, and support explicit version-scoped preview aliases and published preview replacements.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/common@1.6.0
+  - @uapkg/common-schema@1.6.0
+  - @uapkg/config@1.6.0
+  - @uapkg/diagnostics@1.6.0
+  - @uapkg/diagnostics-format@1.6.0
+  - @uapkg/installer@1.6.0
+  - @uapkg/log@1.6.0
+  - @uapkg/pack@1.6.0
+  - @uapkg/package-claims@1.6.0
+  - @uapkg/package-manifest@1.6.0
+  - @uapkg/package-manifest-schema@1.6.0
+  - @uapkg/registry-core@1.6.0
+  - @uapkg/registry-schema@1.6.0
+
 ## 1.5.1
 
 ### Patch Changes

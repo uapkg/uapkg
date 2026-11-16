@@ -4,15 +4,14 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { writeJson } from '../../../packages/uapkg/build/EnginePackage.ts';
 import {
-  ARTIFACT_KINDS,
   PLATFORMS,
   archiveDirectory,
   artifactName,
-  assembleCatalog,
+  assembleRelease,
   inspectArtifact,
   safeEngineCommand,
   selectNativeCandidates,
-  type ReleaseCatalog,
+  type ReleaseBuild,
 } from '../ReleaseArtifacts.ts';
 import { parseOptions } from '../runRelease.ts';
 
@@ -33,34 +32,34 @@ function releaseFixture(): { input: string; output: string } {
   for (const platform of PLATFORMS) {
     const directory = path.join(input, platform);
     mkdirSync(directory, { recursive: true });
-    const metadata: ReleaseCatalog = { schemaVersion: 1, cliVersion: '2.3.4', launcherVersion: '0.1.0', artifacts: [] };
-    for (const kind of ARTIFACT_KINDS) {
-      const file = path.join(directory, artifactName(kind, kind === 'launcher' ? '0.1.0' : '2.3.4', platform));
+    const metadata: ReleaseBuild = { schemaVersion: 1, product: 'cli', version: '2.3.4', artifacts: [] };
+    for (const kind of ['cli'] as const) {
+      const file = path.join(directory, artifactName(kind, '2.3.4', platform));
       writeFileSync(file, `${kind}:${platform}`);
-      metadata.artifacts.push(inspectArtifact(file, kind, platform));
+      metadata.artifacts.push(inspectArtifact(file, platform));
     }
-    writeJson(path.join(directory, `release-${platform}.json`), metadata);
+    writeJson(path.join(directory, `build-${platform}.json`), metadata);
   }
   return { input, output };
 }
 
 describe('release catalog', () => {
-  it('assembles all eighteen artifacts, preserving independent launcher versions', () => {
+  it('assembles only the six CLI artifacts', () => {
     const { input, output } = releaseFixture();
-    const catalog = assembleCatalog(input, output, '2.3.4', '0.1.0');
-    expect(catalog.artifacts).toHaveLength(18);
+    const catalog = assembleRelease(input, output, 'cli', '2.3.4');
+    expect(catalog.artifacts).toHaveLength(6);
     expect(catalog.artifacts.every((artifact) => /^[a-f0-9]{64}$/.test(artifact.sha256))).toBe(true);
-    expect(JSON.parse(readFileSync(path.join(output, 'release.json'), 'utf8'))).toEqual(catalog);
+    expect(JSON.parse(readFileSync(path.join(output, 'build.json'), 'utf8'))).toEqual(catalog);
   });
 
   it('refuses incomplete, altered, or mixed-version build results', () => {
     const { input, output } = releaseFixture();
     const file = path.join(input, 'linux-x64', artifactName('cli', '2.3.4', 'linux-x64'));
     writeFileSync(file, 'changed after platform verification');
-    expect(() => assembleCatalog(input, output, '2.3.4', '0.1.0')).toThrow('differs from build metadata');
+    expect(() => assembleRelease(input, output, 'cli', '2.3.4')).toThrow('differs from build metadata');
     rmSync(file);
-    expect(() => assembleCatalog(input, output, '2.3.4', '0.1.0')).toThrow('Missing release artifact');
-    expect(() => assembleCatalog(input, output, '2.3.5', '0.1.0')).toThrow('Release versions differ');
+    expect(() => assembleRelease(input, output, 'cli', '2.3.4')).toThrow('Missing release artifact');
+    expect(() => assembleRelease(input, output, 'cli', '2.3.5')).toThrow('Release identity differs');
   });
 
   it('rejects version ranges and path-like versions before choosing artifact names', () => {
@@ -123,19 +122,19 @@ describe('six-platform packaging gate', () => {
       for (const platform of PLATFORMS) {
         const directory = path.join(input, `candidate-${format}-${platform}`);
         mkdirSync(directory);
-        const metadata: ReleaseCatalog & { engineFormat: string } = {
+        const metadata: ReleaseBuild = {
           schemaVersion: 1,
-          cliVersion: '2.3.4',
-          launcherVersion: '0.1.0',
+          product: 'cli',
+          version: '2.3.4',
           engineFormat: format,
           artifacts: [],
         };
-        for (const kind of ARTIFACT_KINDS) {
-          const file = path.join(directory, artifactName(kind, kind === 'launcher' ? '0.1.0' : '2.3.4', platform));
+        for (const kind of ['cli'] as const) {
+          const file = path.join(directory, artifactName(kind, '2.3.4', platform));
           writeFileSync(file, `${format}:${kind}:${platform}`);
-          metadata.artifacts.push(inspectArtifact(file, kind, platform));
+          metadata.artifacts.push(inspectArtifact(file, platform));
         }
-        writeJson(path.join(directory, `release-${platform}.json`), metadata);
+        writeJson(path.join(directory, `build-${platform}.json`), metadata);
       }
     }
     return { input, output };
@@ -143,8 +142,8 @@ describe('six-platform packaging gate', () => {
 
   it('selects SEA only when all six native candidates qualify', () => {
     const { input, output } = candidates();
-    expect(selectNativeCandidates(input, output, '2.3.4', '0.1.0').selectedFormat).toBe('sea');
-    expect(assembleCatalog(output, output, '2.3.4', '0.1.0').artifacts).toHaveLength(18);
+    expect(selectNativeCandidates(input, output, '2.3.4').selectedFormat).toBe('sea');
+    expect(assembleRelease(output, output, 'cli', '2.3.4').artifacts).toHaveLength(6);
     expect(readFileSync(path.join(output, artifactName('cli', '2.3.4', 'linux-x64')), 'utf8')).toBe(
       'sea:cli:linux-x64',
     );
@@ -152,12 +151,12 @@ describe('six-platform packaging gate', () => {
 
   it('uses node on every platform when one SEA candidate is missing or altered', () => {
     const { input, output } = candidates();
-    rmSync(path.join(input, 'candidate-sea-darwin-arm64', 'release-darwin-arm64.json'));
+    rmSync(path.join(input, 'candidate-sea-darwin-arm64', 'build-darwin-arm64.json'));
     writeFileSync(
       path.join(input, 'candidate-sea-win32-arm64', artifactName('cli', '2.3.4', 'win32-arm64')),
       'altered',
     );
-    const evidence = selectNativeCandidates(input, output, '2.3.4', '0.1.0');
+    const evidence = selectNativeCandidates(input, output, '2.3.4');
     expect(evidence.selectedFormat).toBe('node');
     expect(evidence.sea.filter((candidate) => !candidate.qualified)).toHaveLength(2);
     for (const platform of PLATFORMS)
@@ -168,14 +167,14 @@ describe('six-platform packaging gate', () => {
 
   it('rejects an altered fallback and excludes mixed-version SEA candidates', () => {
     const { input, output } = candidates();
-    const metadataPath = path.join(input, 'candidate-sea-linux-arm64', 'release-linux-arm64.json');
+    const metadataPath = path.join(input, 'candidate-sea-linux-arm64', 'build-linux-arm64.json');
     const metadata = JSON.parse(readFileSync(metadataPath, 'utf8'));
-    metadata.cliVersion = '2.3.5';
+    metadata.version = '2.3.5';
     writeJson(metadataPath, metadata);
     writeFileSync(
-      path.join(input, 'candidate-node-linux-arm64', artifactName('bundle', '2.3.4', 'linux-arm64')),
+      path.join(input, 'candidate-node-linux-arm64', artifactName('cli', '2.3.4', 'linux-arm64')),
       'bad fallback',
     );
-    expect(() => selectNativeCandidates(input, output, '2.3.4', '0.1.0')).toThrow('Changed node/linux-arm64/bundle');
+    expect(() => selectNativeCandidates(input, output, '2.3.4')).toThrow('Changed node/linux-arm64');
   });
 });

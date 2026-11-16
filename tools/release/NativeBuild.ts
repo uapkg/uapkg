@@ -17,7 +17,7 @@ import {
   currentPlatform,
   inspectArtifact,
   type EngineDescriptor,
-  type ReleaseCatalog,
+  type ReleaseBuild,
 } from './ReleaseArtifacts.ts';
 import { buildSea } from './SeaBuild.ts';
 
@@ -67,27 +67,19 @@ export function installRuntimeDependencies(directory: string, npmVersion = BUILD
   }
 }
 
-export async function buildNativeArtifacts(
-  output: string,
-  launcher: string,
-  format: 'node' | 'sea' = 'node',
-): Promise<ReleaseCatalog> {
+export async function buildNativeArtifacts(output: string, format: 'node' | 'sea' = 'node'): Promise<ReleaseBuild> {
   if (process.versions.node !== BUILD_NODE_VERSION) {
     throw new Error(`Release builds require Node ${BUILD_NODE_VERSION}; use the repository Vite+ toolchain.`);
   }
   const platform = currentPlatform();
   const version = readJson<{ version: string }>(path.join(CLI_ROOT, 'package.json')).version;
-  const launcherPath = path.resolve(launcher);
-  const launcherVersion = runChecked(launcherPath, ['launcher', '--version'], CLI_ROOT).trim();
   const root = path.resolve(output);
   const engineRoot = path.join(root, 'cli');
-  const launcherRoot = path.join(root, 'launcher');
-  const bundleRoot = path.join(root, 'bundle');
   const packageRoot = path.join(root, 'runtime-package');
   const probeRoot = path.join(root, 'sea-smoke');
   const seaBuildRoot = path.join(root, 'sea-build');
   // Only replace dedicated generated children, never the caller's output directory.
-  for (const generated of [engineRoot, launcherRoot, bundleRoot, packageRoot, probeRoot, seaBuildRoot]) {
+  for (const generated of [engineRoot, packageRoot, probeRoot, seaBuildRoot]) {
     if (path.dirname(generated) !== root) throw new Error('Invalid native output directory.');
     rmSync(generated, { recursive: true, force: true });
     mkdirSync(generated, { recursive: true });
@@ -97,7 +89,6 @@ export async function buildNativeArtifacts(
   installRuntimeDependencies(packageRoot);
 
   const executableName = process.platform === 'win32' ? 'node.exe' : 'node';
-  const launcherName = process.platform === 'win32' ? 'uapkg.exe' : 'uapkg';
   if (format === 'node') {
     cpSync(packageRoot, engineRoot, { recursive: true });
     const runtimeRoot = path.join(engineRoot, 'runtime');
@@ -122,29 +113,42 @@ export async function buildNativeArtifacts(
     args: format === 'node' ? ['dist/cli.js'] : [],
   };
   writeJson(path.join(engineRoot, 'engine.json'), descriptor);
-  cpSync(launcherPath, path.join(launcherRoot, launcherName));
-  chmodSync(path.join(launcherRoot, launcherName), 0o755);
-  cpSync(launcherPath, path.join(bundleRoot, launcherName));
-  chmodSync(path.join(bundleRoot, launcherName), 0o755);
-  cpSync(engineRoot, path.join(bundleRoot, 'cli'), { recursive: true });
-  writeJson(path.join(bundleRoot, 'uapkg-install.json'), {
+  const artifact = path.join(root, artifactName('cli', version, platform));
+  await archiveDirectory(engineRoot, artifact);
+  const build: ReleaseBuild = {
     schemaVersion: 1,
-    installMethod: 'standalone',
-    defaultCliVersion: version,
-    bundledEngine: 'cli',
-  });
-  const catalog: ReleaseCatalog = { schemaVersion: 1, cliVersion: version, launcherVersion, artifacts: [] };
-  for (const [kind, directory, artifactVersion] of [
-    ['cli', engineRoot, version],
-    ['launcher', launcherRoot, launcherVersion],
-    ['bundle', bundleRoot, version],
-  ] as const) {
-    const artifact = path.join(root, artifactName(kind, artifactVersion, platform));
-    await archiveDirectory(directory, artifact);
-    catalog.artifacts.push(inspectArtifact(artifact, kind, platform));
-  }
-  writeJson(path.join(root, `release-${platform}.json`), { ...catalog, engineFormat: format });
-  return catalog;
+    product: 'cli',
+    version,
+    engineFormat: format,
+    artifacts: [inspectArtifact(artifact, platform)],
+  };
+  writeJson(path.join(root, `build-${platform}.json`), build);
+  return build;
+}
+
+export async function buildLauncherArtifact(output: string, launcher: string): Promise<ReleaseBuild> {
+  const platform = currentPlatform();
+  const executable = path.resolve(launcher);
+  const version = runChecked(executable, ['launcher', '--version'], path.dirname(executable)).trim();
+  assertExactVersion(version);
+  const root = path.resolve(output);
+  const directory = path.join(root, 'launcher');
+  if (path.dirname(directory) !== root) throw new Error('Invalid launcher output directory.');
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+  const name = process.platform === 'win32' ? 'uapkg.exe' : 'uapkg';
+  cpSync(executable, path.join(directory, name));
+  chmodSync(path.join(directory, name), 0o755);
+  const artifact = path.join(root, artifactName('launcher', version, platform));
+  await archiveDirectory(directory, artifact);
+  const build: ReleaseBuild = {
+    schemaVersion: 1,
+    product: 'launcher',
+    version,
+    artifacts: [inspectArtifact(artifact, platform)],
+  };
+  writeJson(path.join(root, `build-${platform}.json`), build);
+  return build;
 }
 
 export function launcherVersionFromCargo(workspaceRoot: string): string {

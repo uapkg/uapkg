@@ -145,13 +145,13 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
     assert.match(version.stderr, /DEVELOPMENT BUILD/);
     verifyWindowsShells(metadata.displayVersion);
     assert.equal(invoke(['version', 'current']).stdout.trim(), sourceManifest.version);
-    invoke(['config', 'set', 'launcher.cliSource', 'npm', '--global']);
-    assert.equal(JSON.parse(invoke(['config', 'get', 'launcher.cliSource', '--global']).stdout), 'npm');
+    invoke(['config', 'set', 'launcher.defaultCliVersion', 'latest', '--global']);
+    assert.equal(JSON.parse(invoke(['config', 'get', 'launcher.defaultCliVersion', '--global']).stdout), 'latest');
     invoke(['config', 'set', 'term.verbose', 'true', '--global']);
     const developmentConfig = JSON.parse(
       fs.readFileSync(path.join(home, '.uapkg-development', 'config.json'), 'utf8'),
-    ) as { launcher: { cliSource: string }; term: { verbose: boolean } };
-    assert.equal(developmentConfig.launcher.cliSource, 'npm');
+    ) as { launcher: { defaultCliVersion: string }; term: { verbose: boolean } };
+    assert.equal(developmentConfig.launcher.defaultCliVersion, 'latest');
     assert.equal(developmentConfig.term.verbose, true);
     const diagnostic = invoke(['install', '--debug-info', '--offline']);
     for (const expected of [

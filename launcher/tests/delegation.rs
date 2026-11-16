@@ -33,23 +33,15 @@ fn link_node(directory: &Path) -> PathBuf {
     destination
 }
 
-fn fixture_engine(home: &Path, source: &str, version: &str) {
-    let root = home
-        .join("engines")
-        .join(source)
-        .join(version)
-        .join(platform().unwrap());
+fn fixture_engine(home: &Path, _source: &str, version: &str) {
+    let root = home.join("engines").join(version).join(platform().unwrap());
     fs::create_dir_all(&root).unwrap();
-    let executable = if source == "npm" {
-        "node".to_owned()
-    } else {
-        link_node(&root)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned()
-    };
+    let executable = link_node(&root)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     fs::write(root.join("fixture.cjs"), r#"
 const fs = require('node:fs');
 const path = require('node:path');
@@ -67,11 +59,11 @@ process.exit(Number(process.env.UAPKG_TEST_EXIT || '0'));
 "#).unwrap();
     write(
         &root.join("engine.json"),
-        json!({"schemaVersion":1,"version":version,"platform":platform().unwrap(),"kind":if source == "npm" {"npm"} else {"node"},"executable":executable,"args":["fixture.cjs"],"nodeRange":">=26"}),
+        json!({"schemaVersion":1,"version":version,"platform":platform().unwrap(),"kind":"node","executable":executable,"args":["fixture.cjs"]}),
     );
     write(
         &root.join(".installed.json"),
-        json!({"schemaVersion":1,"source":source,"version":version,"platform":platform().unwrap()}),
+        json!({"schemaVersion":1,"version":version,"platform":platform().unwrap()}),
     );
 }
 
@@ -112,7 +104,7 @@ fn two_project_pins_global_commands_unknown_commands_and_override_delegate_corre
     fixture_engine(&home, "github-releases", "2.0.0");
     write(
         &home.join("config.json"),
-        json!({"launcher":{"cliSource":"github-releases","defaultCliVersion":"1.2.3"},"registry":"team"}),
+        json!({"launcher":{"defaultCliVersion":"1.2.3"},"registry":"team"}),
     );
     let a = dir.path().join("Project A");
     let b = dir.path().join("Project B");
@@ -126,7 +118,7 @@ fn two_project_pins_global_commands_unknown_commands_and_override_delegate_corre
     );
     write(
         &b.join(".uapkg/config.json"),
-        json!({"launcher":{"cliSource":"npm","defaultCliVersion":"99.0.0"}}),
+        json!({"launcher":{"defaultCliVersion":"99.0.0"}}),
     );
     selected(run(&home, &a, &["--offline", "install"]), "1.2.3");
     let body = selected(
@@ -294,7 +286,7 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
     );
     assert_eq!(
         context,
-        &json!({"schemaVersion":1,"launcherVersion":env!("CARGO_PKG_VERSION"),"launcherPath":launcher_path,"installMethod":"standalone","cliSource":"github-releases","globalSettingsState":"available","globalCliVersion":"1.2.3","projectCliVersion":"2.0.0","projectState":"pinned","overrideCliVersion":null,"selectedCliVersion":"2.0.0","selectionReason":"project-pin","engineKind":"node","offline":true})
+        &json!({"schemaVersion":1,"launcherVersion":env!("CARGO_PKG_VERSION"),"launcherPath":launcher_path,"installMethod":"standalone","globalSettingsState":"available","globalCliVersion":"1.2.3","projectCliVersion":"2.0.0","projectState":"pinned","overrideCliVersion":null,"selectedCliVersion":"2.0.0","selectionReason":"project-pin","engineKind":"node","offline":true})
     );
     let serialized = context.to_string();
     for forbidden in [
@@ -432,32 +424,6 @@ fn diagnostics_leave_pending_update_recovery_files_unchanged() {
     assert_eq!(fs::read(journal).unwrap(), before);
     assert!(backup.exists());
     assert!(!dir.path().join("uapkg-update.lock").exists());
-}
-
-#[test]
-fn cached_npm_engine_runs_without_npm_and_source_switch_does_not_reuse_github() {
-    let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join(".uapkg");
-    fixture_engine(&home, "github-releases", "1.2.3");
-    write(
-        &home.join("config.json"),
-        json!({"launcher":{"cliSource":"npm","defaultCliVersion":"1.2.3"}}),
-    );
-    let missing = run(&home, dir.path(), &["--offline", "install"]);
-    assert!(!missing.status.success());
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
-    fixture_engine(&home, "npm", "1.2.3");
-    let node_dir = dir.path().join("node-only");
-    link_node(&node_dir);
-    let output = Command::new(env!("CARGO_BIN_EXE_uapkg"))
-        .args(["--offline", "install"])
-        .current_dir(dir.path())
-        .env("HOME", dir.path())
-        .env("USERPROFILE", dir.path())
-        .env("PATH", &node_dir)
-        .output()
-        .unwrap();
-    selected(output, "1.2.3");
 }
 
 #[cfg(feature = "development")]
@@ -603,7 +569,7 @@ fn changing_the_default_delegates_configuration_writes_to_the_selected_engine() 
     let home = dir.path().join(".uapkg");
     fixture_engine(&home, "github-releases", "1.2.3");
     fixture_engine(&home, "github-releases", "2.0.0");
-    let global = json!({"launcher":{"cliSource":"github-releases","defaultCliVersion":"1.2.3"},"registry":"keep-this","term":{"quiet":true}});
+    let global = json!({"launcher":{"defaultCliVersion":"1.2.3"},"registry":"keep-this","term":{"quiet":true}});
     write(&home.join("config.json"), global.clone());
 
     // A CLI which only reports its arguments cannot mutate configuration. This

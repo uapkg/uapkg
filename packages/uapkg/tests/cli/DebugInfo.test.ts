@@ -25,7 +25,6 @@ function context() {
     launcherVersion: '0.1.0',
     launcherPath: path.join(os.tmpdir(), 'uapkg launcher', 'uapkg.exe'),
     installMethod: 'standalone',
-    cliSource: 'npm',
     globalSettingsState: 'available',
     globalCliVersion: '2.0.0',
     projectCliVersion: '3.0.0',
@@ -33,7 +32,7 @@ function context() {
     overrideCliVersion: UAPKG_BUILD_METADATA.packageVersion,
     selectedCliVersion: UAPKG_BUILD_METADATA.packageVersion,
     selectionReason: 'override',
-    engineKind: 'npm',
+    engineKind: 'node',
     offline: true,
   };
 }
@@ -109,12 +108,12 @@ describe('copyable diagnostic report', () => {
     expect(report).toContain(`Launcher path: ${context().launcherPath}`);
     expect(report).toContain(`CLI path: ${path.resolve(process.argv[1]!)}`);
     expect(report).toContain('Installation owner: standalone');
-    expect(report).toContain('CLI source: npm');
+    expect(report).not.toContain('CLI source:');
     expect(report).toContain('Global CLI version: 2.0.0');
     expect(report).toContain('Project CLI pin: 3.0.0');
     expect(report).toContain(`Explicit CLI override: ${UAPKG_BUILD_METADATA.packageVersion}`);
     expect(report).toContain('Selection reason: override');
-    expect(report).toContain('Engine kind: npm');
+    expect(report).toContain('Engine kind: node');
     expect(report).toContain('Offline: yes');
     expect(report).toContain(`Running Node: ${process.versions.node}`);
     expect(report).toContain('Node: 26.0.0');
@@ -130,7 +129,7 @@ describe('copyable diagnostic report', () => {
     async (raw) => {
       const f = fixture();
       write(path.join(f.profile, 'config.json'), {
-        launcher: { cliSource: 'github-releases', defaultCliVersion: '4.0.0' },
+        launcher: { defaultCliVersion: '4.0.0' },
       });
       const report = await DebugInfo.renderDebugInfo({ ...f, collect, environment: { UAPKG_LAUNCHER_CONTEXT: raw } });
       expect(report).toContain('Launcher context: unavailable (invalid or stale)');
@@ -145,17 +144,17 @@ describe('copyable diagnostic report', () => {
   it('uses only global launcher settings and skips plugins during direct-engine pin discovery', async () => {
     const f = fixture();
     write(path.join(f.profile, 'config.json'), {
-      launcher: { cliSource: 'npm', defaultCliVersion: '2.0.0' },
+      launcher: { defaultCliVersion: '2.0.0' },
       registry: 'private-registry',
     });
     write(path.join(f.cwd, 'uapkg.json'), { kind: 'project', uapkgVersion: '3.0.0' });
     const plugin = path.join(f.cwd, 'Plugins', 'PrivateProjectName');
     write(path.join(plugin, 'uapkg.json'), { kind: 'plugin', uapkgVersion: '99.0.0' });
     write(path.join(plugin, '.uapkg', 'config.json'), {
-      launcher: { cliSource: 'github-releases', defaultCliVersion: '99.0.0' },
+      launcher: { defaultCliVersion: '99.0.0' },
     });
     const report = await DebugInfo.renderDebugInfo({ ...f, cwd: plugin, collect, environment: {} });
-    expect(report).toContain('CLI source: npm');
+    expect(report).not.toContain('CLI source:');
     expect(report).toContain('Global CLI version: 2.0.0');
     expect(report).toContain('Project CLI pin: 3.0.0');
     expect(report).not.toMatch(/99\.0\.0|private-registry|PrivateProjectName/);
@@ -167,7 +166,7 @@ describe('copyable diagnostic report', () => {
 
   it('returns a partial report without exposing malformed configuration or collection failures', async () => {
     const f = fixture();
-    write(path.join(f.profile, 'config.json'), { launcher: { cliSource: 'private-invalid-source' } });
+    write(path.join(f.profile, 'config.json'), { launcher: { defaultCliVersion: 'private-invalid-source' } });
     write(path.join(f.cwd, 'uapkg.json'), { kind: 'project', uapkgVersion: 'private-invalid-pin' });
     const report = await DebugInfo.renderDebugInfo({
       ...f,
@@ -187,7 +186,7 @@ describe('copyable diagnostic report', () => {
     write(path.join(f.profile, 'config.json'), { launcher: null });
     const report = await DebugInfo.renderDebugInfo({ ...f, collect, environment: {} });
     expect(report).toContain('Global settings: unavailable');
-    expect(report).toContain('CLI source: unavailable');
+    expect(report).not.toContain('CLI source:');
   });
 
   it('removes control sequences and home paths from probe values', async () => {

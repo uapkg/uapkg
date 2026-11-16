@@ -7,6 +7,9 @@ jobs:
   native:
     uses: ./.github/workflows/_native.yml
 
+  launcher:
+    uses: ./.github/workflows/_launcher.yml
+
   verify:
     runs-on: ubuntu-latest
 

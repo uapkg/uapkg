@@ -1,6 +1,6 @@
 use crate::{
     archive, github,
-    model::{VERSION, exact_version, platform, read_json, relative_path},
+    model::{exact_version, platform, read_json, relative_path},
     storage::{ContextPaths, atomic_json, lock},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -202,65 +202,54 @@ pub fn ownership_instructions(method: &str) -> Result<()> {
 
 pub fn update(context: &ContextPaths, requested: Option<&str>) -> Result<()> {
     ownership_instructions(context.ownership())?;
-    let requested = requested.map(exact_version).transpose()?;
-    let client = github::client()?;
-    let current = exact_version(VERSION)?;
-    let mut selected: Option<github::VerifiedRelease> = None;
-    for version in github::release_versions(&client)? {
-        let verified = match github::release(&client, &version.to_string()) {
-            Ok(release) => release,
-            Err(error) if github::is_not_found(&error) => continue,
-            Err(error) => return Err(error),
-        };
-        let launcher = exact_version(&verified.release.launcher_version)?;
-        if let Some(requested) = &requested {
-            if &launcher != requested {
-                continue;
-            }
-        } else if !launcher.pre.is_empty() || launcher <= current {
-            continue;
-        }
-        if selected.as_ref().is_none_or(|old| {
-            exact_version(&old.release.launcher_version).is_ok_and(|old| launcher > old)
-        }) {
-            selected = Some(verified);
-        }
-    }
-    let Some(verified) = selected else {
-        if let Some(requested) = requested {
-            bail!(
-                "Launcher {requested} is not available in signed UAPKG CLI releases. No other version was installed."
-            );
-        }
-        println!("Launcher {VERSION} is up to date.");
+    let resolution = crate::catalog::resolve(
+        context,
+        "launcher",
+        requested.unwrap_or("latest"),
+        false,
+        true,
+    )?;
+    let current = exact_version(crate::model::VERSION)?;
+    if matches!(requested, None | Some("latest"))
+        && exact_version(&resolution.version)?
+            .cmp_precedence(&current)
+            .is_le()
+    {
+        crate::catalog::activate(context, "launcher", &resolution)?;
+        println!("The launcher is up to date.");
         return Ok(());
-    };
+    }
+    crate::catalog::emit(&resolution.messages);
+    let client = github::client()?;
+    let index = crate::catalog::index(context, "launcher", false)?
+        .context("No verified launcher index is available.")?;
+    index.supports(&resolution.version, platform()?)?;
     let directory = context
         .executable
         .parent()
         .context("Launcher has no installation directory.")?;
-    let stage = tempfile::Builder::new()
+    let temporary = tempfile::Builder::new()
         .prefix(".uapkg-update-")
-        .tempdir_in(directory)
-        .context(
-            "The launcher installation is not writable. Reinstall it in a directory you own.",
-        )?;
-    let artifact = verified.release.artifact("launcher", platform()?)?;
-    let archive_path = stage.path().join("launcher.tar.gz");
+        .tempdir_in(directory)?;
+    let archive_path = temporary.path().join("launcher.tar.gz");
     github::download_artifact(
         &client,
-        &verified.release.cli_version,
-        artifact,
+        "launcher",
+        &resolution.version,
+        platform()?,
         &archive_path,
     )?;
-    let unpacked = stage.path().join("unpacked");
-    archive::extract(&archive_path, &unpacked)?;
-    let next = unpacked.join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
+    let extracted = temporary.path().join("launcher");
+    archive::extract(&archive_path, &extracted)?;
+    let next = extracted.join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
     ensure!(
         next.is_file(),
-        "Launcher archive is missing its executable."
+        "Launcher archive does not contain its executable."
     );
-    replace_staged(context, &next, &verified.release.launcher_version)
+    replace_staged(context, &next, &resolution.version)?;
+    crate::catalog::activate(context, "launcher", &resolution)?;
+    crate::catalog::emit(&resolution.messages);
+    Ok(())
 }
 
 /// Complete a replacement after the caller has verified and extracted a signed

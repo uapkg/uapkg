@@ -96,7 +96,10 @@ console.log('Engine smoke passed: public exports, dynamic imports, TypeScript/es
 `;
 }
 
-export function smokeEngine(root: string, options: { keyring?: boolean; native?: boolean } = {}): void {
+export function smokeEngine(
+  root: string,
+  options: { keyring?: boolean; native?: boolean; launcher?: string } = {},
+): void {
   const engineRoot = path.resolve(root);
   const descriptor = options.native ? readJson<EngineDescriptor>(path.join(engineRoot, 'engine.json')) : undefined;
   const version = descriptor?.version ?? readJson<{ version: string }>(path.join(engineRoot, 'package.json')).version;
@@ -158,7 +161,7 @@ export function smokeEngine(root: string, options: { keyring?: boolean; native?:
       writeFileSync(probe, renderRuntimeSmoke(engineRoot, options.keyring ?? false));
       process.stdout.write(runChecked(command.executable, [probe], cwd, env));
     }
-    if (options.native) smokePackagedTerminal(engineRoot);
+    if (options.native && options.launcher) smokePackagedTerminal(engineRoot, options.launcher);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -1,7 +1,13 @@
 import path from 'node:path';
 import { CLI_ROOT, NPM_PACKAGE_ROOT, prepareNpmPackage, readJson } from '../../packages/uapkg/build/EnginePackage.ts';
-import { buildNativeArtifacts, installRuntimeDependencies, launcherVersionFromCargo } from './NativeBuild.ts';
-import { assembleCatalog, selectNativeCandidates } from './ReleaseArtifacts.ts';
+import {
+  buildNativeArtifacts,
+  buildLauncherArtifact,
+  installRuntimeDependencies,
+  launcherVersionFromCargo,
+} from './NativeBuild.ts';
+import { assembleRelease, selectNativeCandidates } from './ReleaseArtifacts.ts';
+import { assertProduct } from './ReleaseContract.ts';
 import { smokeEngine } from './Smoke.ts';
 
 export function parseOptions(args: string[]): { command: string; values: Map<string, string>; keyring: boolean } {
@@ -14,6 +20,7 @@ export function parseOptions(args: string[]): { command: string; values: Map<str
     '--input',
     '--launcher',
     '--launcher-version',
+    '--product',
     '--engine',
     '--package',
     '--npm-version',
@@ -46,21 +53,30 @@ export async function runRelease(args: string[]): Promise<void> {
   } else if (command === 'build-native') {
     const format = values.get('--format') ?? 'node';
     if (format !== 'node' && format !== 'sea') throw new Error('Engine format must be node or sea.');
-    await buildNativeArtifacts(required('--output'), required('--launcher'), format);
+    await buildNativeArtifacts(required('--output'), format);
+  } else if (command === 'build-launcher') {
+    await buildLauncherArtifact(required('--output'), required('--launcher'));
   } else if (command === 'smoke-native') {
-    smokeEngine(required('--engine'), { native: true, keyring });
+    smokeEngine(required('--engine'), {
+      native: true,
+      keyring,
+      launcher: values.get('--launcher') ?? process.env.UAPKG_SMOKE_LAUNCHER,
+    });
   } else if (command === 'smoke-npm') {
     const directory = path.resolve(values.get('--package') ?? NPM_PACKAGE_ROOT);
     installRuntimeDependencies(directory, values.get('--npm-version'));
     smokeEngine(directory, { keyring });
   } else if (command === 'assemble') {
-    const version = readJson<{ version: string }>(path.join(CLI_ROOT, 'package.json')).version;
-    assembleCatalog(required('--input'), required('--output'), version, required('--launcher-version'));
+    const product = required('--product');
+    assertProduct(product);
+    const version =
+      product === 'cli'
+        ? readJson<{ version: string }>(path.join(CLI_ROOT, 'package.json')).version
+        : launcherVersionFromCargo(path.resolve(CLI_ROOT, '../..'));
+    assembleRelease(required('--input'), required('--output'), product, version);
   } else if (command === 'select-native') {
     const version = readJson<{ version: string }>(path.join(CLI_ROOT, 'package.json')).version;
-    const launcherVersion =
-      values.get('--launcher-version') ?? launcherVersionFromCargo(path.resolve(CLI_ROOT, '../..'));
-    const evidence = selectNativeCandidates(required('--input'), required('--output'), version, launcherVersion);
+    const evidence = selectNativeCandidates(required('--input'), required('--output'), version);
     process.stdout.write(`Selected ${evidence.selectedFormat} engines for all six platforms.\n`);
   } else {
     throw new Error('Expected prepare-npm, build-native, smoke-native, smoke-npm, select-native, or assemble.');

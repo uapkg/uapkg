@@ -1,5 +1,12 @@
 # @uapkg/common-schema
 
+## 1.6.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/diagnostics@1.6.0
+
 ## 1.5.1
 
 ### Patch Changes

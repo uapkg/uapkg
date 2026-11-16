@@ -1,4 +1,4 @@
-import { PackageVersionSchema } from '@uapkg/common-schema';
+import { CliVersionSelectorSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 import { BaseManifestSchema } from '#package-manifest-schema/manifest/BaseManifestSchema.ts';
 import { DependencySchema } from '#package-manifest-schema/manifest/DependencySchema.ts';
@@ -25,8 +25,8 @@ export const ProjectPostinstallSchema = z
  */
 export const ProjectManifestSchema = BaseManifestSchema.extend({
   kind: z.literal('project'),
-  /** Exact CLI engine selected by the native launcher for this project. */
-  uapkgVersion: PackageVersionSchema.optional(),
+  /** CLI version or tracked alias selected by the native launcher for this project. */
+  uapkgVersion: CliVersionSelectorSchema.optional(),
   overrides: z.record(z.string(), DependencySchema).optional(),
   postinstall: ProjectPostinstallSchema.optional(),
   dev: z

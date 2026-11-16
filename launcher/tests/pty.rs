@@ -29,8 +29,10 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32)
     let node_name = if cfg!(windows) { "node.exe" } else { "node" };
     let launcher = root.join(launcher_name);
     fs::copy(env!("CARGO_BIN_EXE_uapkg"), &launcher).unwrap();
-    let engine = root.join("cli");
-    fs::create_dir(&engine).unwrap();
+    let engine = root
+        .join(".uapkg/engines/1.2.3")
+        .join(uapkg_launcher::model::platform().unwrap());
+    fs::create_dir_all(&engine).unwrap();
     let node = node_path();
     let bundled_node = engine.join(node_name);
     if fs::hard_link(&node, &bundled_node).is_err() {
@@ -55,8 +57,16 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32)
     .unwrap();
     fs::write(
         root.join("uapkg-install.json"),
-        json!({"schemaVersion":1,"installMethod":"standalone", "defaultCliVersion":"1.2.3", "bundledEngine":"cli"}).to_string(),
-    ).unwrap();
+        json!({"schemaVersion":1,"installMethod":"standalone", "defaultCliVersion":"1.2.3"})
+            .to_string(),
+    )
+    .unwrap();
+
+    fs::write(
+        engine.join(".installed.json"),
+        json!({"schemaVersion":1,"version":"1.2.3","platform":platform}).to_string(),
+    )
+    .unwrap();
 
     let pair = native_pty_system()
         .openpty(PtySize {

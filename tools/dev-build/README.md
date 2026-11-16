@@ -88,8 +88,8 @@ watching, and cleaning preserve configuration, caches, and authentication data
 in both profiles and leave the production executable and receipt unchanged.
 
 Launcher settings share the profile's `config.json` with other CLI settings.
-For example, `uapkg config set launcher.cliSource npm --global` selects the npm
-engine source for that profile, and `uapkg config get launcher.cliSource --global`
+For example, `uapkg config set launcher.defaultCliVersion latest --global` selects a tracked
+CLI default for that profile, and `uapkg config get launcher.defaultCliVersion --global`
 reads it. A development checkout binding continues to execute its local engine.
 
 Production and source execution use issuer `https://account.uapkg.dev/oauth`

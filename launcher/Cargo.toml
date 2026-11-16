@@ -1,11 +1,11 @@
 [package]
 name = "uapkg-launcher"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.100"
 publish = false
 license = "MIT"
-description = "Native UAPKG launcher and exact CLI version manager"
+description = "Native UAPKG launcher and verified CLI version manager"
 
 [[bin]]
 name = "uapkg"
@@ -17,10 +17,8 @@ development = []
 
 [dependencies]
 anyhow = "1.0.104"
-base64 = "0.23.1"
 flate2 = "1.1.11"
 minisign-verify = "0.3.0"
-node-semver = "2.2.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls", "system-proxy"] }
 self-replace = "1.5.1"
 semver = "1.0.28"

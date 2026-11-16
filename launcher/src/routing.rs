@@ -1,4 +1,4 @@
-use crate::model::exact_version;
+use crate::catalog::selector;
 use anyhow::{Context, Result, bail, ensure};
 use std::{
     ffi::OsString,
@@ -54,11 +54,11 @@ impl Invocation {
                     value.to_owned()
                 } else {
                     iter.next()
-                        .context("--cli-version requires an exact version.")?
+                        .context("--cli-version requires a version selector.")?
                         .into_string()
                         .map_err(|_| anyhow::anyhow!("CLI versions must be UTF-8."))?
                 };
-                exact_version(&value)?;
+                selector(&value)?;
                 override_version = Some(value);
             } else {
                 if matches!(text, "--registry" | "--config") {
@@ -178,13 +178,13 @@ pub fn discover_project(cwd: &Path) -> Result<Option<Project>> {
                 let version = match value.get("uapkgVersion") {
                     None => None,
                     Some(serde_json::Value::String(version)) => {
-                        exact_version(version).with_context(|| {
+                        selector(version).with_context(|| {
                             format!("Invalid uapkgVersion in {}.", manifest.display())
                         })?;
                         Some(version.clone())
                     }
                     Some(_) => bail!(
-                        "uapkgVersion in {} must be an exact version string.",
+                        "uapkgVersion in {} must be a CLI version selector.",
                         manifest.display()
                     ),
                 };
@@ -237,8 +237,9 @@ pub fn select(
     } else {
         None
     };
-    let version = default.context("No default CLI version is configured. Run `uapkg version default <exact-version>` or install a full UAPKG bundle.")?;
-    exact_version(version)?;
+    let version = default
+        .context("No default CLI version is configured. Run `uapkg version default latest`.")?;
+    selector(version)?;
     Ok(VersionSelection {
         version: version.to_owned(),
         reason: if invocation.scope() == Scope::Global {
