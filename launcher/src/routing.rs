@@ -159,6 +159,23 @@ pub struct VersionSelection {
     pub project: Option<ProjectSelection>,
 }
 
+impl VersionSelection {
+    pub(crate) fn install_reason(&self, resolved: &str) -> String {
+        let selection = match self.reason {
+            "override" => format!("The --cli-version option selects UAPKG CLI {resolved}"),
+            "project-pin" if self.version == resolved => {
+                format!("The project uses UAPKG CLI {resolved}")
+            }
+            "project-pin" => format!(
+                "The project's UAPKG CLI selection ({}) resolves to {resolved}",
+                self.version
+            ),
+            _ => format!("The global default selects UAPKG CLI {resolved}"),
+        };
+        format!("{selection}, which is not currently installed.")
+    }
+}
+
 pub fn discover_project(cwd: &Path) -> Result<Option<Project>> {
     for directory in cwd.ancestors() {
         let manifest = directory.join("uapkg.json");
@@ -249,4 +266,50 @@ pub fn select(
         },
         project,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_reason_explains_the_selection_and_exact_download() -> Result<()> {
+        let project = tempfile::tempdir()?;
+        let manifest = project.path().join("uapkg.json");
+        let reason = |args: &[&str], resolved_version: &str| -> Result<String> {
+            let invocation = Invocation::parse(args.iter().copied().map(OsString::from).collect())?;
+            let selection = select(&invocation, project.path(), Some("latest"))?;
+            Ok(selection.install_reason(resolved_version))
+        };
+        let global =
+            "The global default selects UAPKG CLI 1.7.0, which is not currently installed.";
+
+        fs::write(&manifest, r#"{"kind":"project"}"#)?;
+        assert_eq!(reason(&["install"], "1.7.0")?, global);
+
+        fs::write(&manifest, r#"{"kind":"project","uapkgVersion":"1.7.0"}"#)?;
+        assert_eq!(
+            reason(&["install"], "1.7.0")?,
+            "The project uses UAPKG CLI 1.7.0, which is not currently installed."
+        );
+        assert_eq!(reason(&["whoami"], "1.7.0")?, global);
+
+        for selector in ["latest", "1.7.0-beta.1"] {
+            fs::write(
+                &manifest,
+                serde_json::json!({"kind":"project","uapkgVersion":selector}).to_string(),
+            )?;
+            assert_eq!(
+                reason(&["install"], "1.7.0")?,
+                format!(
+                    "The project's UAPKG CLI selection ({selector}) resolves to 1.7.0, which is not currently installed."
+                )
+            );
+        }
+        assert_eq!(
+            reason(&["install", "--cli-version=latest"], "1.7.0")?,
+            "The --cli-version option selects UAPKG CLI 1.7.0, which is not currently installed."
+        );
+        Ok(())
+    }
 }

@@ -44,14 +44,28 @@ pub fn ensure_installed(
     version: &str,
     offline: bool,
 ) -> Result<InstalledEngine> {
+    ensure_installed_with_reason(context, version, offline, None)
+}
+
+pub(crate) fn ensure_installed_with_reason(
+    context: &ContextPaths,
+    version: &str,
+    offline: bool,
+    reason: Option<&str>,
+) -> Result<InstalledEngine> {
     exact_version(version)?;
     let target = platform()?;
     install_cached(context, version, offline, |stage| {
-        eprintln!("Installing UAPKG CLI {version} from github-releases...");
         let client = github::client()?;
         let index = crate::catalog::index(context, "cli", false)?
             .context("No verified CLI index is available.")?;
         index.supports(version, target)?;
+        let progress = format!("Installing UAPKG CLI {version}...");
+        if let Some(reason) = reason {
+            eprintln!("{reason}\n{progress}");
+        } else {
+            eprintln!("{progress}");
+        }
         let archive_path = stage.join("engine.tar.gz");
         github::download_artifact(&client, "cli", version, target, &archive_path)?;
         let root = stage.join("engine");

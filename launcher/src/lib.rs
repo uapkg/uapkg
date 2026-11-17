@@ -77,12 +77,14 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
             .messages
             .extend(catalog::launcher_notices(&context, invocation.offline)?);
     }
-    selection.version.clone_from(&resolution.version);
-    let installed = engines::ensure_installed(
+    let install_reason = selection.install_reason(&resolution.version);
+    let installed = engines::ensure_installed_with_reason(
         &context,
         &resolution.version,
         invocation.offline || debug_info,
+        Some(&install_reason),
     )?;
+    selection.version.clone_from(&resolution.version);
     if !debug_info {
         catalog::activate(&context, "cli", &resolution)?;
     }
