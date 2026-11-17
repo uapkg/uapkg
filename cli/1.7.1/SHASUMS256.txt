@@ -1,0 +1,7 @@
+81ef88218132b3a9a21bf4a4f78a5d89080c6d6a2eeb891098d24c97aee9e13d  uapkg-cli-1.7.1-darwin-arm64.tar.gz
+16a516d4a1dd620f6114d19c2bbe297babc17fa5984d528da8c6cedf06667b26  uapkg-cli-1.7.1-darwin-x64.tar.gz
+91d018bc3b9a83d85dab53ccf43d62411202a6174f33658dc1deee63009a2bcf  uapkg-cli-1.7.1-linux-arm64.tar.gz
+7e3c0bdc9fe3cd0fbe43af4d8c121db8b4a3ea1d9c6a264dc86804853ee9f5a6  uapkg-cli-1.7.1-linux-x64-musl.tar.gz
+5225895271fc975cf4125dfe5686b4491a155b5831cbb7451939c0cafa87589a  uapkg-cli-1.7.1-linux-x64.tar.gz
+f89829964a0a59a2a00a8f67c056450f5bbd16ecd52e388687165742d6d5f9c3  uapkg-cli-1.7.1-win-arm64.tar.gz
+9f361dc889cb4876f169cf8ee6925a8e90221953afff91278bb5794f3df97474  uapkg-cli-1.7.1-win-x64.tar.gz
