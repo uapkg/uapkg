@@ -30,8 +30,9 @@ fi
 "$driver" tools/release/BinaryAudit.ts "$UAPKG_SMOKE_LAUNCHER" linux-x64-musl dist/evidence/abi-launcher-linux-x64-musl.json
 export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/uapkg-no-secret-service
 export UAPKG_RELEASE_SMOKE_HEADLESS=1
+export UAPKG_RELEASE_SMOKE_REQUIRE_UNAVAILABLE=1
 "$driver" tools/release/runRelease.ts smoke-native --engine "$engine"
-unset UAPKG_RELEASE_SMOKE_HEADLESS DBUS_SESSION_BUS_ADDRESS
+unset UAPKG_RELEASE_SMOKE_HEADLESS UAPKG_RELEASE_SMOKE_REQUIRE_UNAVAILABLE DBUS_SESSION_BUS_ADDRESS
 dbus-run-session -- sh -eu -c '
   printf "%s" "uapkg-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets
   /work/dist/native/node/cli/runtime/node tools/release/runRelease.ts smoke-native --engine "/work/dist/native/$1/cli" --keyring

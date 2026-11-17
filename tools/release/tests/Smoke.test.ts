@@ -3,7 +3,67 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vite-plus/test';
-import { assertPackagedDiagnostics, renderInkSmoke } from '../Smoke.ts';
+import { assertPackagedDiagnostics, renderHeadlessCredentialSmoke, renderInkSmoke } from '../Smoke.ts';
+
+describe('headless credential-store qualification', () => {
+  function probe(requireUnavailable: boolean, failure = '') {
+    const scratch = mkdtempSync(path.join(os.tmpdir(), 'uapkg-headless-probe-'));
+    try {
+      const file = path.join(scratch, 'probe.mjs');
+      writeFileSync(
+        file,
+        `import assert from 'node:assert/strict';
+let roundTrips = 0;
+const failure = ${JSON.stringify(failure)};
+const api = { CredentialStore: class {
+  async assertAvailable() {
+    roundTrips += 1;
+    const unavailable = 'Secure operating-system credential storage is unavailable. UAPKG will not save login secrets in plaintext.';
+    if (failure === 'unavailable') throw new Error(unavailable);
+    if (failure === 'string') throw unavailable;
+    if (failure === 'native') throw new Error('Native module failed to load');
+  }
+}};
+${renderHeadlessCredentialSmoke()}
+assert.equal(roundTrips, 1);
+`,
+      );
+      const result = spawnSync(process.execPath, [file], {
+        env: { ...process.env, UAPKG_RELEASE_SMOKE_REQUIRE_UNAVAILABLE: requireUnavailable ? '1' : '' },
+        encoding: 'utf8',
+        timeout: 15_000,
+        windowsHide: true,
+      });
+      expect(result.error).toBeUndefined();
+      return result;
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+
+  it('accepts verified secure storage or the exact unavailable result on general headless hosts', () => {
+    for (const failure of ['', 'unavailable']) {
+      const result = probe(false, failure);
+      expect(result.status, result.stderr).toBe(0);
+    }
+  });
+
+  it('requires unavailable storage in explicitly isolated environments', () => {
+    const unavailable = probe(true, 'unavailable');
+    expect(unavailable.status, unavailable.stderr).toBe(0);
+    const available = probe(true);
+    expect(available.status).not.toBe(0);
+    expect(available.stderr).toContain('must exercise unavailable secure storage');
+  });
+
+  it.each([false, true])('rejects unrelated errors and non-Error failures with strict isolation=%s', (strict) => {
+    for (const failure of ['native', 'string']) {
+      const result = probe(strict, failure);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('must either pass a secure round-trip');
+    }
+  });
+});
 
 describe('packaged diagnostics with and without system utilities', () => {
   const expected = { cliPath: '/engine/dist/cli.js', secret: 'private-test-value', utilitiesAvailable: true };

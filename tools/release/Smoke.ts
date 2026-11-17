@@ -76,6 +76,25 @@ assert.equal(rawModes.includes(true), true); assert.equal(rawModes.at(-1), false
 `;
 }
 
+/** Headless hosts may provide secure kernel storage even when D-Bus is absent. */
+export function renderHeadlessCredentialSmoke(): string {
+  return `let secureStorageUnavailable = false;
+try {
+  await new api.CredentialStore(undefined, 'uapkg.cli.release-smoke-headless').assertAvailable();
+} catch (error) {
+  assert.equal(
+    error instanceof Error ? error.message : undefined,
+    'Secure operating-system credential storage is unavailable. UAPKG will not save login secrets in plaintext.',
+    'Headless credential storage must either pass a secure round-trip or report its supported unavailable result.',
+  );
+  secureStorageUnavailable = true;
+}
+if (process.env.UAPKG_RELEASE_SMOKE_REQUIRE_UNAVAILABLE === '1') {
+  assert.equal(secureStorageUnavailable, true, 'The isolated credential-store probe must exercise unavailable secure storage.');
+}
+`;
+}
+
 export function renderRuntimeSmoke(engineRoot: string, keyring: boolean, virtual = false): string {
   return `import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -114,10 +133,7 @@ if (process.env.UAPKG_RELEASE_SMOKE_HEADLESS === '1') {
   // A missing service must not be confused with an unloadable musl native addon.
   const keyring = await import(pathToFileURL(require.resolve('@napi-rs/keyring')).href);
   assert.equal(typeof (keyring.Entry ?? keyring.default?.Entry), 'function');
-  await assert.rejects(
-    new api.CredentialStore(undefined, 'uapkg.cli.release-smoke-headless').assertAvailable(),
-    /Secure operating-system credential storage is unavailable.*will not save login secrets in plaintext/,
-  );
+  ${renderHeadlessCredentialSmoke()}
 }
 console.log('Engine smoke passed: public exports, dynamic imports, TypeScript/esbuild, browser assets, Ink input/render, Git/filesystem${keyring ? ', secure keyring' : ''}.');
 `;

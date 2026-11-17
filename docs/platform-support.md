@@ -50,14 +50,21 @@ evidence when evaluating a distribution outside the tested baseline.
 
 Linux needs the runtime libraries identified by that evidence, including
 `libstdc++`, `libgcc` and `libatomic`, plus CA certificates and Git for network and
-Git operations. Secure login storage needs a working D-Bus session and Secret
-Service provider, such as GNOME Keyring. Commands that do not need credentials
-can run headlessly; login reports unavailable secure storage and does not save
-secrets in plaintext.
+Git operations. On Linux, the pinned native credential binding first tries a
+Secret Service provider over D-Bus, such as GNOME Keyring, then falls back to the
+protected Linux kernel keyring when available. Secure login can therefore work
+headlessly without a desktop secret service. If neither backend is available,
+login reports unavailable secure storage and does not save secrets in plaintext.
+Commands that do not need credentials remain usable. See the
+[pinned binding's Linux backend selection](https://github.com/Brooooooklyn/keyring-node/blob/e46be75c3ba8d5fde6b88a17c6153b87ffe4b946/src/linux_credential_builder.rs).
 
 The container qualification commands grant Docker's `IPC_LOCK` capability to
 GNOME Keyring so its daemon can lock secret memory. Normal CLI operations do not
 require running a privileged container.
+The Alpine negative test uses an unavailable D-Bus address and Docker's default
+kernel-keyring restrictions to verify refusal when neither secure backend is
+available. A missing D-Bus service alone does not establish that condition on a
+normal Linux host.
 
 ## Windows names and musl release transition
 
