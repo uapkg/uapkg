@@ -1,5 +1,16 @@
 # @uapkg/config
 
+## 1.7.1
+
+### Patch Changes
+
+- [`88a9296`](https://github.com/uapkg/uapkg/commit/88a92963fcb4f2055ffa6c6b85c5817c95fdcd74) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Add global preferences for automatic launcher and CLI updates. Print launcher notices after command output with a blank line before the footer.
+
+- Updated dependencies []:
+  - @uapkg/common@1.7.1
+  - @uapkg/common-schema@1.7.1
+  - @uapkg/diagnostics@1.7.1
+
 ## 1.7.0
 
 ### Patch Changes

@@ -125,12 +125,14 @@ separate future work. The launcher does not calculate this interval, interpret a
 deadline, reject old policy by age, or infer replacement from a missing entry/404.
 Published metadata remains authoritative even when stale.
 
-`latest` preserves update-tracking intent. Ordinary commands can notify about a
-new stable release but do not automatically advance an installed stable CLI or
-rewrite a project pin. Updates are explicit. Offline or site-unavailable operation
-uses last verified metadata and installed versions; known replacements apply, and
-a required version missing locally fails clearly. Preview replacements are reported
-as requested and resolved versions without corrupting machine-readable stdout.
+`latest` preserves update-tracking intent. Eligible commands check the global CLI
+for a new stable release at most once every 24 hours and advance its active
+version after verifying and installing the update. The configured selector and
+project pins keep their values. Set `launcher.autoCLIUpdate` to `false` to receive
+notices and install updates manually. Offline or site-unavailable operation uses
+the last verified metadata and installed versions. Known replacements apply, and a
+required version missing locally fails clearly. Preview replacement notices report
+the requested and resolved versions on stderr.
 
 ## Signing and trust
 

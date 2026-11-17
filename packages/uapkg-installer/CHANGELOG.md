@@ -1,5 +1,20 @@
 # @uapkg/installer
 
+## 1.7.1
+
+### Patch Changes
+
+- Updated dependencies [[`88a9296`](https://github.com/uapkg/uapkg/commit/88a92963fcb4f2055ffa6c6b85c5817c95fdcd74)]:
+  - @uapkg/config@1.7.1
+  - @uapkg/common@1.7.1
+  - @uapkg/common-schema@1.7.1
+  - @uapkg/diagnostics@1.7.1
+  - @uapkg/package-claims@1.7.1
+  - @uapkg/package-manifest@1.7.1
+  - @uapkg/package-manifest-schema@1.7.1
+  - @uapkg/registry-core@1.7.1
+  - @uapkg/registry-schema@1.7.1
+
 ## 1.7.0
 
 ### Patch Changes
