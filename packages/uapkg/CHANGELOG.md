@@ -1,5 +1,31 @@
 # uapkg
 
+## 1.7.0
+
+### Minor Changes
+
+- [`cfe8d3b`](https://github.com/uapkg/uapkg/commit/cfe8d3b49364d3c06e8988cb87fca704c0abb13e) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Add standalone Alpine Linux x64 support using official prebuilt Node binaries,
+  and rename Windows distribution targets to `win-x64` and `win-arm64`.
+  The transition requires the new launcher and a CLI release using the new target
+  names. Historical archives and signed release records retain their original names.
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/common@1.7.0
+  - @uapkg/common-schema@1.7.0
+  - @uapkg/config@1.7.0
+  - @uapkg/diagnostics@1.7.0
+  - @uapkg/diagnostics-format@1.7.0
+  - @uapkg/installer@1.7.0
+  - @uapkg/log@1.7.0
+  - @uapkg/pack@1.7.0
+  - @uapkg/package-claims@1.7.0
+  - @uapkg/package-manifest@1.7.0
+  - @uapkg/package-manifest-schema@1.7.0
+  - @uapkg/registry-core@1.7.0
+  - @uapkg/registry-schema@1.7.0
+
 ## 1.6.0
 
 ### Minor Changes

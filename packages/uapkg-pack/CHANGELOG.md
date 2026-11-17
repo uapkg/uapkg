@@ -1,5 +1,13 @@
 # @uapkg/pack
 
+## 1.7.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/diagnostics@1.7.0
+  - @uapkg/log@1.7.0
+
 ## 1.6.0
 
 ### Patch Changes

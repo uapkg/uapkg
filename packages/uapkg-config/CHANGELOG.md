@@ -1,5 +1,14 @@
 # @uapkg/config
 
+## 1.7.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/common@1.7.0
+  - @uapkg/common-schema@1.7.0
+  - @uapkg/diagnostics@1.7.0
+
 ## 1.6.0
 
 ### Patch Changes
