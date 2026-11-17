@@ -14,11 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: win32-x64
+          - platform: win-x64
             runner: windows-2025
             target: x86_64-pc-windows-msvc
             executable: uapkg.exe
-          - platform: win32-arm64
+          - platform: win-arm64
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             executable: uapkg.exe
@@ -38,6 +38,10 @@ jobs:
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             executable: uapkg
+          - platform: linux-x64-musl
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            executable: uapkg
     env:
       UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
       UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
@@ -49,18 +53,31 @@ jobs:
           node-version-file: .node-version
           run-install: false
       - run: vp install --frozen-lockfile
+      - name: Install the musl linker
+        if: matrix.platform == 'linux-x64-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Install pinned Rust toolchain
         working-directory: launcher
         run: rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy --target ${{ matrix.target }}
       - run: vp run launcher:format:check
-      - run: vp run launcher:lint
-      - run: vp run launcher:test
-      - run: vp run launcher:test -- --features development
+      - run: vp run launcher:lint -- --target ${{ matrix.target }}
+      - run: vp run launcher:test -- --target ${{ matrix.target }}
+      - run: vp run launcher:test -- --features development --target ${{ matrix.target }}
       - name: Build release launcher
         working-directory: launcher
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package only the launcher
-        run: vp exec node tools/release/runRelease.ts build-launcher --output dist/native/launcher --launcher launcher/target/${{ matrix.target }}/release/${{ matrix.executable }}
+        run: vp exec node tools/release/runRelease.ts build-launcher --output dist/native/launcher --launcher launcher/target/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }}
+      - name: Inspect executable architecture and Linux ABI
+        if: runner.os != 'macOS'
+        run: vp exec node tools/release/BinaryAudit.ts launcher/target/${{ matrix.target }}/release/${{ matrix.executable }} '${{ matrix.platform }}' dist/evidence/abi-launcher.json
+      - name: Verify the static musl launcher in clean Alpine
+        if: matrix.platform == 'linux-x64-musl'
+        run: |
+          docker run --rm --network none -v "$PWD:/work:ro" alpine:3.22.2@sha256:4b7ce07002c69e8f3d704a9c5d6fd3053be500b7f1c69fc0d80990c2ad8dd412 sh -eu -c '
+            test "$(/work/launcher/target/x86_64-unknown-linux-musl/release/uapkg launcher --platform)" = linux-x64-musl
+            /work/launcher/target/x86_64-unknown-linux-musl/release/uapkg launcher --version
+          '
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: native-launcher-${{ matrix.platform }}
@@ -69,3 +86,10 @@ jobs:
             dist/native/launcher/*.json
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@v7.0.2
+        if: always() && runner.os != 'macOS'
+        with:
+          name: launcher-qualification-${{ matrix.platform }}
+          path: dist/evidence/*.json
+          if-no-files-found: error
+          retention-days: 90

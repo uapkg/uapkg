@@ -12,18 +12,42 @@ permissions:
   contents: read
 
 jobs:
+  official-node:
+    name: Verify official Node (${{ matrix.platform }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [win-x64, win-arm64, darwin-x64, darwin-arm64, linux-x64, linux-arm64, linux-x64-musl]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - name: Authenticate the pinned official Node runtime
+        run: vp exec node tools/release/OfficialNode.ts provision '${{ matrix.platform }}' dist/official-node
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: official-node-${{ matrix.platform }}
+          path: dist/official-node/*
+          if-no-files-found: error
+          retention-days: 7
+
   native:
     name: ${{ matrix.platform }}
+    needs: official-node
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: win32-x64
+          - platform: win-x64
             runner: windows-2025
             target: x86_64-pc-windows-msvc
             executable: uapkg.exe
-          - platform: win32-arm64
+          - platform: win-arm64
             runner: windows-11-arm
             target: aarch64-pc-windows-msvc
             executable: uapkg.exe
@@ -53,6 +77,12 @@ jobs:
           cache: true
           run-install: false
       - run: vp install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: official-node-${{ matrix.platform }}
+          path: dist/official-node
+      - name: Activate the authenticated official runtime
+        run: vp exec node tools/release/OfficialNode.ts activate dist/official-node dist/verified-runtime
       - name: Install pinned Rust toolchain for the independent terminal harness
         if: inputs.smoke-launcher-version != ''
         working-directory: tools/release/terminal-smoke
@@ -63,7 +93,7 @@ jobs:
         env:
           SMOKE_LAUNCHER_VERSION: ${{ inputs.smoke-launcher-version }}
         run: |
-          vp exec node tools/release/fetchSmokeLauncher.ts "$SMOKE_LAUNCHER_VERSION" dist/smoke-launcher
+          "$UAPKG_OFFICIAL_NODE" tools/release/fetchSmokeLauncher.ts "$SMOKE_LAUNCHER_VERSION" dist/smoke-launcher
           node -e 'console.log("UAPKG_SMOKE_LAUNCHER=" + require("node:path").resolve("dist/smoke-launcher", process.platform === "win32" ? "uapkg.exe" : "uapkg"))' >> "$GITHUB_ENV"
       - name: Build workspace libraries
         run: vp run --cache -w pack:libraries
@@ -75,10 +105,22 @@ jobs:
         if: matrix.platform == 'linux-x64'
         run: vp run release:smoke-npm -- --package packages/uapkg/package --npm-version 11.12.1
       - name: Build native archives
-        run: vp run release:native -- --format node --output dist/native/node
+        shell: bash
+        run: '"$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts build-native --format node --output dist/native/node'
       - name: Prepare Linux credential-store service
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus-x11 libsecret-1-0
+      - name: Inspect executable architecture and Linux ABI
+        if: runner.os != 'macOS'
+        shell: bash
+        run: '"$UAPKG_OFFICIAL_NODE" tools/release/BinaryAudit.ts dist/native/node/cli "${{ matrix.platform }}" dist/evidence/abi-node.json'
+      - name: Verify headless Linux authentication policy
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          DBUS_SESSION_BUS_ADDRESS: unix:path=/tmp/uapkg-no-secret-service
+          UAPKG_RELEASE_SMOKE_HEADLESS: '1'
+        run: '"$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts smoke-native --engine dist/native/node/cli'
       - name: Exercise standalone runtime on Linux
         if: runner.os == 'Linux'
         shell: bash
@@ -101,13 +143,19 @@ jobs:
       - name: Build SEA candidate
         id: sea-build
         continue-on-error: true
-        run: vp run release:native -- --format sea --output dist/native/sea
+        shell: bash
+        run: '"$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts build-native --format sea --output dist/native/sea'
       - name: Qualify SEA on Linux
         id: sea-linux
         if: steps.sea-build.outcome == 'success' && runner.os == 'Linux'
         continue-on-error: true
         shell: bash
         run: |
+          "$UAPKG_OFFICIAL_NODE" tools/release/BinaryAudit.ts dist/native/sea/cli '${{ matrix.platform }}' dist/evidence/abi-sea.json
+          for addon in dist/native/sea/runtime-package/node_modules/@napi-rs/keyring-*/*.node; do
+            "$UAPKG_OFFICIAL_NODE" tools/release/BinaryAudit.ts "$addon" '${{ matrix.platform }}' "dist/evidence/abi-sea-$(basename "$addon").json"
+          done
+          DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/uapkg-no-secret-service UAPKG_RELEASE_SMOKE_HEADLESS=1 "$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts smoke-native --engine dist/native/sea/cli
           dbus-run-session -- bash -euo pipefail -c '
             printf "%s" "uapkg-ci-keyring" | gnome-keyring-daemon --unlock --components=secrets
             vp run release:smoke-native -- --engine dist/native/sea/cli --keyring
@@ -116,7 +164,15 @@ jobs:
         id: sea-other
         if: steps.sea-build.outcome == 'success' && runner.os != 'Linux'
         continue-on-error: true
-        run: vp run release:smoke-native -- --engine dist/native/sea/cli --keyring
+        shell: bash
+        run: |
+          if [ '${{ runner.os }}' = Windows ]; then
+            "$UAPKG_OFFICIAL_NODE" tools/release/BinaryAudit.ts dist/native/sea/cli '${{ matrix.platform }}' dist/evidence/abi-sea.json
+            for addon in dist/native/sea/runtime-package/node_modules/@napi-rs/keyring-*/*.node; do
+              "$UAPKG_OFFICIAL_NODE" tools/release/BinaryAudit.ts "$addon" '${{ matrix.platform }}' "dist/evidence/abi-sea-$(basename "$addon").json"
+            done
+          fi
+          "$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts smoke-native --engine dist/native/sea/cli --keyring
       - uses: actions/upload-artifact@v7.0.2
         if: steps.sea-build.outcome == 'success' && (steps.sea-linux.outcome == 'success' || steps.sea-other.outcome == 'success')
         with:
@@ -126,10 +182,98 @@ jobs:
             dist/native/sea/*.json
           if-no-files-found: error
           retention-days: 7
+      - name: Retain runtime provenance and ABI evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: qualification-${{ matrix.platform }}
+          path: |
+            dist/official-node/node-provenance.json
+            dist/official-node/SHASUMS256.txt.asc
+            dist/evidence/*.json
+          if-no-files-found: error
+          retention-days: 90
+
+  musl:
+    name: linux-x64-musl
+    needs: official-node
+    runs-on: ubuntu-24.04
+    env:
+      UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+      UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
+      SMOKE_LAUNCHER_VERSION: ${{ inputs.smoke-launcher-version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: official-node-linux-x64-musl
+          path: dist/official-node/linux-x64-musl
+      - run: vp run --cache -w pack:libraries
+      - run: vp run --cache -w cli:build -- --production
+      - name: Prepare the musl launcher and independent terminal harness
+        shell: bash
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup toolchain install 1.100.0 --profile minimal --target x86_64-unknown-linux-musl
+          cargo +1.100.0 test --manifest-path tools/release/terminal-smoke/Cargo.toml --target x86_64-unknown-linux-musl --locked --no-run --message-format=json > "$RUNNER_TEMP/terminal-smoke.jsonl"
+          mkdir -p dist/terminal-smoke dist/smoke-launcher
+          harness="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "packaged" and .profile.test == true) | .executable // empty' "$RUNNER_TEMP/terminal-smoke.jsonl")"
+          test -n "$harness"
+          cp "$harness" dist/terminal-smoke/packaged
+          if [ -z "$SMOKE_LAUNCHER_VERSION" ]; then
+            cargo +1.100.0 build --manifest-path launcher/Cargo.toml --release --locked --target x86_64-unknown-linux-musl
+            cp launcher/target/x86_64-unknown-linux-musl/release/uapkg dist/smoke-launcher/uapkg
+          fi
+      - name: Build the pinned Alpine qualification image
+        run: docker build --target build -t uapkg-musl-build -f tools/release/alpine/Dockerfile .
+      - name: Build the bundled official Node candidate on musl
+        run: docker run --rm -v "$PWD:/work" -e UAPKG_RELEASE_PUBLIC_KEY -e SMOKE_LAUNCHER_VERSION uapkg-musl-build sh tools/release/alpine/build.sh node
+      - name: Qualify clean Alpine runtime, credentials, and real terminal behavior
+        # GNOME Keyring locks secret memory; no privileged container or extra host access is needed.
+        run: docker run --rm --network none --cap-add IPC_LOCK -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/smoke.sh node
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: candidate-node-linux-x64-musl
+          path: |
+            dist/native/node/*.tar.gz
+            dist/native/node/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Build and qualify SEA on musl
+        id: sea
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/build.sh sea
+          docker run --rm --network none --cap-add IPC_LOCK -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/smoke.sh sea
+      - uses: actions/upload-artifact@v7.0.2
+        if: steps.sea.outcome == 'success'
+        with:
+          name: candidate-sea-linux-x64-musl
+          path: |
+            dist/native/sea/*.tar.gz
+            dist/native/sea/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain musl runtime provenance and ABI evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: qualification-linux-x64-musl
+          path: |
+            dist/official-node/linux-x64-musl/node-provenance.json
+            dist/official-node/linux-x64-musl/SHASUMS256.txt.asc
+            dist/evidence/*.json
+          if-no-files-found: error
+          retention-days: 90
 
   select-format:
     name: Select one qualified format for all platforms
-    needs: native
+    needs: [native, musl]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1

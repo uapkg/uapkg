@@ -8,6 +8,7 @@ import {
   artifactName,
   assertExactVersion,
   type ReleasePlatform,
+  type CurrentReleasePlatform,
   type ReleaseProduct,
 } from './ReleaseContract.ts';
 export {
@@ -58,11 +59,42 @@ const tar = require('tar') as {
   ): Promise<void>;
 };
 
-export function currentPlatform(): ReleasePlatform {
-  const platform = `${process.platform}-${process.arch}`;
+interface RuntimeReport {
+  header?: { glibcVersionRuntime?: string };
+  sharedObjects?: string[];
+}
+
+/** Node and npm keep their win32 name; only UAPKG distribution identities use win. */
+export function platformForRuntime(os: string, arch: string, report?: RuntimeReport): CurrentReleasePlatform {
+  let platform = `${os === 'win32' ? 'win' : os}-${arch}`;
+  if (os === 'linux') {
+    const glibc = Boolean(report?.header?.glibcVersionRuntime);
+    const musl = report?.sharedObjects?.some((library) => /(?:^|\/)ld-musl-[^/]+\.so\.1$/.test(library)) ?? false;
+    if (glibc === musl) throw new Error('Cannot identify the Linux runtime libc from its Node diagnostic report.');
+    if (musl) platform += '-musl';
+  }
   if (!(PLATFORMS as readonly string[]).includes(platform))
     throw new Error(`Unsupported release platform ${platform}.`);
-  return platform as ReleasePlatform;
+  return platform as CurrentReleasePlatform;
+}
+
+export function currentPlatform(): CurrentReleasePlatform {
+  const report = process.platform === 'linux' ? process.report?.getReport() : undefined;
+  return platformForRuntime(process.platform, process.arch, report as RuntimeReport | undefined);
+}
+
+export function platformForRustTarget(target: string): CurrentReleasePlatform {
+  const platforms: Record<string, CurrentReleasePlatform> = {
+    'x86_64-pc-windows-msvc': 'win-x64',
+    'aarch64-pc-windows-msvc': 'win-arm64',
+    'x86_64-apple-darwin': 'darwin-x64',
+    'aarch64-apple-darwin': 'darwin-arm64',
+    'x86_64-unknown-linux-gnu': 'linux-x64',
+    'aarch64-unknown-linux-gnu': 'linux-arm64',
+    'x86_64-unknown-linux-musl': 'linux-x64-musl',
+  };
+  if (!Object.hasOwn(platforms, target)) throw new Error(`Unsupported launcher target ${target}.`);
+  return platforms[target]!;
 }
 
 /** Archives contain files/directories only, matching the launcher's safe extractor. */

@@ -6,7 +6,7 @@ import {
   CHECKSUM_FILE,
   CHECKSUM_SIGNATURE,
   parseChecksums,
-  validateEntry,
+  validateCurrentEntry,
   type CatalogEntry,
 } from './ReleaseContract.ts';
 
@@ -31,7 +31,7 @@ export function publishCatalog(
   adapter: CatalogAdapter,
   attempts = 5,
 ): { changed: boolean; attempts: number } {
-  const entry = validateEntry(record.entry);
+  const entry = validateCurrentEntry(record.entry);
   parseChecksums(record.checksums.toString('utf8'), entry.product, entry.version, entry.files);
   if (!record.signature.length) throw new Error('A verified checksum signature is required.');
   const files = new Map<string, Buffer>([

@@ -17,14 +17,18 @@ use storage::ContextPaths;
 pub fn run(args: Vec<OsString>) -> Result<i32> {
     let invocation = Invocation::parse(args)?;
     let debug_info = diagnostics::requested(&invocation.args);
-    // This pure version check also validates staged update executables without
-    // loading a profile or entering update recovery recursively.
-    if invocation.command.as_deref() == Some("launcher")
-        && !debug_info
-        && invocation.command_args()? == ["--version"]
-    {
-        println!("{VERSION}");
-        return Ok(0);
+    // Build identity checks validate staged executables without loading a
+    // profile or entering update recovery recursively.
+    if invocation.command.as_deref() == Some("launcher") && !debug_info {
+        let args = invocation.command_args()?;
+        if args == ["--version"] {
+            println!("{VERSION}");
+            return Ok(0);
+        }
+        if args == ["--platform"] {
+            println!("{}", model::platform()?);
+            return Ok(0);
+        }
     }
     let context = ContextPaths::load()?;
     if !debug_info {
@@ -105,7 +109,7 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
     match (invocation.command.as_deref(), args.as_slice()) {
         (Some("launcher"), ["--help"] | ["-h"] | []) => {
             println!(
-                "UAPKG launcher\n\n  launcher --version\n  version install <version-selector>\n  version list\n  version default [version-selector]\n  version current\n  self-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
+                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  version install <version-selector>\n  version list\n  version default [version-selector]\n  version current\n  self-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
             );
         }
         (Some("version"), ["install", version]) => {

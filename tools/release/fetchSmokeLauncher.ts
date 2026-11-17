@@ -30,7 +30,10 @@ export async function fetchSmokeLauncher(version: string, output: string): Promi
         `https://github.com/uapkg/uapkg/releases/download/${encodeURIComponent(releaseTag('launcher', version))}/${encodeURIComponent(name)}`,
         { signal: AbortSignal.timeout(120_000) },
       );
-      if (!response.ok || !response.body) throw new Error(`Could not download ${name}: HTTP ${response.status}.`);
+      if (!response.ok || !response.body)
+        throw new Error(
+          `Could not download ${name}: HTTP ${response.status}. Publish a launcher for the current platform matrix before qualifying the CLI release.`,
+        );
       const limit = name === archive ? 64 * 1024 * 1024 : 64 * 1024;
       const chunks: Uint8Array[] = [];
       let length = 0;
@@ -76,6 +79,8 @@ export async function fetchSmokeLauncher(version: string, output: string): Promi
     chmodSync(path.join(output, executable), 0o755);
     if (runChecked(path.join(path.resolve(output), executable), ['launcher', '--version'], output).trim() !== version)
       throw new Error('Downloaded launcher version differs.');
+    if (runChecked(path.join(path.resolve(output), executable), ['launcher', '--platform'], output).trim() !== platform)
+      throw new Error('Downloaded launcher platform differs from the qualification runtime.');
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -11,7 +11,7 @@ import {
   artifactName,
   parseChecksums,
   releaseTag,
-  validateEntry,
+  validateCurrentEntry,
   type CatalogEntry,
   type ReleaseProduct,
 } from './ReleaseContract.ts';
@@ -195,7 +195,7 @@ export function verifyPublishedRelease(
       throw new Error(`Published archive checksum mismatch: ${name}`);
     rmSync(file);
   }
-  return validateEntry({
+  return validateCurrentEntry({
     schemaVersion: 1,
     product,
     version,

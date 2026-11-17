@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
 import { publishCatalog, type CatalogAdapter, type CatalogRecord } from '../publishCatalog.ts';
-import { artifactName, PLATFORMS, releaseTag, type ReleaseProduct } from '../ReleaseContract.ts';
+import { artifactName, HISTORICAL_PLATFORMS, PLATFORMS, releaseTag, type ReleaseProduct } from '../ReleaseContract.ts';
 const directories: string[] = [];
 function temporary() {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'uapkg-catalog-test-'));
@@ -64,6 +64,13 @@ function remote() {
   };
 }
 describe('durable release catalog publication', () => {
+  it('does not publish a historical six-target matrix as a new release', () => {
+    const target = remote();
+    const historical = record();
+    historical.entry.files = [...HISTORICAL_PLATFORMS];
+    expect(() => publishCatalog(historical, target.adapter)).toThrow('current release platform matrix');
+    expect(existsSync(path.join(target.directory, 'cli/1.6.0'))).toBe(false);
+  });
   it('publishes exact original metadata once and rejects replacement bytes', () => {
     const target = remote();
     const published = record();

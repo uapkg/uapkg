@@ -12,6 +12,20 @@ pub const PLATFORMS: &[&str] = &[
     "darwin-x64",
     "linux-arm64",
     "linux-x64",
+    "linux-x64-musl",
+    "win-arm64",
+    "win-x64",
+];
+// Historical signed metadata keeps its original identifiers. Recognizing those
+// records does not make them aliases for the current executable's platform.
+pub const KNOWN_PLATFORMS: &[&str] = &[
+    "darwin-arm64",
+    "darwin-x64",
+    "linux-arm64",
+    "linux-x64",
+    "linux-x64-musl",
+    "win-arm64",
+    "win-x64",
     "win32-arm64",
     "win32-x64",
 ];
@@ -105,7 +119,7 @@ impl Index {
             );
             for platform in &release.files {
                 ensure!(
-                    PLATFORMS.contains(&platform.as_str()) && platforms.insert(platform),
+                    KNOWN_PLATFORMS.contains(&platform.as_str()) && platforms.insert(platform),
                     "Invalid or duplicate release platform."
                 );
             }
@@ -460,6 +474,43 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn historical_and_current_catalogs_coexist_without_platform_aliases() {
+        let mut index: Index =
+            serde_json::from_str(include_str!("../../tools/release/fixtures/index.json")).unwrap();
+        index.releases.push(Release {
+            version: "3.0.0".into(),
+            date: "2026-11-17".into(),
+            files: PLATFORMS
+                .iter()
+                .map(|platform| (*platform).into())
+                .collect(),
+        });
+        index.validate("cli").unwrap();
+        for platform in ["win-x64", "win-arm64", "linux-x64-musl"] {
+            index.supports("3.0.0", platform).unwrap();
+            let error = index.supports("2.0.0", platform).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                format!("Release 2.0.0 is unavailable for {platform}.")
+            );
+        }
+        for platform in ["win32-x64", "win32-arm64"] {
+            index.supports("2.0.0", platform).unwrap();
+            assert!(index.supports("3.0.0", platform).is_err());
+            assert!(github::artifact_name("cli", "3.0.0", platform).is_err());
+        }
+        for platform in ["linux-arm64-musl", "win-ia32", "../../escape"] {
+            let mut invalid = index.clone();
+            invalid.releases[0].files.push(platform.into());
+            assert!(invalid.validate("cli").is_err());
+        }
+        let duplicate = index.releases[0].files[0].clone();
+        index.releases[0].files.push(duplicate);
+        assert!(index.validate("cli").is_err());
+    }
+
     #[test]
     fn offline_latest_notifies_without_advancing_until_explicit_installation() {
         let directory = tempfile::tempdir().unwrap();

@@ -8,14 +8,29 @@ use std::{
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn platform() -> Result<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("windows", "x86_64") => Ok("win32-x64"),
-        ("windows", "aarch64") => Ok("win32-arm64"),
-        ("macos", "x86_64") => Ok("darwin-x64"),
-        ("macos", "aarch64") => Ok("darwin-arm64"),
-        ("linux", "x86_64") => Ok("linux-x64"),
-        ("linux", "aarch64") => Ok("linux-arm64"),
-        (os, arch) => bail!("No UAPKG executable is available for {os}/{arch}."),
+    let target_env = if cfg!(target_env = "musl") {
+        "musl"
+    } else if cfg!(target_env = "gnu") {
+        "gnu"
+    } else {
+        ""
+    };
+    distribution_platform(std::env::consts::OS, std::env::consts::ARCH, target_env)
+}
+
+fn distribution_platform(os: &str, arch: &str, target_env: &str) -> Result<&'static str> {
+    match (os, arch, target_env) {
+        ("windows", "x86_64", _) => Ok("win-x64"),
+        ("windows", "aarch64", _) => Ok("win-arm64"),
+        ("macos", "x86_64", _) => Ok("darwin-x64"),
+        ("macos", "aarch64", _) => Ok("darwin-arm64"),
+        ("linux", "x86_64", "gnu") => Ok("linux-x64"),
+        ("linux", "aarch64", "gnu") => Ok("linux-arm64"),
+        ("linux", "x86_64", "musl") => Ok("linux-x64-musl"),
+        ("linux", _, _) => {
+            bail!("No UAPKG executable is available for {os}/{arch} with libc {target_env:?}.")
+        }
+        _ => bail!("No UAPKG executable is available for {os}/{arch}."),
     }
 }
 
@@ -144,5 +159,37 @@ impl Engine {
             "SEA engines must not specify entry files."
         );
         Ok(engine)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distribution_ids_distinguish_linux_libc_and_name_only_64_bit_windows_targets() {
+        for (os, arch, target_env, expected) in [
+            ("windows", "x86_64", "msvc", "win-x64"),
+            ("windows", "aarch64", "msvc", "win-arm64"),
+            ("macos", "x86_64", "", "darwin-x64"),
+            ("macos", "aarch64", "", "darwin-arm64"),
+            ("linux", "x86_64", "gnu", "linux-x64"),
+            ("linux", "aarch64", "gnu", "linux-arm64"),
+            ("linux", "x86_64", "musl", "linux-x64-musl"),
+        ] {
+            assert_eq!(
+                distribution_platform(os, arch, target_env).unwrap(),
+                expected
+            );
+            assert!(crate::catalog::PLATFORMS.contains(&expected));
+        }
+        for (os, arch, target_env) in [
+            ("windows", "x86", "msvc"),
+            ("linux", "aarch64", "musl"),
+            ("linux", "x86_64", ""),
+            ("linux", "x86_64", "uclibc"),
+        ] {
+            assert!(distribution_platform(os, arch, target_env).is_err());
+        }
     }
 }

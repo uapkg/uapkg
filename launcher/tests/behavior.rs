@@ -509,6 +509,37 @@ fn run_cli(binary: &Path, home: &Path, cwd: &Path, args: &[&str]) -> Output {
 }
 
 #[test]
+fn launcher_build_identity_does_not_load_profiles_or_recover_updates() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let home = root.join(".uapkg");
+    let binary = root.join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
+    fs::copy(env!("CARGO_BIN_EXE_uapkg"), &binary).unwrap();
+    for name in ["uapkg-install.json", "uapkg-update.json"] {
+        fs::write(root.join(name), b"invalid profile or transaction").unwrap();
+    }
+    for (option, expected) in [
+        ("--version", env!("CARGO_PKG_VERSION")),
+        ("--platform", platform().unwrap()),
+    ] {
+        let output = run_cli(&binary, &home, root, &["launcher", option]);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!("{expected}\n")
+        );
+        assert!(output.stderr.is_empty());
+    }
+    assert!(!home.exists());
+    for name in ["uapkg-install.json", "uapkg-update.json"] {
+        assert_eq!(
+            fs::read(root.join(name)).unwrap(),
+            b"invalid profile or transaction"
+        );
+    }
+}
+
+#[test]
 fn launcher_management_never_delegates_or_requires_an_engine() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".uapkg");

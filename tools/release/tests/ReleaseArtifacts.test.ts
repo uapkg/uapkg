@@ -9,6 +9,8 @@ import {
   artifactName,
   assembleRelease,
   inspectArtifact,
+  platformForRuntime,
+  platformForRustTarget,
   safeEngineCommand,
   selectNativeCandidates,
   type ReleaseBuild,
@@ -44,10 +46,10 @@ function releaseFixture(): { input: string; output: string } {
 }
 
 describe('release catalog', () => {
-  it('assembles only the six CLI artifacts', () => {
+  it('assembles only the seven CLI artifacts', () => {
     const { input, output } = releaseFixture();
     const catalog = assembleRelease(input, output, 'cli', '2.3.4');
-    expect(catalog.artifacts).toHaveLength(6);
+    expect(catalog.artifacts).toHaveLength(7);
     expect(catalog.artifacts.every((artifact) => /^[a-f0-9]{64}$/.test(artifact.sha256))).toBe(true);
     expect(JSON.parse(readFileSync(path.join(output, 'build.json'), 'utf8'))).toEqual(catalog);
   });
@@ -64,18 +66,44 @@ describe('release catalog', () => {
 
   it('rejects version ranges and path-like versions before choosing artifact names', () => {
     for (const version of ['latest', '^1.2.3', '1.2', '../1.2.3', '01.2.3', '1.2.3-01', 'v1.2.3']) {
-      expect(() => artifactName('cli', version, 'win32-x64')).toThrow('exact version');
+      expect(() => artifactName('cli', version, 'win-x64')).toThrow('exact version');
     }
   });
 
   it('preserves explicit prereleases and build metadata in artifact names', () => {
-    expect(artifactName('cli', '1.2.3-beta.1+build.2', 'win32-x64')).toBe(
-      'uapkg-cli-1.2.3-beta.1+build.2-win32-x64.tar.gz',
+    expect(artifactName('cli', '1.2.3-beta.1+build.2', 'win-x64')).toBe(
+      'uapkg-cli-1.2.3-beta.1+build.2-win-x64.tar.gz',
     );
   });
 });
 
 describe('native archive and descriptor', () => {
+  it('maps Node OS/CPU/libc independently from upstream package identifiers', () => {
+    expect(platformForRuntime('win32', 'x64')).toBe('win-x64');
+    expect(platformForRuntime('win32', 'arm64')).toBe('win-arm64');
+    expect(platformForRuntime('linux', 'x64', { header: { glibcVersionRuntime: '2.28' } })).toBe('linux-x64');
+    expect(platformForRuntime('linux', 'arm64', { header: { glibcVersionRuntime: '2.28' } })).toBe('linux-arm64');
+    const musl = { sharedObjects: ['/lib/ld-musl-x86_64.so.1'] };
+    expect(platformForRuntime('linux', 'x64', musl)).toBe('linux-x64-musl');
+    expect(() => platformForRuntime('linux', 'arm64', musl)).toThrow('Unsupported release platform');
+    expect(() => platformForRuntime('win32', 'ia32')).toThrow('Unsupported release platform');
+    expect(() => platformForRuntime('linux', 'x64', {})).toThrow('Cannot identify');
+    expect(() => platformForRuntime('linux', 'x64', { ...musl, header: { glibcVersionRuntime: '2.28' } })).toThrow(
+      'Cannot identify',
+    );
+  });
+
+  it('identifies launcher artifacts from the explicit Rust compilation target', () => {
+    expect(platformForRustTarget('x86_64-unknown-linux-musl')).toBe('linux-x64-musl');
+    expect(platformForRustTarget('x86_64-unknown-linux-gnu')).toBe('linux-x64');
+    expect(platformForRustTarget('x86_64-pc-windows-msvc')).toBe('win-x64');
+    expect(platformForRustTarget('aarch64-pc-windows-msvc')).toBe('win-arm64');
+    for (const target of ['i686-pc-windows-msvc', 'aarch64-unknown-linux-musl', 'toString'])
+      expect(() => platformForRustTarget(target)).toThrow('Unsupported launcher target');
+    expect(parseOptions(['build-launcher', '--target', 'x86_64-unknown-linux-musl']).values.get('--target')).toBe(
+      'x86_64-unknown-linux-musl',
+    );
+  });
   it('writes deterministic archives without using filesystem timestamps', async () => {
     const root = temporary();
     const source = path.join(root, 'source');
@@ -115,7 +143,7 @@ describe('native archive and descriptor', () => {
   });
 });
 
-describe('six-platform packaging gate', () => {
+describe('seven-platform packaging gate', () => {
   function candidates(): { input: string; output: string } {
     const { input, output } = releaseFixture();
     for (const format of ['node', 'sea'] as const) {
@@ -140,10 +168,10 @@ describe('six-platform packaging gate', () => {
     return { input, output };
   }
 
-  it('selects SEA only when all six native candidates qualify', () => {
+  it('selects SEA only when all seven native candidates qualify', () => {
     const { input, output } = candidates();
     expect(selectNativeCandidates(input, output, '2.3.4').selectedFormat).toBe('sea');
-    expect(assembleRelease(output, output, 'cli', '2.3.4').artifacts).toHaveLength(6);
+    expect(assembleRelease(output, output, 'cli', '2.3.4').artifacts).toHaveLength(7);
     expect(readFileSync(path.join(output, artifactName('cli', '2.3.4', 'linux-x64')), 'utf8')).toBe(
       'sea:cli:linux-x64',
     );
@@ -152,10 +180,7 @@ describe('six-platform packaging gate', () => {
   it('uses node on every platform when one SEA candidate is missing or altered', () => {
     const { input, output } = candidates();
     rmSync(path.join(input, 'candidate-sea-darwin-arm64', 'build-darwin-arm64.json'));
-    writeFileSync(
-      path.join(input, 'candidate-sea-win32-arm64', artifactName('cli', '2.3.4', 'win32-arm64')),
-      'altered',
-    );
+    writeFileSync(path.join(input, 'candidate-sea-win-arm64', artifactName('cli', '2.3.4', 'win-arm64')), 'altered');
     const evidence = selectNativeCandidates(input, output, '2.3.4');
     expect(evidence.selectedFormat).toBe('node');
     expect(evidence.sea.filter((candidate) => !candidate.qualified)).toHaveLength(2);
@@ -163,6 +188,18 @@ describe('six-platform packaging gate', () => {
       expect(readFileSync(path.join(output, artifactName('cli', '2.3.4', platform)), 'utf8')).toBe(
         `node:cli:${platform}`,
       );
+  });
+
+  it('falls back collectively when only the musl SEA is unavailable and refuses a missing musl Node fallback', () => {
+    const { input, output } = candidates();
+    rmSync(path.join(input, 'candidate-sea-linux-x64-musl', 'build-linux-x64-musl.json'));
+    const evidence = selectNativeCandidates(input, output, '2.3.4');
+    expect(evidence.selectedFormat).toBe('node');
+    expect(evidence.sea.filter((candidate) => !candidate.qualified).map((candidate) => candidate.platform)).toEqual([
+      'linux-x64-musl',
+    ]);
+    rmSync(path.join(input, 'candidate-node-linux-x64-musl', artifactName('cli', '2.3.4', 'linux-x64-musl')));
+    expect(() => selectNativeCandidates(input, output, '2.3.4')).toThrow();
   });
 
   it('rejects an altered fallback and excludes mixed-version SEA candidates', () => {

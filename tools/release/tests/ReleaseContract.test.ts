@@ -5,9 +5,14 @@ import { describe, expect, it } from 'vite-plus/test';
 import { verifyMinisign } from '../Minisign.ts';
 import {
   artifactName,
+  assertCurrentFiles,
   assertExactVersion,
+  HISTORICAL_PLATFORMS,
+  KNOWN_PLATFORMS,
+  PLATFORMS,
   parseChecksums,
   validateEntry,
+  validateCurrentEntry,
   validateIndex,
   validateReplacements,
 } from '../ReleaseContract.ts';
@@ -57,5 +62,28 @@ describe('shared release contract fixtures', () => {
     expect(parseChecksums(bytes, 'cli', '2.0.0', fixture.entry.files).size).toBe(6);
     for (const invalid of [bytes + bytes, bytes.replace('uapkg-cli', '../uapkg-cli'), bytes.replace(/^.*\n/, '')])
       expect(() => parseChecksums(invalid, 'cli', '2.0.0', fixture.entry.files)).toThrow();
+  });
+  it('preserves historical receipts while requiring the current seven targets for publication', () => {
+    expect(KNOWN_PLATFORMS).toHaveLength(9);
+    const current = { ...fixture.entry, files: [...PLATFORMS] };
+    expect(validateCurrentEntry(current)).toEqual(current);
+    expect(validateEntry(fixture.entry).files).toEqual([...HISTORICAL_PLATFORMS]);
+    expect(() => validateCurrentEntry(fixture.entry)).toThrow('current release platform matrix');
+    for (const files of [
+      PLATFORMS.slice(0, -1),
+      [...PLATFORMS, PLATFORMS[0]],
+      [...PLATFORMS, 'win32-x64'],
+      PLATFORMS.map((platform) => (platform === 'win-x64' ? 'win32-x64' : platform)),
+    ]) {
+      expect(() => validateEntry({ ...current, files })).toThrow();
+      expect(() => assertCurrentFiles(files)).toThrow();
+    }
+  });
+  it('reads mixed historical/current indexes without rewriting signed Windows names', () => {
+    const current = { version: '2.1.0', date: '2026-11-17', files: [...PLATFORMS] };
+    const mixed = { ...fixture.index, aliases: { latest: '2.1.0' }, releases: [current, ...fixture.index.releases] };
+    expect(validateIndex(mixed)).toEqual(mixed);
+    expect(artifactName('cli', '2.1.0', 'win-x64')).toBe('uapkg-cli-2.1.0-win-x64.tar.gz');
+    expect(artifactName('cli', '2.0.0', 'win32-x64')).toBe('uapkg-cli-2.0.0-win32-x64.tar.gz');
   });
 });

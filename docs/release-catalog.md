@@ -17,10 +17,20 @@ leading `v`, ranges, nightly and RC selectors are not. Build metadata is preserv
 Bare `X.Y.Z-alpha` and `X.Y.Z-beta` are reserved selectors, not publishable versions.
 Ordinary package-version schemas retain their own behavior.
 
-Supported file identifiers are `win32-x64`, `win32-arm64`, `darwin-x64`,
-`darwin-arm64`, `linux-x64` and `linux-arm64`. Every producer release has all six.
+Current file identifiers are `win-x64`, `win-arm64`, `darwin-x64`,
+`darwin-arm64`, `linux-x64`, `linux-arm64`, and `linux-x64-musl`. Every new producer
+release has all seven. Unsuffixed Linux targets require glibc; the musl target
+supports Alpine x64. All current architectures are 64-bit.
 An identifier expands to `uapkg-{product}-{version}-{platform}.tar.gz`.
 The GitHub tags are `@uapkg/cli@{version}` and `uapkg-launcher@{version}`.
+
+Historical receipts keep their original six identifiers, including `win32-x64`
+and `win32-arm64`, and have no musl archive. Readers accept either complete
+historical or current matrix. Producers require the current seven and reject
+mixed or incomplete matrices. The union of nine recognized historical/current
+strings is not a publication matrix. Immutable artifacts, descriptors, receipts,
+checksum bytes and signatures are never renamed. The examples below describe
+historical releases, whose original identities remain valid for catalog browsing.
 
 The canonical archive URL is
 `/{product}/{version}/uapkg-{product}-{version}-{platform}.tar.gz` on the releases
@@ -148,8 +158,9 @@ overlapping-key rotation would require its own explicit protocol and implementat
 2. Run the `Release` workflow manually with the exact product/version. It never
    creates a version PR. npm packages publish independently when the product is
    `cli`; native publication has no npm-existence or npm-success gate.
-3. For a CLI release, supply an already published launcher version for all-six-platform
-   terminal qualification. Publish launcher `0.2.0` before CLI `1.6.0` during cutover.
+3. For a CLI release, supply an already published launcher version for all-seven-platform
+   terminal qualification. Publish launcher `0.3.0` before the next CLI minor release
+   (`1.7.0`) for the Windows naming and musl transition.
    General CI can qualify CLI runtime candidates before the paired launcher exists.
 4. The workflow publishes immutable assets and checksums, verifies the remote bytes,
    and commits `catalog-release`. A complete existing release skips native rebuilding
@@ -169,3 +180,13 @@ Old launchers discover only CLI-tagged `release.json` assets. They cannot discov
 this new protocol unaided. Install the new launcher manually without deleting the
 user profile; the installer experience is tracked separately. Historical tags and
 release assets stay unchanged, and this cutover uses minor versions.
+
+For the seven-platform transition, first deploy the infrastructure reader that
+recognizes both platform matrices, then publish launcher `0.3.0`, then qualify and
+publish CLI `1.7.0` with that launcher. The updated launcher binaries must exist
+before expanded signed indexes activate. Launchers through `0.2.0` reject new
+identifiers anywhere in a product index, so all operating systems require manual
+launcher replacement at this cutover. Windows users must select a CLI release
+containing `win-*` artifacts; historical Windows pins report the target unavailable.
+Old `win32-*` caches are left intact and are not relabeled or reused. See
+[platform support and transition](platform-support.md).

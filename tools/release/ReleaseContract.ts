@@ -3,6 +3,17 @@ import { parse } from 'semver';
 export const PRODUCTS = ['cli', 'launcher'] as const;
 export type ReleaseProduct = (typeof PRODUCTS)[number];
 export const PLATFORMS = [
+  'win-x64',
+  'win-arm64',
+  'darwin-x64',
+  'darwin-arm64',
+  'linux-x64',
+  'linux-arm64',
+  'linux-x64-musl',
+] as const;
+export type CurrentReleasePlatform = (typeof PLATFORMS)[number];
+/** Immutable receipts retain the platform names they were originally signed with. */
+export const HISTORICAL_PLATFORMS = [
   'win32-x64',
   'win32-arm64',
   'darwin-x64',
@@ -10,7 +21,8 @@ export const PLATFORMS = [
   'linux-x64',
   'linux-arm64',
 ] as const;
-export type ReleasePlatform = (typeof PLATFORMS)[number];
+export const KNOWN_PLATFORMS = [...PLATFORMS, 'win32-x64', 'win32-arm64'] as const;
+export type ReleasePlatform = (typeof KNOWN_PLATFORMS)[number];
 export const CHECKSUM_FILE = 'SHASUMS256.txt';
 export const CHECKSUM_SIGNATURE = `${CHECKSUM_FILE}.minisig`;
 
@@ -65,11 +77,20 @@ export function assertFiles(value: unknown, complete = false): asserts value is 
     !Array.isArray(value) ||
     value.length === 0 ||
     new Set(value).size !== value.length ||
-    value.some((file) => !(PLATFORMS as readonly unknown[]).includes(file)) ||
-    (complete && value.length !== PLATFORMS.length)
+    value.some((file) => !(KNOWN_PLATFORMS as readonly unknown[]).includes(file)) ||
+    (complete &&
+      ![PLATFORMS, HISTORICAL_PLATFORMS].some(
+        (matrix) => value.length === matrix.length && matrix.every((platform) => value.includes(platform)),
+      ))
   ) {
     throw new Error('Expected unique supported release platforms.');
   }
+}
+/** New publication must never acquire historical names or omit a current target. */
+export function assertCurrentFiles(value: unknown): asserts value is CurrentReleasePlatform[] {
+  assertFiles(value);
+  if (value.length !== PLATFORMS.length || !PLATFORMS.every((platform) => value.includes(platform)))
+    throw new Error('Expected the complete current release platform matrix.');
 }
 export function releaseTag(product: ReleaseProduct, version: string): string {
   assertProduct(product);
@@ -98,6 +119,11 @@ export function validateEntry(value: unknown): CatalogEntry {
   }
   if (entry.tag !== releaseTag(entry.product, entry.version)) throw new Error('Release tag differs from its identity.');
   return entry as unknown as CatalogEntry;
+}
+export function validateCurrentEntry(value: unknown): CatalogEntry {
+  const entry = validateEntry(value);
+  assertCurrentFiles(entry.files);
+  return entry;
 }
 function sameBase(left: string, right: string): boolean {
   const a = parse(left)!;

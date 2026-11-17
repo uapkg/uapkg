@@ -39,15 +39,7 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32)
         fs::copy(&node, &bundled_node).unwrap();
     }
     fs::write(engine.join("terminal.cjs"), script).unwrap();
-    let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("windows", "x86_64") => "win32-x64",
-        ("windows", "aarch64") => "win32-arm64",
-        ("macos", "x86_64") => "darwin-x64",
-        ("macos", "aarch64") => "darwin-arm64",
-        ("linux", "x86_64") => "linux-x64",
-        ("linux", "aarch64") => "linux-arm64",
-        _ => panic!("Unsupported test platform"),
-    };
+    let platform = uapkg_launcher::model::platform().unwrap();
     fs::write(
         engine.join("engine.json"),
         json!({"schemaVersion":1,"version":"1.2.3","platform":platform,

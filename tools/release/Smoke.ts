@@ -5,7 +5,25 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readJson, runChecked } from '../../packages/uapkg/build/EnginePackage.ts';
 import { smokePackagedTerminal } from './PackagedTerminalSmoke.ts';
-import { safeEngineCommand, type EngineDescriptor } from './ReleaseArtifacts.ts';
+import { currentPlatform, safeEngineCommand, type EngineDescriptor } from './ReleaseArtifacts.ts';
+
+export function assertPackagedDiagnostics(
+  output: { stdout: string; stderr: string },
+  expected: { cliPath: string; secret: string; utilitiesAvailable: boolean },
+): void {
+  const collected = output.stdout.includes('Environment collection: available');
+  const unavailable = output.stdout.includes('Environment collection: unavailable');
+  if (
+    !output.stdout.includes('UAPKG debug information') ||
+    !output.stdout.includes('System:') ||
+    (!collected && (expected.utilitiesAvailable || !unavailable))
+  )
+    throw new Error('Packaged diagnostics did not collect environment information successfully.');
+  if (!output.stdout.includes(`CLI path: ${expected.cliPath}\n`))
+    throw new Error('Packaged diagnostics did not report the executing CLI location.');
+  if (`${output.stdout}${output.stderr}`.includes(expected.secret))
+    throw new Error('Packaged diagnostics exposed a private environment value.');
+}
 
 /** Capture each frame even in CI, and wait for observable rendering/input readiness. */
 export function renderInkSmoke(): string {
@@ -92,6 +110,15 @@ ${renderInkSmoke()}
 execFileSync('git', ['init', '--quiet'], {cwd:process.cwd(), stdio:'pipe'});
 assert.equal(execFileSync('git',['rev-parse','--is-inside-work-tree'],{cwd:process.cwd(),encoding:'utf8'}).trim(),'true');
 if (${JSON.stringify(keyring)}) await new api.CredentialStore(undefined, 'uapkg.cli.release-smoke').assertAvailable();
+if (process.env.UAPKG_RELEASE_SMOKE_HEADLESS === '1') {
+  // A missing service must not be confused with an unloadable musl native addon.
+  const keyring = await import(pathToFileURL(require.resolve('@napi-rs/keyring')).href);
+  assert.equal(typeof (keyring.Entry ?? keyring.default?.Entry), 'function');
+  await assert.rejects(
+    new api.CredentialStore(undefined, 'uapkg.cli.release-smoke-headless').assertAvailable(),
+    /Secure operating-system credential storage is unavailable.*will not save login secrets in plaintext/,
+  );
+}
 console.log('Engine smoke passed: public exports, dynamic imports, TypeScript/esbuild, browser assets, Ink input/render, Git/filesystem${keyring ? ', secure keyring' : ''}.');
 `;
 }
@@ -102,6 +129,10 @@ export function smokeEngine(
 ): void {
   const engineRoot = path.resolve(root);
   const descriptor = options.native ? readJson<EngineDescriptor>(path.join(engineRoot, 'engine.json')) : undefined;
+  if (descriptor && descriptor.platform !== currentPlatform())
+    throw new Error(
+      `Engine platform ${descriptor.platform} differs from the qualification runtime ${currentPlatform()}.`,
+    );
   const version = descriptor?.version ?? readJson<{ version: string }>(path.join(engineRoot, 'package.json')).version;
   const command = descriptor
     ? safeEngineCommand(engineRoot, descriptor)
@@ -116,10 +147,13 @@ export function smokeEngine(
     const output = runChecked(command.executable, [...command.args, '--version'], cwd, env);
     if (output.trim() !== version) throw new Error(`Unexpected engine version: ${output.trim()}`);
     runChecked(command.executable, [...command.args, '--help'], cwd, env);
-    // The collector must work inside both bundled runtimes, including when no
-    // user Node/npm is on PATH. envinfo debug logging must never leak the env.
+    // Normal collection must work without host Node/npm. With all system utilities
+    // removed as well, the supported unavailable result must still be safe and useful.
     const diagnosticSentinel = 'uapkg-release-smoke-private-environment-value';
-    for (const diagnosticEnv of [env, { ...env, PATH: emptyPath }]) {
+    for (const [utilitiesAvailable, diagnosticEnv] of [
+      [true, env],
+      [false, { ...env, PATH: emptyPath }],
+    ] as const) {
       const diagnostic = spawnSync(command.executable, [...command.args, '--debug-info'], {
         cwd,
         env: {
@@ -133,17 +167,9 @@ export function smokeEngine(
       });
       if (diagnostic.error || diagnostic.status !== 0)
         throw new Error(`Packaged diagnostics failed: ${diagnostic.error?.message ?? diagnostic.stderr}`);
-      if (
-        !diagnostic.stdout.includes('UAPKG debug information') ||
-        !diagnostic.stdout.includes('System:') ||
-        !diagnostic.stdout.includes('Environment collection: available')
-      )
-        throw new Error('Packaged diagnostics did not collect environment information successfully.');
       const cliPath = descriptor?.kind === 'sea' ? command.executable : command.args[0];
-      if (!diagnostic.stdout.includes(`CLI path: ${cliPath}\n`))
-        throw new Error('Packaged diagnostics did not report the executing CLI location.');
-      if (`${diagnostic.stdout}${diagnostic.stderr}`.includes(diagnosticSentinel))
-        throw new Error('Packaged diagnostics exposed a private environment value.');
+      if (!cliPath) throw new Error('Packaged diagnostics have no expected CLI location.');
+      assertPackagedDiagnostics(diagnostic, { cliPath, secret: diagnosticSentinel, utilitiesAvailable });
     }
     const invalid = spawnSync(command.executable, [...command.args, 'release-smoke-unknown-command'], {
       cwd,

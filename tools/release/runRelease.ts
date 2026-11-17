@@ -6,7 +6,7 @@ import {
   installRuntimeDependencies,
   launcherVersionFromCargo,
 } from './NativeBuild.ts';
-import { assembleRelease, selectNativeCandidates } from './ReleaseArtifacts.ts';
+import { assembleRelease, PLATFORMS, selectNativeCandidates } from './ReleaseArtifacts.ts';
 import { assertProduct } from './ReleaseContract.ts';
 import { smokeEngine } from './Smoke.ts';
 
@@ -25,6 +25,7 @@ export function parseOptions(args: string[]): { command: string; values: Map<str
     '--package',
     '--npm-version',
     '--format',
+    '--target',
   ]);
   for (let index = 0; index < filtered.length; index += 1) {
     const option = filtered[index];
@@ -55,7 +56,7 @@ export async function runRelease(args: string[]): Promise<void> {
     if (format !== 'node' && format !== 'sea') throw new Error('Engine format must be node or sea.');
     await buildNativeArtifacts(required('--output'), format);
   } else if (command === 'build-launcher') {
-    await buildLauncherArtifact(required('--output'), required('--launcher'));
+    await buildLauncherArtifact(required('--output'), required('--launcher'), required('--target'));
   } else if (command === 'smoke-native') {
     smokeEngine(required('--engine'), {
       native: true,
@@ -77,9 +78,11 @@ export async function runRelease(args: string[]): Promise<void> {
   } else if (command === 'select-native') {
     const version = readJson<{ version: string }>(path.join(CLI_ROOT, 'package.json')).version;
     const evidence = selectNativeCandidates(required('--input'), required('--output'), version);
-    process.stdout.write(`Selected ${evidence.selectedFormat} engines for all six platforms.\n`);
+    process.stdout.write(`Selected ${evidence.selectedFormat} engines for all ${PLATFORMS.length} platforms.\n`);
   } else {
-    throw new Error('Expected prepare-npm, build-native, smoke-native, smoke-npm, select-native, or assemble.');
+    throw new Error(
+      'Expected prepare-npm, build-native, build-launcher, smoke-native, smoke-npm, select-native, or assemble.',
+    );
   }
 }
 

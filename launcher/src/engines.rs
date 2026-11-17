@@ -250,6 +250,57 @@ mod tests {
     }
 
     #[test]
+    fn incompatible_cache_entries_are_not_renamed_or_used_as_platform_fallbacks() {
+        let target = platform().unwrap();
+        let mut incompatible = vec!["win32-x64", "win32-arm64"];
+        if target == "linux-x64-musl" {
+            incompatible.push("linux-x64");
+        }
+        for previous_target in incompatible {
+            let directory = tempfile::tempdir().unwrap();
+            let context = context(directory.path());
+            let staged = stage_engine(directory.path(), "1.2.3").unwrap();
+            let mut descriptor: Engine = read_json(&staged.join("engine.json")).unwrap();
+            descriptor.platform = previous_target.into();
+            atomic_json(&staged.join("engine.json"), &descriptor).unwrap();
+            atomic_json(
+                &staged.join(".installed.json"),
+                &Installation {
+                    schema_version: 1,
+                    version: "1.2.3".into(),
+                    platform: previous_target.into(),
+                },
+            )
+            .unwrap();
+            let previous = context.cache_dir("1.2.3", previous_target).unwrap();
+            fs::create_dir_all(previous.parent().unwrap()).unwrap();
+            fs::rename(staged, &previous).unwrap();
+            let original_descriptor = fs::read(previous.join("engine.json")).unwrap();
+            let original_receipt = fs::read(previous.join(".installed.json")).unwrap();
+
+            let error = ensure_installed(&context, "1.2.3", true)
+                .err()
+                .expect("An incompatible cache must not satisfy the selected platform");
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("not cached for {target}"))
+            );
+            assert!(!context.cache_dir("1.2.3", target).unwrap().exists());
+            assert!(cached(&previous, "1.2.3", target).is_err());
+            assert!(Engine::read(&previous, "1.2.3", target).is_err());
+            assert_eq!(
+                fs::read(previous.join("engine.json")).unwrap(),
+                original_descriptor
+            );
+            assert_eq!(
+                fs::read(previous.join(".installed.json")).unwrap(),
+                original_receipt
+            );
+        }
+    }
+
+    #[test]
     fn concurrent_installers_share_one_provider_and_activate_only_a_complete_engine() {
         let directory = tempfile::tempdir().unwrap();
         let context = context(directory.path());

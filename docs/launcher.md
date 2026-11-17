@@ -12,8 +12,11 @@ Download `uapkg-launcher-<version>-<platform>.tar.gz` and the accompanying
 For example, `minisign -Vm SHASUMS256.txt -p release-signing.pub` verifies the
 checksum list. The site redirects artifact downloads to GitHub Releases.
 
-Supported platforms are `win32-x64`, `win32-arm64`, `darwin-x64`, `darwin-arm64`,
-`linux-x64`, and `linux-arm64`. Linux requires glibc; Alpine/musl is not supported.
+Supported platforms are `win-x64`, `win-arm64`, `darwin-x64`, `darwin-arm64`,
+`linux-x64`, `linux-arm64`, and `linux-x64-musl`. Unsuffixed Linux targets require
+glibc; Alpine x64 uses the musl target. ARM64 musl is not supported. See
+[platform requirements and the Windows naming transition](platform-support.md)
+before replacing an older launcher or choosing an Alpine image.
 Extract the launcher into a user-writable directory and add that directory to
 `PATH`. Then choose the initial CLI:
 
@@ -71,6 +74,7 @@ Launcher options can appear before or after the command. `--cli-version=value`
 also works. A standalone `--` ends launcher option parsing and preserves all
 following arguments. `uapkg --version` reports the CLI version;
 `uapkg launcher --version` reports the launcher version.
+`uapkg launcher --platform` reports its compiled distribution identifier.
 
 `version default` installs the selected CLI and delegates the configuration
 write to that CLI. The global configuration preserves the requested selector:

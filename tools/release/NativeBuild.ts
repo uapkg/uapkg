@@ -16,10 +16,12 @@ import {
   assertExactVersion,
   currentPlatform,
   inspectArtifact,
+  platformForRustTarget,
   type EngineDescriptor,
   type ReleaseBuild,
 } from './ReleaseArtifacts.ts';
 import { buildSea } from './SeaBuild.ts';
+import { verifyOfficialNodeRuntime } from './OfficialNode.ts';
 
 export function npmCliPath(): string {
   const executableDirectory = path.dirname(process.execPath);
@@ -69,9 +71,10 @@ export function installRuntimeDependencies(directory: string, npmVersion = BUILD
 
 export async function buildNativeArtifacts(output: string, format: 'node' | 'sea' = 'node'): Promise<ReleaseBuild> {
   if (process.versions.node !== BUILD_NODE_VERSION) {
-    throw new Error(`Release builds require Node ${BUILD_NODE_VERSION}; use the repository Vite+ toolchain.`);
+    throw new Error(`Release builds require Node ${BUILD_NODE_VERSION}; activate the verified official runtime.`);
   }
   const platform = currentPlatform();
+  verifyOfficialNodeRuntime(platform);
   const version = readJson<{ version: string }>(path.join(CLI_ROOT, 'package.json')).version;
   const root = path.resolve(output);
   const engineRoot = path.join(root, 'cli');
@@ -126,9 +129,11 @@ export async function buildNativeArtifacts(output: string, format: 'node' | 'sea
   return build;
 }
 
-export async function buildLauncherArtifact(output: string, launcher: string): Promise<ReleaseBuild> {
-  const platform = currentPlatform();
+export async function buildLauncherArtifact(output: string, launcher: string, target: string): Promise<ReleaseBuild> {
+  const platform = platformForRustTarget(target);
   const executable = path.resolve(launcher);
+  const compiledPlatform = runChecked(executable, ['launcher', '--platform'], path.dirname(executable)).trim();
+  if (compiledPlatform !== platform) throw new Error(`Launcher platform ${compiledPlatform} differs from ${target}.`);
   const version = runChecked(executable, ['launcher', '--version'], path.dirname(executable)).trim();
   assertExactVersion(version);
   const root = path.resolve(output);
@@ -136,7 +141,7 @@ export async function buildLauncherArtifact(output: string, launcher: string): P
   if (path.dirname(directory) !== root) throw new Error('Invalid launcher output directory.');
   rmSync(directory, { recursive: true, force: true });
   mkdirSync(directory, { recursive: true });
-  const name = process.platform === 'win32' ? 'uapkg.exe' : 'uapkg';
+  const name = platform.startsWith('win-') ? 'uapkg.exe' : 'uapkg';
   cpSync(executable, path.join(directory, name));
   chmodSync(path.join(directory, name), 0o755);
   const artifact = path.join(root, artifactName('launcher', version, platform));

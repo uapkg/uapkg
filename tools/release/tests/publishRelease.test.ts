@@ -25,12 +25,12 @@ export function fixture(product: ReleaseProduct = 'cli') {
   return { directory, build, save };
 }
 describe('independent native publication preflight', () => {
-  it.each(['cli', 'launcher'] as const)('accepts a complete six-platform %s release', (product) => {
+  it.each(['cli', 'launcher'] as const)('accepts a complete seven-platform %s release', (product) => {
     const { directory, build } = fixture(product);
-    expect(writeChecksums(directory).artifacts).toHaveLength(6);
+    expect(writeChecksums(directory).artifacts).toHaveLength(7);
     expect(
       parseChecksums(readFileSync(path.join(directory, 'SHASUMS256.txt'), 'utf8'), product, build.version, PLATFORMS),
-    ).toHaveLength(6);
+    ).toHaveLength(7);
   });
   it('rejects missing or duplicate targets', () => {
     const { directory, build, save } = fixture();
