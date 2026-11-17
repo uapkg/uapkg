@@ -61,7 +61,7 @@ fn command_scopes_are_independent_of_launcher_option_placement() {
     for command in ["install", "config", "init", "future-command"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Project);
     }
-    for command in ["launcher", "version", "self-update"] {
+    for command in ["launcher", "version", "launcher-update", "self-update"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Launcher);
     }
     assert_eq!(
@@ -585,9 +585,14 @@ fn launcher_management_never_delegates_or_requires_an_engine() {
     );
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
-    let update = run_cli(binary, &home, dir.path(), &["self-update", "--offline"]);
-    assert!(!update.status.success());
-    assert!(String::from_utf8_lossy(&update.stderr).contains("requires an online connection"));
+    for command in ["launcher-update", "self-update"] {
+        let update = run_cli(binary, &home, dir.path(), &[command, "--offline"]);
+        assert!(!update.status.success());
+        assert!(String::from_utf8_lossy(&update.stderr).contains("require an online connection"));
+        let help = run_cli(binary, &home, dir.path(), &[command, "--help"]);
+        assert!(help.status.success());
+        assert!(String::from_utf8_lossy(&help.stdout).contains("uapkg launcher-update"));
+    }
     assert!(
         run_cli(binary, &home, dir.path(), &["version", "list"])
             .status

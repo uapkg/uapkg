@@ -33,7 +33,7 @@ describe('shared launcher configuration', () => {
   it('does not invent a CLI version or create a profile', () => {
     const { profile, project } = fixture();
     const config = createConfig({ cwd: project });
-    expect(config.get('launcher')).toEqual({});
+    expect(config.get('launcher')).toEqual({ autoLauncherUpdate: true, autoCLIUpdate: true });
     expect(config.get('launcher.defaultCliVersion')).toBeNull();
     expect(config.getDiagnostics()).toEqual([]);
     expect(fs.existsSync(profile)).toBe(false);
@@ -58,13 +58,44 @@ describe('shared launcher configuration', () => {
       launcher: { defaultCliVersion: '3.0.0' },
     });
     const config = createConfig({ cwd: project });
-    expect(config.get('launcher')).toEqual({ defaultCliVersion: '3.0.0' });
+    expect(config.get('launcher')).toEqual({
+      defaultCliVersion: '3.0.0',
+      autoLauncherUpdate: true,
+      autoCLIUpdate: true,
+    });
     expect(config.get('launcher', { scope: 'global' })).toEqual({ defaultCliVersion: '1.2.3' });
     expect(config.trace('launcher.defaultCliVersion').map(({ source }) => source)).toEqual([
       'default',
       'global',
       'local',
     ]);
+  });
+
+  it('takes update policy only from defaults and the global profile', () => {
+    const { profile, project } = fixture();
+    const nested = path.join(project, 'nested');
+    fs.mkdirSync(nested);
+    write(path.join(profile, 'config.json'), { launcher: { autoLauncherUpdate: false } });
+    write(path.join(project, '.uapkg', 'config.json'), { launcher: { autoLauncherUpdate: true } });
+    write(path.join(nested, '.uapkg', 'config.json'), {
+      launcher: { autoCLIUpdate: false, defaultCliVersion: '3.0.0' },
+    });
+    const config = createConfig({ cwd: nested });
+    expect(config.get('launcher')).toEqual({
+      autoLauncherUpdate: false,
+      autoCLIUpdate: true,
+      defaultCliVersion: '3.0.0',
+    });
+    expect(config.getWithOrigin('launcher.autoLauncherUpdate')).toMatchObject({ source: 'global', value: false });
+    expect(config.getWithOrigin('launcher.autoCLIUpdate')).toMatchObject({ source: 'default', value: true });
+  });
+
+  it.each(['autoLauncherUpdate', 'autoCLIUpdate'])('supports only boolean values for launcher.%s', (key) => {
+    const property = `launcher.${key}`;
+    expect(isLeafConfigPath(property)).toBe(true);
+    expect(parseConfigCliValue(property, 'false')).toEqual({ ok: true, value: false, diagnostics: [] });
+    expect(parseConfigCliValue(property, 'yes').ok).toBe(false);
+    expect(partialConfigSchema.safeParse({ launcher: { [key]: 'false' } }).success).toBe(false);
   });
 
   it.each(['1.2.3', '2.0.0-beta.1', '1.2.3+build.2', 'latest', '2.0.0-alpha', '2.0.0-beta'])(

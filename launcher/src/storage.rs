@@ -118,9 +118,10 @@ impl ContextPaths {
             })?;
             settings.default_cli_version = Some(version.to_owned());
         }
+        settings.auto_launcher_update = update_enabled(launcher.get("autoLauncherUpdate"));
+        settings.auto_cli_update = update_enabled(launcher.get("autoCLIUpdate"));
         // The TypeScript config module owns validation and persistence of the
-        // full config tree. Routing reads only the global selector, never
-        // project config or unrelated settings introduced by another CLI.
+        // full config tree. The launcher reads only its global settings.
         Ok(settings)
     }
 
@@ -149,17 +150,27 @@ impl ContextPaths {
     }
 }
 
+fn update_enabled(setting: Option<&serde_json::Value>) -> bool {
+    // Invalid values never authorize an automatic install. The CLI can still
+    // run and report or repair the invalid setting.
+    setting.is_none_or(|value| value.as_bool() == Some(true))
+}
+
 /// File locks release automatically on process termination; stale lock files are
 /// harmless and must never be removed while another process can be using them.
-pub fn lock(path: &Path) -> Result<File> {
+pub(crate) fn open_lock(path: &Path) -> Result<File> {
     fs::create_dir_all(path.parent().context("Lock path has no parent.")?)?;
-    let file = OpenOptions::new()
+    OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
         .open(path)
-        .with_context(|| format!("Could not open {}.", path.display()))?;
+        .with_context(|| format!("Could not open {}.", path.display()))
+}
+
+pub fn lock(path: &Path) -> Result<File> {
+    let file = open_lock(path)?;
     file.lock()
         .with_context(|| format!("Could not lock {}.", path.display()))?;
     Ok(file)

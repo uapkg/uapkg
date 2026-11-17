@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod diagnostics;
 pub mod engines;
 pub mod github;
+mod maintenance;
 pub mod model;
 pub mod routing;
 pub mod storage;
@@ -15,7 +16,7 @@ use std::{ffi::OsString, io::Write, process::Command};
 use storage::ContextPaths;
 
 pub fn run(args: Vec<OsString>) -> Result<i32> {
-    let invocation = Invocation::parse(args)?;
+    let invocation = Invocation::parse(args.clone())?;
     let debug_info = diagnostics::requested(&invocation.args);
     // Build identity checks validate staged executables without loading a
     // profile or entering update recovery recursively.
@@ -37,6 +38,24 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
     if invocation.scope() == Scope::Launcher && !debug_info {
         return launcher_command(&context, &invocation);
     }
+    let settings = if context.ownership() == "development" {
+        None
+    } else {
+        Some(context.settings()?)
+    };
+    let mut launcher_notices = vec![];
+    if let Some(settings) = &settings
+        && !invocation.offline
+        && !debug_info
+    {
+        let update = updater::maintain(&context, settings.auto_launcher_update);
+        if update.restart
+            && let Some(code) = updater::resume(&context, &args)?
+        {
+            return Ok(code);
+        }
+        launcher_notices = update.notices;
+    }
     if invocation.command.is_none()
         && (invocation.args.is_empty()
             || invocation
@@ -45,49 +64,66 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
                 .any(|arg| arg == "--help" || arg == "-h"))
     {
         println!(
-            "Launcher commands: launcher, version, self-update. See `uapkg launcher --help`.\nLauncher options: --cli-version <version-selector>, --offline. Place them anywhere after uapkg, before --.\n"
+            "Launcher commands: launcher, version, launcher-update. See `uapkg launcher --help`.\nLauncher options: --cli-version <version-selector>, --offline. Place them anywhere after uapkg, before --.\n"
         );
         std::io::stdout().flush()?;
     }
-    if context
-        .receipt
-        .as_ref()
-        .and_then(|receipt| receipt.development.as_ref())
-        .is_some()
-    {
+    let Some(settings) = settings else {
         ensure!(
             invocation.override_version.is_none(),
             "--cli-version is unavailable for a development checkout binding. Use an official launcher for released CLI versions."
         );
         let diagnostic = diagnostics::for_development(&context, &invocation);
         return delegate_development(&context, &invocation.args, diagnostic.as_ref());
-    }
-    let settings = context.settings()?;
+    };
     let cwd = std::env::current_dir()?;
     let mut selection = routing::select(&invocation, &cwd, context.default_version(&settings))?;
-    let mut resolution = catalog::resolve(
-        &context,
-        "cli",
-        &selection.version,
-        invocation.offline || debug_info,
-        false,
-    )?;
-    if !debug_info {
-        resolution
-            .messages
-            .extend(catalog::launcher_notices(&context, invocation.offline)?);
-    }
-    let install_reason = selection.install_reason(&resolution.version);
-    let installed = engines::ensure_installed_with_reason(
-        &context,
-        &resolution.version,
-        invocation.offline || debug_info,
-        Some(&install_reason),
-    )?;
+    let offline = invocation.offline || debug_info;
+    let global_latest = selection.uses_global_latest();
+    let active = if global_latest {
+        catalog::active_version(&context, "cli", "latest")?
+    } else {
+        None
+    };
+    let known_active = active.is_some();
+    // A required first-time installation is itself an online check. Pace the
+    // next optional refresh from that attempt without making bootstrap depend on it.
+    let bootstrap = if global_latest && !offline && !known_active {
+        maintenance::claim(&maintenance::cli_directory(&context), false)
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    let mut resolution = if let Some(version) = active {
+        catalog::Resolution {
+            requested: "latest".into(),
+            version,
+            messages: vec![],
+        }
+    } else {
+        catalog::resolve(&context, "cli", &selection.version, offline, false)?
+    };
+    let updated = if known_active && !offline {
+        maintenance::maintain_cli(&context, &mut resolution, settings.auto_cli_update)
+    } else {
+        None
+    };
+    let installed = match updated {
+        Some(installed) => installed,
+        None => engines::ensure_installed_with_reason(
+            &context,
+            &resolution.version,
+            offline,
+            Some(&selection.install_reason(&resolution.version)),
+        )?,
+    };
     selection.version.clone_from(&resolution.version);
-    if !debug_info {
+    if !debug_info && !known_active {
         catalog::activate(&context, "cli", &resolution)?;
     }
+    drop(bootstrap);
+    resolution.messages.extend(launcher_notices);
     let diagnostic = diagnostics::for_release(
         &context,
         &invocation,
@@ -111,10 +147,11 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
     match (invocation.command.as_deref(), args.as_slice()) {
         (Some("launcher"), ["--help"] | ["-h"] | []) => {
             println!(
-                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  version install <version-selector>\n  version list\n  version default [version-selector]\n  version current\n  self-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
+                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  version install <version-selector>\n  version list\n  version default [version-selector]\n  version current\n  launcher-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
             );
         }
         (Some("version"), ["install", version]) => {
+            let _check = track_explicit_cli_check(context, version, invocation.offline)?;
             let resolution = catalog::resolve(context, "cli", version, invocation.offline, true)?;
             catalog::emit(&resolution.messages);
             let installed =
@@ -142,10 +179,12 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
             );
         }
         (Some("version"), ["default", version]) => {
+            let _check = track_explicit_cli_check(context, version, invocation.offline)?;
             let resolution = catalog::resolve(context, "cli", version, invocation.offline, true)?;
             let installed =
                 engines::ensure_installed(context, &resolution.version, invocation.offline)?;
             catalog::activate(context, "cli", &resolution)?;
+            drop(_check);
             let args = [
                 "config",
                 "set",
@@ -197,26 +236,30 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
         (Some("version"), ["--help"] | ["-h"] | []) => println!(
             "Usage: uapkg version install <version-selector> | list | default [version-selector] | current"
         ),
-        (Some("self-update"), []) => {
-            ensure!(
-                !invocation.offline,
-                "Self-update requires an online connection."
-            );
-            updater::update(context, None)?;
-        }
-        (Some("self-update"), ["--help"] | ["-h"]) => println!(
-            "Usage: uapkg self-update [launcher-version]\nUpdates only a standalone launcher. CLI defaults and project pins are unchanged."
+        (Some("launcher-update" | "self-update"), ["--help"] | ["-h"]) => println!(
+            "Usage: uapkg launcher-update [launcher-version]\nUpdates a standalone launcher."
         ),
-        (Some("self-update"), [version]) => {
+        (Some("launcher-update" | "self-update"), [] | [_]) => {
             ensure!(
                 !invocation.offline,
-                "Self-update requires an online connection."
+                "Launcher updates require an online connection."
             );
-            updater::update(context, Some(version))?;
+            updater::update(context, args.first().copied())?;
         }
         _ => bail!("Unknown launcher command. Run `uapkg launcher --help` for usage."),
     }
     Ok(0)
+}
+
+fn track_explicit_cli_check(
+    context: &ContextPaths,
+    version: &str,
+    offline: bool,
+) -> Result<Option<std::fs::File>> {
+    if version == "latest" && !offline && context.ownership() != "development" {
+        return maintenance::claim(&maintenance::cli_directory(context), true);
+    }
+    Ok(None)
 }
 
 fn delegate_development(

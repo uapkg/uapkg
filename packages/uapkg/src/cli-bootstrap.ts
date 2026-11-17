@@ -1,7 +1,9 @@
 import Config from '@uapkg/config';
 import Log, { configureLogger } from '@uapkg/log';
+import { registerLauncherNoticeFooter } from '#cli/cli/LauncherNotices.ts';
 import { runUAPKGCLI } from '#cli/cli/runUAPKGCLI.ts';
 
+registerLauncherNoticeFooter();
 Config.reload({ cwd: process.cwd() });
 configureLogger({
   isVerboseEnabled: () => Config.get('term.verbose') === true,

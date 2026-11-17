@@ -53,12 +53,12 @@ The launcher searches upward for the nearest game project, skipping plugin
 manifests. An unpinned project uses the global default. One CLI handles the
 complete dependency graph; dependency manifests do not select another CLI.
 
-| Command                              | CLI selection                                      |
-| ------------------------------------ | -------------------------------------------------- |
-| `login`, `logout`, `whoami`          | Global default                                     |
-| Other CLI commands                   | Nearest project selector, otherwise global default |
-| `--cli-version <selector>`           | Explicit override                                  |
-| `launcher`, `version`, `self-update` | Handled by the launcher                            |
+| Command                                  | CLI selection                                      |
+| ---------------------------------------- | -------------------------------------------------- |
+| `login`, `logout`, `whoami`              | Global default                                     |
+| Other CLI commands                       | Nearest project selector, otherwise global default |
+| `--cli-version <selector>`               | Explicit override                                  |
+| `launcher`, `version`, `launcher-update` | Handled by the launcher                            |
 
 ```sh
 uapkg version install 1.6.0
@@ -92,9 +92,9 @@ this default. The installation receipt may supply a default when configuration
 has none. `--global` on a CLI configuration command controls configuration scope,
 not version selection.
 
-`latest` remembers an installed exact version separately. Ordinary commands
-continue to use it and report available stable updates. Run `uapkg version install
-latest` or `uapkg version default latest` to advance it explicitly.
+`latest` remembers the exact version installed in the cache. The global default
+continues to read `latest` after updates. Exact global versions and project
+selectors retain their own version selection rules.
 
 ## Preview versions
 
@@ -136,22 +136,43 @@ For the distribution cutover, install the new standalone launcher archive and
 select its default CLI; an older launcher cannot discover this distribution format.
 Keep unrelated configuration and authentication state.
 
-## Update the launcher
+## Launcher and global CLI updates
 
 ```sh
-uapkg self-update
-uapkg self-update 0.2.0
-uapkg self-update 0.3.0-beta
+uapkg launcher-update
+uapkg launcher-update 0.3.2
+uapkg launcher-update 0.3.0-beta
+uapkg version install latest
 ```
 
-Self-update uses the independent launcher catalog and the same selector and
-published replacement rules. It leaves CLI defaults and project selectors intact.
-A `latest` self-update remembers tracking intent and later commands report newer
-launcher versions; installing them remains explicit.
+The first eligible command checks for launcher updates, and subsequent commands
+check at most once every 24 hours per installation. The global CLI checks on the
+same cadence when the command selects a global default of `latest`. New stable
+versions are installed automatically. The original command continues with the
+updated launcher or CLI. If a check or automatic installation fails, the command
+can still use the installed version. Offline runs, diagnostics, launcher
+management commands, and development bindings skip periodic checks.
 
-Standalone launchers can update themselves. npm-, WinGet-, Homebrew-, Scoop-,
-and development-owned installations must use their owner's update method.
-An installation receipt records ownership independently of artifact hosting.
+Use either global setting to keep daily checks and install updates manually:
+
+```sh
+uapkg config set launcher.autoLauncherUpdate false
+uapkg config set launcher.autoCLIUpdate false
+```
+
+Use `uapkg config get <key>` to see the effective value. Both settings default to
+`true`. They require CLI 1.7.1 or later. To edit these settings while using an
+older pinned CLI, select a newer version for the config command with
+`--cli-version`. Availability notices appear before and after CLI output on stderr.
+
+`uapkg launcher-update` checks immediately and resets the launcher check interval.
+It follows the independent launcher catalog and its published selectors. An
+explicit exact launcher version stays selected until the next manual update.
+`uapkg self-update` is an alias for `uapkg launcher-update`.
+
+Standalone launchers can update themselves. Use the original package manager to
+update installations owned by npm, WinGet, Homebrew, or Scoop. The installation
+receipt records which tool owns the launcher.
 
 Updates verify the staged executable's version before replacement. A verified
 backup and transaction journal support recovery after interruption, including

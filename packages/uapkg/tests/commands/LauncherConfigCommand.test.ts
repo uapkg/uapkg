@@ -72,6 +72,31 @@ describe('launcher settings through the normal config command', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ term: { verbose: true } });
   });
 
+  it.each(['autoLauncherUpdate', 'autoCLIUpdate'])('modifies launcher.%s globally from a project', async (key) => {
+    const { file, project, invoke } = fixture();
+    const pathToProperty = `launcher.${key}`;
+    const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('true');
+
+    expect(await invoke({ action: 'set', pathToProperty, rawValue: 'false' })).toBe(0);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
+      term: { verbose: true },
+      launcher: { [key]: false },
+    });
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('false');
+
+    expect(await invoke({ action: 'set', pathToProperty, rawValue: 'true', scope: 'local' })).toBe(1);
+    expect(await invoke({ action: 'delete', pathToProperty, scope: 'local' })).toBe(1);
+    expect(fs.existsSync(path.join(project, '.uapkg'))).toBe(false);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).launcher).toEqual({ [key]: false });
+
+    expect(await invoke({ action: 'delete', pathToProperty })).toBe(0);
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('true');
+  });
+
   it.each([
     ['launcher.cliSource', 'winget'],
     ['launcher.defaultCliVersion', 'nightly'],

@@ -1,11 +1,14 @@
 use crate::{
-    archive, github,
+    archive,
+    catalog::{self, Index, Selector},
+    github, maintenance,
     model::{exact_version, platform, read_json, relative_path},
     storage::{ContextPaths, atomic_json, lock},
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
+    ffi::OsString,
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -59,7 +62,7 @@ fn paths(directory: &Path, transaction: &Transaction) -> Result<(PathBuf, PathBu
     Ok((directory.join(executable), directory.join(backup)))
 }
 
-fn health(executable: &Path, expected_version: &str) -> Result<()> {
+fn reported_version(executable: &Path) -> Result<Option<String>> {
     let mut child = Command::new(executable)
         .args(["launcher", "--version"])
         .stdin(Stdio::null())
@@ -86,8 +89,14 @@ fn health(executable: &Path, expected_version: &str) -> Result<()> {
         .context("Launcher health output is unavailable.")?
         .take(1024)
         .read_to_end(&mut stdout)?;
+    Ok(status
+        .success()
+        .then(|| String::from_utf8_lossy(&stdout).trim().to_owned()))
+}
+
+fn health(executable: &Path, expected_version: &str) -> Result<()> {
     ensure!(
-        status.success() && String::from_utf8_lossy(&stdout).trim() == expected_version,
+        reported_version(executable)?.as_deref() == Some(expected_version),
         "The staged launcher did not pass its version check."
     );
     Ok(())
@@ -116,9 +125,7 @@ pub fn rollback(directory: &Path, transaction: &Transaction) -> Result<()> {
                 target.display()
             )
         })?;
-    fs::remove_file(directory.join(JOURNAL))?;
-    remove_backup(&backup)?;
-    Ok(())
+    finish_transaction(directory, &backup)
 }
 
 /// A verified backup and journal exist before replacing the live executable.
@@ -150,25 +157,26 @@ pub fn recover(executable: &Path) -> Result<()> {
     if current_hash.as_deref() == Some(&transaction.next_sha256)
         && health(&target, &transaction.next_version).is_ok()
     {
-        fs::remove_file(journal)?;
-        if backup.exists() {
-            remove_backup(&backup)?;
-        }
-        return Ok(());
+        return finish_transaction(directory, &backup);
     }
     if current_hash.as_deref() == Some(&transaction.previous_sha256) {
-        fs::remove_file(journal)?;
-        if backup.exists() {
-            remove_backup(&backup)?;
-        }
-        return Ok(());
+        return finish_transaction(directory, &backup);
     }
     rollback(directory, &transaction)?;
     bail!("Recovered the previous launcher after an interrupted update. Run the command again.")
 }
 
+fn finish_transaction(directory: &Path, backup: &Path) -> Result<()> {
+    if backup.exists() {
+        remove_backup(backup)?;
+    }
+    fs::remove_file(directory.join(JOURNAL))?;
+    Ok(())
+}
+
 fn remove_backup(backup: &Path) -> Result<()> {
-    if std::env::current_exe()?.canonicalize()? == backup.canonicalize()? {
+    let running = std::env::current_exe()?.canonicalize().ok();
+    if running.as_ref() == Some(&backup.canonicalize()?) {
         self_replace::self_delete().context("The launcher was recovered, but its running backup could not be scheduled for cleanup.")?;
     } else {
         fs::remove_file(backup)?;
@@ -180,7 +188,7 @@ pub fn ownership_instructions(method: &str) -> Result<()> {
     match method {
         "standalone" => Ok(()),
         "npm" => bail!(
-            "npm owns this launcher installation. Update it with npm; self-update will not replace package-manager files."
+            "npm owns this launcher installation. Use npm to update the package that installed UAPKG."
         ),
         "winget" => bail!(
             "WinGet owns this launcher installation. Use WinGet to update the package that installed UAPKG."
@@ -200,30 +208,195 @@ pub fn ownership_instructions(method: &str) -> Result<()> {
     }
 }
 
+#[derive(Default)]
+pub struct UpdateMaintenance {
+    pub restart: bool,
+    pub notices: Vec<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateMode {
+    Automatic,
+    ManualLatest,
+    ManualSelected,
+}
+
+enum Replacement {
+    Installed,
+    AlreadyPresent(String),
+}
+
+fn tracked_selector(context: &ContextPaths) -> Result<String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Tracking {
+        selector: String,
+        version: String,
+    }
+
+    let path = context.home.join("catalog/launcher/tracking.json");
+    if !path.exists() {
+        return Ok("latest".into());
+    }
+    let tracking: Tracking = read_json(&path)?;
+    exact_version(&tracking.version)?;
+    Ok(tracking.selector)
+}
+
+fn update_notices(current: &str, next: &str, owner: &str, requested: &str) -> Vec<String> {
+    let action = match owner {
+        "standalone" if requested == "latest" => {
+            "Use `uapkg launcher-update` to install it.".into()
+        }
+        "standalone" => format!("Use `uapkg launcher-update {requested}` to install it."),
+        "npm" => "Use npm to update the package that installed UAPKG.".into(),
+        "winget" => "Use WinGet to update the package that installed UAPKG.".into(),
+        "homebrew" => "Use Homebrew to update the formula that installed UAPKG.".into(),
+        "scoop" => "Use Scoop to update the package that installed UAPKG.".into(),
+        _ => "Update UAPKG through its original installation method.".into(),
+    };
+    vec![
+        format!("A new UAPKG launcher update is available. {current} -> {next}"),
+        action,
+    ]
+}
+
+/// A launcher update is optional for a delegated command. Reuse a verified
+/// index for reminders and require a fresh index before automatic replacement.
+pub fn maintain(context: &ContextPaths, auto_update: bool) -> UpdateMaintenance {
+    if context.ownership() == "development"
+        || github::catalog_key().is_none_or(|key| key.trim().is_empty())
+    {
+        return UpdateMaintenance::default();
+    }
+    maintain_from_catalog(context, auto_update).unwrap_or_else(|error| {
+        eprintln!("uapkg: Could not check for launcher updates. {error:#}");
+        UpdateMaintenance::default()
+    })
+}
+
+fn maintain_from_catalog(context: &ContextPaths, auto_update: bool) -> Result<UpdateMaintenance> {
+    let requested = tracked_selector(context)?;
+    if catalog::selector(&requested)? == Selector::Exact {
+        return Ok(UpdateMaintenance::default());
+    }
+
+    let attempt = maintenance::claim(&maintenance::launcher_directory(context), false)?;
+    let fresh = if attempt.is_some() {
+        match catalog::refresh_index(context, "launcher") {
+            Ok(index) => Some(index),
+            Err(error) => {
+                eprintln!("uapkg: Could not check for launcher updates. {error:#}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let perform_update = fresh.is_some() && auto_update && context.ownership() == "standalone";
+    let index = match fresh {
+        Some(index) => index,
+        None => match catalog::index(context, "launcher", true) {
+            Ok(Some(index)) => index,
+            _ => return Ok(UpdateMaintenance::default()),
+        },
+    };
+    let Some(next) = index.aliases.get(&requested) else {
+        return Ok(UpdateMaintenance::default());
+    };
+    let current = crate::model::VERSION;
+    if !exact_version(next)?
+        .cmp_precedence(&exact_version(current)?)
+        .is_gt()
+        || index.supports(next, platform()?).is_err()
+    {
+        return Ok(UpdateMaintenance::default());
+    }
+
+    if perform_update {
+        match install(context, next, &index, UpdateMode::Automatic) {
+            Ok(Replacement::Installed) => {
+                // Maintenance keeps following the existing selector. The next
+                // launcher can reuse that intent with the timestamp we saved.
+                eprintln!("uapkg: Updated launcher to {next}.");
+                return Ok(UpdateMaintenance {
+                    restart: true,
+                    notices: Vec::new(),
+                });
+            }
+            Ok(Replacement::AlreadyPresent(_)) => {
+                return Ok(UpdateMaintenance {
+                    restart: true,
+                    notices: Vec::new(),
+                });
+            }
+            Err(error) => {
+                eprintln!("uapkg: Could not update the launcher automatically. {error:#}");
+            }
+        }
+    }
+
+    Ok(UpdateMaintenance {
+        restart: false,
+        notices: update_notices(current, next, context.ownership(), &requested),
+    })
+}
+
 pub fn update(context: &ContextPaths, requested: Option<&str>) -> Result<()> {
     ownership_instructions(context.ownership())?;
-    let resolution = crate::catalog::resolve(
-        context,
-        "launcher",
-        requested.unwrap_or("latest"),
-        false,
-        true,
-    )?;
+    let requested = requested.unwrap_or("latest");
+    let selector = catalog::selector(requested)?;
+    let _attempt = maintenance::claim(&maintenance::launcher_directory(context), true)?
+        .context("Could not reserve the launcher update check.")?;
+    let resolution = catalog::resolve(context, "launcher", requested, false, true)?;
     let current = exact_version(crate::model::VERSION)?;
-    if matches!(requested, None | Some("latest"))
+    if selector == Selector::Latest
         && exact_version(&resolution.version)?
             .cmp_precedence(&current)
             .is_le()
     {
-        crate::catalog::activate(context, "launcher", &resolution)?;
+        catalog::activate(context, "launcher", &resolution)?;
         println!("The launcher is up to date.");
         return Ok(());
     }
-    crate::catalog::emit(&resolution.messages);
-    let client = github::client()?;
-    let index = crate::catalog::index(context, "launcher", false)?
+    catalog::emit(&resolution.messages);
+    let offline = selector != Selector::Exact;
+    let index = catalog::index(context, "launcher", offline)?
         .context("No verified launcher index is available.")?;
-    index.supports(&resolution.version, platform()?)?;
+    let mode = if selector == Selector::Latest {
+        UpdateMode::ManualLatest
+    } else {
+        UpdateMode::ManualSelected
+    };
+    let mut resolution = resolution;
+    match install(context, &resolution.version, &index, mode)? {
+        Replacement::Installed => {
+            catalog::activate(context, "launcher", &resolution)?;
+            println!("Updated launcher to {}.", resolution.version);
+            catalog::emit(&resolution.messages);
+        }
+        Replacement::AlreadyPresent(version) => {
+            resolution.version = version;
+            catalog::activate(context, "launcher", &resolution)?;
+            println!("The launcher is up to date.");
+        }
+    }
+    Ok(())
+}
+
+fn install(
+    context: &ContextPaths,
+    version: &str,
+    index: &Index,
+    mode: UpdateMode,
+) -> Result<Replacement> {
+    let client = if mode == UpdateMode::Automatic {
+        github::client_with_timeout(Duration::from_secs(30))?
+    } else {
+        github::client()?
+    };
+    let target = platform()?;
+    index.supports(version, target)?;
     let directory = context
         .executable
         .parent()
@@ -232,13 +405,7 @@ pub fn update(context: &ContextPaths, requested: Option<&str>) -> Result<()> {
         .prefix(".uapkg-update-")
         .tempdir_in(directory)?;
     let archive_path = temporary.path().join("launcher.tar.gz");
-    github::download_artifact(
-        &client,
-        "launcher",
-        &resolution.version,
-        platform()?,
-        &archive_path,
-    )?;
+    github::download_artifact(&client, "launcher", version, target, &archive_path)?;
     let extracted = temporary.path().join("launcher");
     archive::extract(&archive_path, &extracted)?;
     let next = extracted.join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
@@ -246,22 +413,69 @@ pub fn update(context: &ContextPaths, requested: Option<&str>) -> Result<()> {
         next.is_file(),
         "Launcher archive does not contain its executable."
     );
-    replace_staged(context, &next, &resolution.version)?;
-    crate::catalog::activate(context, "launcher", &resolution)?;
-    crate::catalog::emit(&resolution.messages);
-    Ok(())
+    replace_staged_with_mode(context, &next, version, mode)
+}
+
+/// Start the already checked replacement with the original arguments and
+/// inherited process context. Only a failure before launch permits fallback.
+pub fn resume(context: &ContextPaths, args: &[OsString]) -> Result<Option<i32>> {
+    let mut command = Command::new(&context.executable);
+    command
+        .args(args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+
+    #[cfg(unix)]
+    let error = {
+        use std::os::unix::process::CommandExt;
+        command.exec()
+    };
+    #[cfg(not(unix))]
+    let error = {
+        #[cfg(windows)]
+        windows_console_handler()?;
+        match command.spawn() {
+            Ok(mut child) => {
+                let status = child
+                    .wait()
+                    .context("Could not wait for the updated launcher.")?;
+                return Ok(Some(status.code().unwrap_or(1)));
+            }
+            Err(error) => error,
+        }
+    };
+
+    eprintln!(
+        "uapkg: Could not start the updated launcher. Continuing this command with the running launcher. {error}"
+    );
+    Ok(None)
+}
+
+#[cfg(windows)]
+pub(crate) fn windows_console_handler() -> Result<()> {
+    match ctrlc::try_set_handler(|| {}) {
+        Ok(()) | Err(ctrlc::Error::MultipleHandlers) => Ok(()),
+        Err(error) => Err(error).context("Could not initialize console signal handling."),
+    }
 }
 
 /// Complete a replacement after the caller has verified and extracted a signed
 /// artifact. This phase is separate so recovery and the platform replacement
 /// helper can be tested without publishing a release or using the network.
 pub fn replace_staged(context: &ContextPaths, next: &Path, version: &str) -> Result<()> {
+    replace_staged_with_mode(context, next, version, UpdateMode::ManualSelected)?;
+    Ok(())
+}
+
+fn replace_staged_with_mode(
+    context: &ContextPaths,
+    next: &Path,
+    version: &str,
+    mode: UpdateMode,
+) -> Result<Replacement> {
     ownership_instructions(context.ownership())?;
     exact_version(version)?;
-    ensure!(
-        context.executable.canonicalize()? == std::env::current_exe()?.canonicalize()?,
-        "Only the running launcher can replace itself."
-    );
     let directory = context
         .executable
         .parent()
@@ -270,6 +484,20 @@ pub fn replace_staged(context: &ContextPaths, next: &Path, version: &str) -> Res
     ensure!(
         !directory.join(JOURNAL).exists(),
         "An earlier launcher update needs recovery. Run UAPKG again before updating."
+    );
+    if mode != UpdateMode::ManualSelected {
+        // Different profiles may share this installation. Inspect the live
+        // binary under its installation lock, after downloading the candidate.
+        let live = reported_version(&context.executable)
+            .context("Could not check the installed launcher version.")?
+            .context("The installed launcher did not report its version.")?;
+        if keep_installed(&live, version, crate::model::VERSION, mode)? {
+            return Ok(Replacement::AlreadyPresent(live));
+        }
+    }
+    ensure!(
+        context.executable.canonicalize()? == std::env::current_exe()?.canonicalize()?,
+        "Only the running launcher can replace itself."
     );
     health(next, version)?;
     let name = context
@@ -283,12 +511,16 @@ pub fn replace_staged(context: &ContextPaths, next: &Path, version: &str) -> Res
         format!("{name}.backup")
     };
     let backup = directory.join(&backup_name);
-    ensure!(
-        !backup.exists(),
-        "A launcher backup already exists at {}. Keep it until you have checked the current installation.",
-        backup.display()
-    );
     let previous_sha256 = archive::sha256(&context.executable)?;
+    if backup.exists() {
+        ensure!(
+            archive::sha256(&backup)? == previous_sha256,
+            "A launcher backup already exists at {}. Keep it until you have checked the current installation.",
+            backup.display()
+        );
+        // A crash between writing the backup and journal can leave an orphan.
+        fs::remove_file(&backup)?;
+    }
     fs::copy(&context.executable, &backup).context("Could not create the launcher backup.")?;
     fs::OpenOptions::new()
         .write(true)
@@ -312,22 +544,63 @@ pub fn replace_staged(context: &ContextPaths, next: &Path, version: &str) -> Res
     // after exit; it does not invoke a shell or overwrite an open executable.
     if let Err(error) = self_replace::self_replace(next) {
         if archive::sha256(&context.executable).ok().as_deref()
-            != Some(&transaction.previous_sha256)
+            == Some(&transaction.previous_sha256)
         {
+            finish_transaction(directory, &backup)?;
+        } else {
             rollback(directory, &transaction)?;
         }
-        return Err(error).context("Could not replace the launcher. The verified backup and update record are available for recovery.");
+        return Err(error)
+            .context("Could not replace the launcher. The previous launcher is still installed.");
     }
     if let Err(error) = health(&context.executable, &transaction.next_version) {
         rollback(directory, &transaction)?;
         return Err(error)
             .context("The updated launcher failed its check; the previous launcher was restored.");
     }
-    fs::remove_file(directory.join(JOURNAL))?;
-    fs::remove_file(backup)?;
-    println!(
-        "Updated launcher to {}. Your default CLI and project pins are unchanged.",
-        transaction.next_version
-    );
-    Ok(())
+    finish_transaction(directory, &backup)?;
+    Ok(Replacement::Installed)
+}
+
+fn keep_installed(live: &str, candidate: &str, running: &str, mode: UpdateMode) -> Result<bool> {
+    let live = exact_version(live)?;
+    Ok(!exact_version(candidate)?.cmp_precedence(&live).is_gt()
+        || (mode == UpdateMode::Automatic && live != exact_version(running)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_replacement_hands_off_to_a_launcher_installed_by_another_process() {
+        for candidate in ["0.9.0", "0.10.0", "0.11.0"] {
+            assert!(keep_installed("0.10.0", candidate, "0.8.0", UpdateMode::Automatic).unwrap());
+        }
+        assert!(keep_installed("0.7.0", "0.9.0", "0.8.0", UpdateMode::Automatic).unwrap());
+        assert!(!keep_installed("0.8.0", "0.9.0", "0.8.0", UpdateMode::Automatic).unwrap());
+        assert!(keep_installed("0.10.0", "0.9.0", "0.8.0", UpdateMode::ManualLatest).unwrap());
+        assert!(!keep_installed("0.10.0", "0.11.0", "0.8.0", UpdateMode::ManualLatest).unwrap());
+    }
+
+    #[test]
+    fn a_fresh_launcher_tracks_latest_and_an_explicit_exact_update_stays_pinned() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("launcher"),
+            receipt: None,
+        };
+        assert_eq!(tracked_selector(&context).unwrap(), "latest");
+        atomic_json(
+            &context.home.join("catalog/launcher/tracking.json"),
+            &serde_json::json!({"selector":"0.1.2", "version":"0.1.2"}),
+        )
+        .unwrap();
+        let action = maintain(&context, true);
+        assert_eq!(tracked_selector(&context).unwrap(), "0.1.2");
+        assert!(!action.restart);
+        assert!(action.notices.is_empty());
+        assert!(!maintenance::launcher_directory(&context).exists());
+    }
 }

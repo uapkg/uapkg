@@ -15,7 +15,7 @@ import type {
 } from '#config/contracts/ConfigTypes.ts';
 import { ConfigFileRepository } from '#config/files/ConfigFileRepository.ts';
 import { ConfigPathResolver } from '#config/files/ConfigPathResolver.ts';
-import { partialConfigSchema } from '#config/schema/configSchema.ts';
+import { launcherUpdateKeys, partialConfigSchema } from '#config/schema/configSchema.ts';
 import { deleteValueByPath, setValueByPath, validateConfigPath } from '#config/schema/pathSchema.ts';
 
 export class ConfigWriter {
@@ -69,7 +69,9 @@ export class ConfigWriter {
       return bag.toFailure();
     }
 
-    const targetFile = this.resolveWriteTarget(cwd, options.scope);
+    const target = this.resolveWriteTarget(cwd, pathToProperty, options.scope);
+    if (!target.ok) return target;
+    const targetFile = target.value;
     const readResult = this.repository.read(targetFile);
     if (!readResult.ok) {
       bag.mergeArray(readResult.diagnostics);
@@ -103,7 +105,9 @@ export class ConfigWriter {
       return bag.toFailure();
     }
 
-    const targetFile = this.resolveWriteTarget(cwd, options.scope);
+    const target = this.resolveWriteTarget(cwd, pathToProperty, options.scope);
+    if (!target.ok) return target;
+    const targetFile = target.value;
     const readResult = this.repository.read(targetFile);
     if (!readResult.ok) {
       bag.mergeArray(readResult.diagnostics);
@@ -137,18 +141,13 @@ export class ConfigWriter {
     return this.getEditTarget(cwd, inferredScope);
   }
 
-  private resolveWriteTarget(cwd: string, scope?: ConfigScope) {
-    if (scope === 'global') {
-      return this.pathResolver.resolve(cwd).globalFile;
+  private resolveWriteTarget(cwd: string, pathToProperty: string, scope?: ConfigScope): Result<string> {
+    const globalOnly = launcherUpdateKeys.some((key) => pathToProperty === `launcher.${key}`);
+    if (globalOnly && scope === 'local') {
+      return fail([createParseErrorDiagnostic(`Use --global to edit ${pathToProperty}`)]);
     }
 
-    if (scope === 'local') {
-      return this.pathResolver.resolveLocalWriteTarget(cwd);
-    }
-
-    return this.pathResolver.isInProject(cwd)
-      ? this.pathResolver.resolveLocalWriteTarget(cwd)
-      : this.pathResolver.resolve(cwd).globalFile;
+    return ok(this.getEditTarget(cwd, globalOnly ? 'global' : scope));
   }
 
   toDisplayPath(cwd: string, filePath: string) {

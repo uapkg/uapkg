@@ -231,6 +231,13 @@ pub fn index(context: &ContextPaths, product: &str, offline: bool) -> Result<Opt
     }
     Ok(value)
 }
+
+pub fn refresh_index(context: &ContextPaths, product: &str) -> Result<Index> {
+    github::refresh_document(context, product, "index.json", |index: &Index| {
+        index.validate(product)
+    })
+}
+
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Resolutions {
@@ -243,7 +250,39 @@ pub struct Resolution {
     pub version: String,
     pub messages: Vec<String>,
 }
-/// Stable tracking is activated only after successful explicit installation.
+
+fn read_resolutions(path: &std::path::Path) -> Result<Resolutions> {
+    match read_json(path) {
+        Ok(state) => Ok(state),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            Ok(Resolutions::default())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub fn active_version(
+    context: &ContextPaths,
+    product: &str,
+    requested: &str,
+) -> Result<Option<String>> {
+    let path = context
+        .home
+        .join("catalog")
+        .join(product)
+        .join("resolutions.json");
+    let active = read_resolutions(&path)?.active.remove(requested);
+    if let Some(version) = &active {
+        exact(version)?;
+    }
+    Ok(active)
+}
+
+/// Stable tracking is activated only after a successful installation.
 /// Preview movement is entirely published metadata; no local retirement clock exists.
 pub fn resolve(
     context: &ContextPaths,
@@ -280,34 +319,21 @@ pub fn resolve(
             let latest = index
                 .as_ref()
                 .and_then(|index| index.aliases.get(requested).cloned());
-            let state_path = context
-                .home
-                .join("catalog")
-                .join(product)
-                .join("resolutions.json");
-            let state: Resolutions = if state_path.exists() {
-                read_json(&state_path)?
-            } else {
-                Resolutions::default()
-            };
-            let active = state.active.get(requested);
-            if let Some(active) = active {
-                exact(active)?;
-            }
+            let active = active_version(context, product, requested)?;
             if kind == Selector::Latest
                 && !explicit
-                && let Some(active) = active
+                && let Some(active) = &active
             {
                 if let Some(latest) = &latest
                     && exact_version(latest)?
                         .cmp_precedence(&exact_version(active)?)
                         .is_gt()
                 {
-                    messages.push(format!("A new {product} version is available: {active} -> {latest}. Run `uapkg {}` to update.", if product == "cli" { "version install latest" } else { "self-update" }));
+                    messages.push(format!("A new {product} version is available: {active} -> {latest}. Run `uapkg {}` to update.", if product == "cli" { "version install latest" } else { "launcher-update" }));
                 }
                 active.clone()
             } else {
-                latest.or_else(|| active.cloned()).with_context(|| format!("No verified resolution is cached for {product} {requested}. Connect to releases.uapkg.dev and retry."))?
+                latest.or(active).with_context(|| format!("No verified resolution is cached for {product} {requested}. Connect to releases.uapkg.dev and retry."))?
             }
         }
     };
@@ -332,49 +358,24 @@ pub fn activate(context: &ContextPaths, product: &str, resolution: &Resolution) 
     if selector(&resolution.requested)? == Selector::Exact {
         return Ok(());
     }
-    exact(&resolution.version)?;
+    let candidate = exact(&resolution.version)?;
     let directory = context.home.join("catalog").join(product);
     let _lock = lock(&directory.join("resolutions.lock"))?;
     let path = directory.join("resolutions.json");
-    let mut state: Resolutions = if path.exists() {
-        read_json(&path)?
-    } else {
-        Resolutions::default()
-    };
+    let mut state = read_resolutions(&path)?;
+    if let Some(active) = state.active.get(&resolution.requested)
+        && (active == &resolution.version
+            || (product == "cli"
+                && resolution.requested == "latest"
+                && !candidate.cmp_precedence(&exact(active)?).is_gt()))
+    {
+        return Ok(());
+    }
     state
         .active
         .insert(resolution.requested.clone(), resolution.version.clone());
     atomic_json(&path, &state)
 }
-pub fn launcher_notices(context: &ContextPaths, offline: bool) -> Result<Vec<String>> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Tracking {
-        selector: String,
-        version: String,
-    }
-    let path = context.home.join("catalog/launcher/tracking.json");
-    if !path.exists() {
-        return Ok(vec![]);
-    }
-    let tracking: Tracking = read_json(&path)?;
-    exact(&tracking.version)?;
-    let resolved = resolve(context, "launcher", &tracking.selector, offline, true)?;
-    let mut messages = resolved.messages;
-    if exact_version(&resolved.version)?
-        .cmp_precedence(&exact_version(crate::model::VERSION)?)
-        .is_gt()
-    {
-        messages.push(format!(
-            "A new launcher version is available: {} -> {}. Run `uapkg self-update {}` to update.",
-            crate::model::VERSION,
-            resolved.version,
-            tracking.selector
-        ));
-    }
-    Ok(messages)
-}
-
 pub fn emit(messages: &[String]) {
     for message in messages {
         eprintln!("uapkg: {message}");

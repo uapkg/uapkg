@@ -23,7 +23,7 @@ const noticesSchema = z
   .strict();
 
 /** Consume once so nested CLI processes cannot repeat their parent's notices. */
-export function registerLauncherNoticeFooter(): () => void {
+export function registerLauncherNoticeFooter(): void {
   const raw = process.env.UAPKG_LAUNCHER_NOTICES;
   delete process.env.UAPKG_LAUNCHER_NOTICES;
   let messages: string[] = [];
@@ -35,21 +35,14 @@ export function registerLauncherNoticeFooter(): () => void {
       /* Malformed inherited context must not change command behavior. */
     }
   }
-  let emitted = false;
-  const emit = () => {
-    if (emitted) return;
-    emitted = true;
-    process.removeListener('exit', emit);
-    if (messages.length) {
-      // Also works in yargs' synchronous help/error exit path. A closed stderr
-      // must not replace the command's own result or exit status.
-      try {
-        writeSync(2, messages.map((message) => `uapkg: ${message}\n`).join(''));
-      } catch {
-        /* Preserve command status. */
-      }
+  if (messages.length === 0) return;
+  process.once('exit', () => {
+    // Run after bootstrap reports command errors. Synchronous stderr writes
+    // also work when the argument parser exits without returning.
+    try {
+      writeSync(2, `\n${messages.map((message) => `uapkg: ${message}\n`).join('')}`);
+    } catch {
+      /* Preserve command status when stderr is closed. */
     }
-  };
-  if (messages.length) process.once('exit', emit);
-  return emit;
+  });
 }

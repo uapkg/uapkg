@@ -1,5 +1,5 @@
 use crate::{
-    archive, diagnostics, github,
+    archive, catalog, diagnostics, github,
     model::{Engine, exact_version, platform, read_json, relative_path},
     storage::{ContextPaths, atomic_json, lock},
 };
@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsString,
     fs,
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Duration,
 };
 
 #[derive(Deserialize, Serialize)]
@@ -53,13 +55,36 @@ pub(crate) fn ensure_installed_with_reason(
     offline: bool,
     reason: Option<&str>,
 ) -> Result<InstalledEngine> {
+    install_release(context, version, offline, reason, None)
+}
+
+pub(crate) fn install_cli_update(
+    context: &ContextPaths,
+    version: &str,
+    index: &catalog::Index,
+) -> Result<InstalledEngine> {
+    install_release(context, version, false, None, Some(index))
+}
+
+fn install_release(
+    context: &ContextPaths,
+    version: &str,
+    offline: bool,
+    reason: Option<&str>,
+    verified_index: Option<&catalog::Index>,
+) -> Result<InstalledEngine> {
     exact_version(version)?;
     let target = platform()?;
     install_cached(context, version, offline, |stage| {
-        let client = github::client()?;
-        let index = crate::catalog::index(context, "cli", false)?
-            .context("No verified CLI index is available.")?;
-        index.supports(version, target)?;
+        let client = if let Some(index) = verified_index {
+            index.supports(version, target)?;
+            github::client_with_timeout(Duration::from_secs(30))?
+        } else {
+            catalog::index(context, "cli", false)?
+                .context("No verified CLI index is available.")?
+                .supports(version, target)?;
+            github::client()?
+        };
         let progress = format!("Installing UAPKG CLI {version}...");
         if let Some(reason) = reason {
             eprintln!("{reason}\n{progress}");
@@ -175,8 +200,14 @@ pub fn delegate(
             .root
             .join(relative_path(&installed.engine.executable)?),
     );
-    crate::catalog::emit(notices);
-    crate::catalog::apply_notices(&mut command, notices)?;
+    catalog::apply_notices(&mut command, notices)?;
+    if !notices.is_empty() {
+        let mut stderr = std::io::stderr().lock();
+        for notice in notices {
+            let _ = writeln!(stderr, "uapkg: {notice}");
+        }
+        let _ = writeln!(stderr);
+    }
     for arg in &installed.engine.args {
         command.arg(installed.root.join(relative_path(arg)?));
     }
@@ -209,7 +240,7 @@ pub fn execute(
         // Both processes share the console. Let Node handle Ctrl+C; the parent
         // waits so that it returns the child's actual status instead of exiting
         // first and leaving a live CLI behind.
-        ctrlc::set_handler(|| {}).context("Could not initialize console signal handling.")?;
+        crate::updater::windows_console_handler()?;
         let status = command
             .status()
             .context("Could not start the selected UAPKG CLI.")?;

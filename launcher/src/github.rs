@@ -42,10 +42,14 @@ fn allowed_host(url: &Url) -> bool {
     )
 }
 pub fn client() -> Result<Client> {
+    client_with_timeout(Duration::from_secs(300))
+}
+
+pub fn client_with_timeout(timeout: Duration) -> Result<Client> {
     Ok(Client::builder()
         .user_agent(concat!("uapkg-launcher/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(300))
+        .timeout(timeout)
         .redirect(Policy::custom(|attempt| {
             if attempt.url().scheme() != "https" || !allowed_host(attempt.url()) {
                 attempt.error("Refusing a redirect outside UAPKG and GitHub release hosting")
@@ -100,9 +104,13 @@ pub fn verify(bytes: &[u8], signature: &str, key: &str) -> Result<()> {
         .context("Release signature verification failed. Nothing was installed.")
 }
 fn metadata(client: &Client, url: Url) -> Result<Vec<u8>> {
+    metadata_with_timeout(client, url, Duration::from_secs(10))
+}
+
+fn metadata_with_timeout(client: &Client, url: Url, timeout: Duration) -> Result<Vec<u8>> {
     let response = client
         .get(url)
-        .timeout(Duration::from_secs(10))
+        .timeout(timeout)
         .send()?
         .error_for_status()?;
     ensure!(
@@ -131,6 +139,57 @@ fn parse<T: DeserializeOwned>(document: &SignedDocument, key: &str) -> Result<T>
     verify(document.bytes.as_bytes(), &document.signature, key)?;
     serde_json::from_str(&document.bytes).context("Invalid signed release metadata.")
 }
+
+fn catalog_cache(context: &ContextPaths, product_name: &str, name: &str) -> std::path::PathBuf {
+    context
+        .home
+        .join("catalog")
+        .join(product_name)
+        .join(format!("{name}.verified.json"))
+}
+
+fn fetch_document(
+    client: &Client,
+    product_name: &str,
+    name: &str,
+    timeout: Duration,
+) -> Result<SignedDocument> {
+    Ok(SignedDocument {
+        bytes: String::from_utf8(metadata_with_timeout(
+            client,
+            url(product_name, None, name)?,
+            timeout,
+        )?)?,
+        signature: String::from_utf8(metadata_with_timeout(
+            client,
+            url(product_name, None, &format!("{name}.minisig"))?,
+            timeout,
+        )?)?,
+    })
+}
+
+fn require_catalog_key() -> Result<&'static str> {
+    catalog_key()
+        .filter(|key| !key.trim().is_empty())
+        .context("This launcher has no catalog verification key. Install an official launcher.")
+}
+
+/// Optional upgrade attempts only install from fresh authenticated metadata.
+pub fn refresh_document<T: DeserializeOwned>(
+    context: &ContextPaths,
+    product_name: &str,
+    name: &str,
+    validate: impl FnOnce(&T) -> Result<()>,
+) -> Result<T> {
+    let key = require_catalog_key()?;
+    let timeout = Duration::from_secs(3);
+    let document = fetch_document(&client_with_timeout(timeout)?, product_name, name, timeout)?;
+    let value = parse(&document, key)?;
+    validate(&value)?;
+    atomic_json(&catalog_cache(context, product_name, name), &document)?;
+    Ok(value)
+}
+
 /// Only network unavailability falls back to authenticated cached metadata.
 /// Invalid signatures and malformed successful responses always fail closed.
 pub fn document<T: DeserializeOwned>(
@@ -140,26 +199,11 @@ pub fn document<T: DeserializeOwned>(
     offline: bool,
 ) -> Result<T> {
     product(product_name)?;
-    let key = catalog_key()
-        .filter(|key| !key.trim().is_empty())
-        .context("This launcher has no catalog verification key. Install an official launcher.")?;
-    let cache = context
-        .home
-        .join("catalog")
-        .join(product_name)
-        .join(format!("{name}.verified.json"));
+    let key = require_catalog_key()?;
+    let cache = catalog_cache(context, product_name, name);
     if !offline {
         let client = client()?;
-        let fetched = (|| -> Result<SignedDocument> {
-            Ok(SignedDocument {
-                bytes: String::from_utf8(metadata(&client, url(product_name, None, name)?)?)?,
-                signature: String::from_utf8(metadata(
-                    &client,
-                    url(product_name, None, &format!("{name}.minisig"))?,
-                )?)?,
-            })
-        })();
-        match fetched {
+        match fetch_document(&client, product_name, name, Duration::from_secs(10)) {
             Ok(document) => {
                 let parsed = parse(&document, key)?;
                 atomic_json(&cache, &document)?;

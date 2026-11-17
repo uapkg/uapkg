@@ -50,11 +50,14 @@ unavailability can fall back to verified state; signature failures fail closed.
 Locks, bounded extraction, ordinary-file-only archives, and atomic activation
 protect installation. Content-Length is optional; SHA-256 is authoritative.
 
-The shared config owns `launcher.defaultCliVersion`, preserving selector intent.
-Rust reads it globally and asks the selected CLI to persist changes. Project
+The shared config owns `launcher.defaultCliVersion`, `launcher.autoLauncherUpdate`,
+and `launcher.autoCLIUpdate`. Rust reads them from the global config and the CLI
+persists configuration changes. Automatic updates default to on. An eligible
+command checks each product at most once in 24 hours. The installed CLI version
+for `latest` is recorded separately from configuration. Project
 `uapkgVersion` and overrides use the same dedicated selector contract. Source
 selection and cached npm engines are unsupported. Installation ownership remains
-independent and restricts self-update to standalone installations.
+independent and restricts launcher replacement to standalone installations.
 
 The launcher preserves Unix process replacement and direct Windows terminal
 inheritance. Startup notices use stderr; the narrow versioned
@@ -62,9 +65,10 @@ inheritance. Startup notices use stderr; the narrow versioned
 Older engines may only show startup notices. No footer is guaranteed after forced
 termination. Machine stdout and delegated exit codes remain unchanged.
 
-Self-update verifies the independent launcher artifact, checks the staged
+`launcher-update` verifies the independent launcher artifact, checks the staged
 executable, and preserves the existing journal, verified backup, rollback, and
-Windows cleanup behavior. It never edits CLI configuration or project pins.
+Windows cleanup behavior. After automatic replacement, the new launcher runs the
+original command with its arguments, working directory, and terminal streams.
 
 The `development` Cargo feature permits receipts bound to an absolute checkout,
 Node executable, and CLI entrypoint. They use `~/.uapkg-development` and execute

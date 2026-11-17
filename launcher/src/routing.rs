@@ -101,7 +101,7 @@ impl Invocation {
 
     pub fn scope(&self) -> Scope {
         match self.command.as_deref() {
-            Some("launcher" | "version" | "self-update") => Scope::Launcher,
+            Some("launcher" | "version" | "launcher-update" | "self-update") => Scope::Launcher,
             Some("login" | "logout" | "whoami") => Scope::Global,
             _ => Scope::Project,
         }
@@ -160,6 +160,10 @@ pub struct VersionSelection {
 }
 
 impl VersionSelection {
+    pub(crate) fn uses_global_latest(&self) -> bool {
+        self.version == "latest" && matches!(self.reason, "global-default" | "global-command")
+    }
+
     pub(crate) fn install_reason(&self, resolved: &str) -> String {
         let selection = match self.reason {
             "override" => format!("The --cli-version option selects UAPKG CLI {resolved}"),

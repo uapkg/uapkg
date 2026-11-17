@@ -11,10 +11,14 @@ const postInstallPolicySchema = z.enum(['allow', 'deny']);
 const registryUrlConfigSchema = RegistryURLSchema.transform((value): string => value);
 
 // The native launcher reads only this subtree in the active global profile.
-// Normal CLI config resolution still supports project-local overrides.
+// Update policy applies to the profile, even inside a project.
+export const launcherUpdateKeys = ['autoLauncherUpdate', 'autoCLIUpdate'] as const;
+
 const launcherConfigSchema = z
   .object({
     defaultCliVersion: CliVersionSelectorSchema.optional(),
+    autoLauncherUpdate: z.boolean().optional(),
+    autoCLIUpdate: z.boolean().optional(),
   })
   .strict();
 
@@ -191,7 +195,7 @@ export function getDefaultConfig(): ResolvedConfig {
     resolveUapkgBuildMode() === 'development' ? DEVELOPMENT_REGISTRY_URL : PRODUCTION_REGISTRY_URL;
   const defaults: ResolvedConfig = {
     registry: 'default',
-    launcher: {},
+    launcher: { autoLauncherUpdate: true, autoCLIUpdate: true },
     registries: {
       default: {
         url: registryUrlConfigSchema.parse(defaultRegistryUrl),

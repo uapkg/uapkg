@@ -1,14 +1,17 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 use uapkg_launcher::{
     archive,
-    model::VERSION,
+    model::{VERSION, platform},
     storage::{ContextPaths, atomic_json},
     updater::{self, Transaction},
 };
+
+const TEST_ENGINE_VERSION: &str = "3.2.1";
 
 // This test body doubles as a child-process fixture. It only replaces a copied
 // test executable under a temporary directory, never the Cargo build artifact.
@@ -24,6 +27,18 @@ fn replacement_child() {
         receipt: None,
     };
     updater::replace_staged(&context, &PathBuf::from(staged), VERSION).unwrap();
+    if std::env::var_os("UAPKG_TEST_RESUME_UPDATE").is_some() {
+        let args = [
+            "--offline",
+            "--exact",
+            "resumed_engine_child",
+            "--cli-version",
+            TEST_ENGINE_VERSION,
+            "--nocapture",
+        ]
+        .map(std::ffi::OsString::from);
+        std::process::exit(updater::resume(&context, &args).unwrap().unwrap());
+    }
 }
 
 #[test]
@@ -66,6 +81,116 @@ fn replaces_a_running_executable_and_removes_transaction_state() {
             })
             .exists()
     );
+}
+
+#[test]
+fn resumed_engine_child() {
+    if std::env::var_os("UAPKG_TEST_RESUME_UPDATE").is_none() {
+        return;
+    }
+    assert_eq!(
+        std::env::args_os().skip(1).collect::<Vec<_>>(),
+        ["--exact", "resumed_engine_child", "--nocapture"].map(std::ffi::OsString::from)
+    );
+    assert_eq!(std::env::var("UAPKG_LAUNCHER_VERSION").unwrap(), VERSION);
+    assert_eq!(
+        std::env::var("UAPKG_CLI_VERSION").unwrap(),
+        TEST_ENGINE_VERSION
+    );
+    assert_eq!(
+        std::env::current_dir().unwrap().file_name().unwrap(),
+        "project with spaces"
+    );
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+    assert_eq!(input.trim_end(), "input from parent");
+    println!("Resumed command stdout");
+    eprintln!("Resumed command stderr");
+    std::process::exit(37);
+}
+
+#[test]
+fn resumes_the_original_command_after_replacement() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = directory
+        .path()
+        .join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
+    let fixture = std::env::current_exe().unwrap();
+    fs::copy(&fixture, &target).unwrap();
+    let profile = directory.path().join(".uapkg");
+    let platform = platform().unwrap();
+    let engine = profile
+        .join("engines")
+        .join(TEST_ENGINE_VERSION)
+        .join(platform);
+    fs::create_dir_all(&engine).unwrap();
+    let engine_exe = if cfg!(windows) {
+        "engine.exe"
+    } else {
+        "engine"
+    };
+    fs::copy(fixture, engine.join(engine_exe)).unwrap();
+    atomic_json(
+        &engine.join("engine.json"),
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "version": TEST_ENGINE_VERSION,
+            "platform": platform,
+            "kind": "sea",
+            "executable": engine_exe,
+            "args": [],
+        }),
+    )
+    .unwrap();
+    atomic_json(
+        &engine.join(".installed.json"),
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "version": TEST_ENGINE_VERSION,
+            "platform": platform,
+        }),
+    )
+    .unwrap();
+    let cwd = directory.path().join("project with spaces");
+    fs::create_dir(&cwd).unwrap();
+
+    let mut child = Command::new(&target)
+        .args(["--exact", "replacement_child", "--nocapture"])
+        .current_dir(&cwd)
+        .env(
+            if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+            directory.path(),
+        )
+        .env("UAPKG_TEST_STAGED_LAUNCHER", env!("CARGO_BIN_EXE_uapkg"))
+        .env("UAPKG_TEST_RESUME_UPDATE", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"input from parent\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(37), "{stdout}\n{stderr}");
+    assert_eq!(stdout.matches("Resumed command stdout").count(), 1);
+    assert_eq!(stderr.matches("Resumed command stderr").count(), 1);
+}
+
+#[test]
+fn returns_for_fallback_when_the_replacement_cannot_start() {
+    let directory = tempfile::tempdir().unwrap();
+    let context = ContextPaths {
+        home: directory.path().join("profile"),
+        executable: directory.path().join("missing-launcher"),
+        receipt: None,
+    };
+    assert_eq!(updater::resume(&context, &[]).unwrap(), None);
 }
 
 #[test]

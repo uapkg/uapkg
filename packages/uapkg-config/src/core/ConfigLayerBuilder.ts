@@ -2,7 +2,8 @@ import { DiagnosticBag } from '@uapkg/diagnostics';
 import type { ConfigLayer, ConfigLayerBuildResult } from '#config/contracts/ConfigTypes.ts';
 import { ConfigFileRepository } from '#config/files/ConfigFileRepository.ts';
 import { ConfigPathResolver } from '#config/files/ConfigPathResolver.ts';
-import { getDefaultConfig } from '#config/schema/configSchema.ts';
+import { getDefaultConfig, launcherUpdateKeys } from '#config/schema/configSchema.ts';
+import { isRecordValue } from '#config/schema/runtime/ConfigSchemaIntrospection.ts';
 
 export class ConfigLayerBuilder {
   constructor(
@@ -30,14 +31,14 @@ export class ConfigLayerBuilder {
       layers.push({
         source: 'intermediary',
         file: intermediaryFile,
-        values: this.readValues(intermediaryFile, bag),
+        values: this.readProjectValues(intermediaryFile, bag),
       });
     }
 
     layers.push({
       source: 'local',
       file: paths.localFile,
-      values: this.readValues(paths.localFile, bag),
+      values: this.readProjectValues(paths.localFile, bag),
     });
 
     return { layers, diagnostics: bag.all() };
@@ -51,5 +52,14 @@ export class ConfigLayerBuilder {
     }
     bag.mergeArray(result.value.diagnostics);
     return result.value.values;
+  }
+
+  private readProjectValues(filePath: string, bag: DiagnosticBag): Record<string, unknown> {
+    const values = this.readValues(filePath, bag);
+    if (!isRecordValue(values.launcher)) return values;
+
+    const launcher = { ...values.launcher };
+    for (const key of launcherUpdateKeys) delete launcher[key];
+    return { ...values, launcher };
   }
 }

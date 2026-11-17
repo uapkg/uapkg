@@ -87,9 +87,21 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     serde_json::from_slice(&content).with_context(|| format!("Invalid JSON in {}.", path.display()))
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Settings {
     pub default_cli_version: Option<String>,
+    pub auto_launcher_update: bool,
+    pub auto_cli_update: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            default_cli_version: None,
+            auto_launcher_update: true,
+            auto_cli_update: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
