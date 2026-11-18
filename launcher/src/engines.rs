@@ -27,6 +27,178 @@ pub struct InstalledEngine {
     pub engine: Engine,
 }
 
+fn version_lock(context: &ContextPaths, version: &str) -> Result<fs::File> {
+    lock(
+        &context
+            .home
+            .join("locks")
+            .join(format!("cli-{version}.lock")),
+    )
+}
+
+fn known_policy(context: &ContextPaths, version: &str) -> Result<()> {
+    if let Some(index) = catalog::index(context, "cli", true)? {
+        index.ensure_runnable(version)?;
+    }
+    Ok(())
+}
+
+fn cleanup_lock(context: &ContextPaths, version: &str) -> Result<Option<fs::File>> {
+    let guard = crate::storage::try_lock(
+        &context
+            .home
+            .join("locks")
+            .join(format!("cli-{version}.lock")),
+    )?;
+    if guard.is_none() {
+        eprintln!(
+            "uapkg: Cleanup of quarantined CLI {version} is deferred while another installation is active."
+        );
+    }
+    Ok(guard)
+}
+
+fn managed_directory(context: &ContextPaths, path: &Path) -> Result<()> {
+    let home = context.home.canonicalize()?;
+    ensure!(
+        path.canonicalize()?.starts_with(&home),
+        "Refusing cache cleanup outside {}.",
+        home.display()
+    );
+    ensure!(
+        !fs::symlink_metadata(path)?.file_type().is_symlink(),
+        "Refusing cache cleanup through a symbolic link: {}.",
+        path.display()
+    );
+    Ok(())
+}
+
+fn retire_directory(context: &ContextPaths, source: &Path, version: &str) -> Result<()> {
+    managed_directory(context, source)?;
+    if fs::remove_dir_all(source).is_ok() {
+        return Ok(());
+    }
+    let pending = context.home.join("quarantine-removals");
+    if pending.exists() {
+        managed_directory(context, &pending)?;
+    }
+    let retired = pending.join(version);
+    fs::create_dir_all(&retired)?;
+    managed_directory(context, &pending)?;
+    managed_directory(context, &retired)?;
+    let temporary = tempfile::Builder::new()
+        .prefix("engine-")
+        .tempdir_in(&retired)?;
+    fs::rename(source, temporary.path().join("engine"))
+        .with_context(|| format!("Could not remove quarantined CLI {version} from its managed cache. Close processes using it and retry."))?;
+    let path = temporary.keep();
+    if fs::remove_dir_all(&path).is_err() {
+        eprintln!(
+            "uapkg: Removed quarantined CLI {version} from the executable cache; remaining files will be deleted after existing processes exit."
+        );
+    }
+    Ok(())
+}
+
+fn purge_staging(context: &ContextPaths, index: &catalog::Index) -> Result<()> {
+    let staging = context.home.join("staging");
+    if !staging.exists() {
+        return Ok(());
+    }
+    managed_directory(context, &staging)?;
+    for entry in fs::read_dir(&staging)? {
+        let entry = entry?;
+        if !entry.file_name().to_string_lossy().starts_with("engine-")
+            || !entry.file_type()?.is_dir()
+        {
+            continue;
+        }
+        managed_directory(context, &entry.path())?;
+        let version = read_json::<Installation>(&entry.path().join(".release.json"))
+            .ok()
+            .filter(|record| record.schema_version == 1)
+            .map(|record| record.version)
+            .or_else(|| {
+                let root = entry.path().join("engine");
+                root.canonicalize().ok().filter(|path| {
+                    path.starts_with(entry.path().canonicalize().unwrap_or_default())
+                })?;
+                read_json::<Engine>(&root.join("engine.json"))
+                    .ok()
+                    .map(|engine| engine.version)
+            });
+        let Some(version) = version else {
+            continue;
+        };
+        if exact_version(&version).is_err()
+            || !index
+                .release(&version)
+                .is_some_and(|release| release.quarantined.is_some())
+        {
+            continue;
+        }
+        let Some(_guard) = cleanup_lock(context, &version)? else {
+            continue;
+        };
+        if entry.path().exists() {
+            retire_directory(context, &entry.path(), &version)?;
+        }
+    }
+    Ok(())
+}
+
+/// Purge every platform, including historical platforms. A Windows executable
+/// already in use can be retired from the executable cache and retried later.
+pub fn purge_quarantined(context: &ContextPaths, index: &catalog::Index) -> Result<()> {
+    let pending = context.home.join("quarantine-removals");
+    if pending.exists() {
+        managed_directory(context, &pending)?;
+        for entry in fs::read_dir(&pending)? {
+            let entry = entry?;
+            let version = entry.file_name().to_string_lossy().into_owned();
+            if exact_version(&version).is_err() {
+                continue;
+            }
+            let Some(_guard) = cleanup_lock(context, &version)? else {
+                continue;
+            };
+            managed_directory(context, &entry.path())?;
+            if fs::remove_dir_all(entry.path()).is_err() {
+                eprintln!(
+                    "uapkg: Quarantined CLI {version} is awaiting cleanup; close any processes using it and run UAPKG again."
+                );
+            }
+        }
+    }
+    purge_staging(context, index)?;
+    let engines = context.home.join("engines");
+    if !engines.exists() {
+        return Ok(());
+    }
+    managed_directory(context, &engines)?;
+    for release in &index.releases {
+        if release.quarantined.is_none() {
+            continue;
+        }
+        exact_version(&release.version)?;
+        let Some(_guard) = cleanup_lock(context, &release.version)? else {
+            continue;
+        };
+        let source = engines.join(&release.version);
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if metadata.file_type().is_symlink() {
+            fs::remove_file(&source)?;
+            continue;
+        }
+        retire_directory(context, &source, &release.version)?;
+    }
+    Ok(())
+}
+
 fn cached(root: &Path, version: &str, platform: &str) -> Result<InstalledEngine> {
     let receipt: Installation = read_json(&root.join(".installed.json"))?;
     ensure!(
@@ -75,14 +247,35 @@ fn install_release(
 ) -> Result<InstalledEngine> {
     exact_version(version)?;
     let target = platform()?;
+    let published = if verified_index.is_none() {
+        let cached = catalog::index(context, "cli", true)?;
+        if cached.is_none() && !offline && !context.cache_dir(version, target)?.exists() {
+            catalog::index(context, "cli", false)?
+        } else {
+            cached
+        }
+    } else {
+        None
+    };
+    let verified_index = verified_index.or(published.as_ref());
+    if let Some(index) = verified_index {
+        if let Err(error) = purge_quarantined(context, index) {
+            eprintln!("uapkg: Could not finish quarantined CLI cleanup. {error:#}");
+        }
+        index.ensure_runnable(version)?;
+    }
     install_cached(context, version, offline, |stage| {
         let client = if let Some(index) = verified_index {
             index.supports(version, target)?;
             github::client_with_timeout(Duration::from_secs(30))?
         } else {
-            catalog::index(context, "cli", false)?
-                .context("No verified CLI index is available.")?
-                .supports(version, target)?;
+            let index = match catalog::index(context, "cli", true)? {
+                Some(index) => index,
+                None => catalog::index(context, "cli", false)?
+                    .context("No verified CLI index is available.")?,
+            };
+            index.ensure_runnable(version)?;
+            index.supports(version, target)?;
             github::client()?
         };
         let progress = format!("Installing UAPKG CLI {version}...");
@@ -109,21 +302,26 @@ pub(crate) fn install_cached(
     install: impl FnOnce(&Path) -> Result<PathBuf>,
 ) -> Result<InstalledEngine> {
     exact_version(version)?;
+    known_policy(context, version)?;
     let target = platform()?;
     let destination = context.cache_dir(version, target)?;
     if destination.exists() {
+        let _guard = version_lock(context, version)?;
+        known_policy(context, version)?;
         return cached(&destination, version, target);
     }
     ensure!(
         !offline,
         "CLI {version} is not cached for {target}. Offline mode prevents downloading it. Disable offline mode and retry to install this version; no other version will be substituted."
     );
+    let _version_lock = version_lock(context, version)?;
     let _lock = lock(
         &context
             .home
             .join("locks")
             .join(format!("cli-{version}-{target}.lock")),
     )?;
+    known_policy(context, version)?;
     if destination.exists() {
         return cached(&destination, version, target);
     }
@@ -132,7 +330,16 @@ pub(crate) fn install_cached(
     let temporary = tempfile::Builder::new()
         .prefix("engine-")
         .tempdir_in(&staging_parent)?;
+    atomic_json(
+        &temporary.path().join(".release.json"),
+        &Installation {
+            schema_version: 1,
+            version: version.into(),
+            platform: target.into(),
+        },
+    )?;
     let root = install(temporary.path())?;
+    known_policy(context, version)?;
     ensure!(
         root.canonicalize()?
             .starts_with(temporary.path().canonicalize()?),
@@ -192,6 +399,7 @@ pub fn delegate(
     diagnostic: Option<&diagnostics::LauncherContext>,
     notices: &[String],
 ) -> Result<i32> {
+    known_policy(context, &installed.engine.version)?;
     let mut command = Command::new(
         installed
             .root
@@ -289,6 +497,97 @@ mod tests {
             },
         )?;
         Ok(root)
+    }
+
+    #[test]
+    fn known_signed_policy_blocks_cached_and_missing_marked_engines_before_provider() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        for version in ["1.7.0", "1.7.1", "1.7.2"] {
+            install_cached(&context, version, false, |stage| {
+                stage_engine(stage, version)
+            })
+            .unwrap();
+        }
+        let foreign = context.cache_dir("1.7.2", "win32-arm64").unwrap();
+        fs::create_dir_all(&foreign).unwrap();
+        fs::write(foreign.join("binary"), b"quarantined bytes").unwrap();
+        let index = catalog::cache_moderated_fixture(&context, "cli");
+        for (name, version) in [("engine-marked", "1.7.2"), ("engine-yanked", "1.7.1")] {
+            let stage = context.home.join("staging").join(name);
+            atomic_json(
+                &stage.join(".release.json"),
+                &Installation {
+                    schema_version: 1,
+                    version: version.into(),
+                    platform: platform().unwrap().into(),
+                },
+            )
+            .unwrap();
+            fs::write(stage.join("engine.tar.gz"), b"abandoned archive").unwrap();
+        }
+        let unknown = context.home.join("staging/engine-unknown");
+        fs::create_dir_all(&unknown).unwrap();
+        fs::write(unknown.join("engine.tar.gz"), b"unknown archive").unwrap();
+        let legacy = context.home.join("staging/engine-legacy");
+        stage_engine(&legacy, "1.7.2").unwrap();
+        for version in ["1.7.1", "1.7.2"] {
+            for offline in [false, true] {
+                let error = install_cached(&context, version, offline, |_| {
+                    panic!("A marked version must never reach its acquisition provider")
+                })
+                .err()
+                .unwrap();
+                assert!(error.to_string().contains("Execution is refused"));
+            }
+        }
+        purge_quarantined(&context, &index).unwrap();
+        assert!(!context.home.join("engines/1.7.2").exists());
+        assert!(!context.home.join("staging/engine-marked").exists());
+        assert!(!legacy.exists());
+        assert!(context.home.join("staging/engine-yanked").exists());
+        assert!(unknown.exists());
+        assert!(
+            context
+                .cache_dir("1.7.1", platform().unwrap())
+                .unwrap()
+                .exists()
+        );
+        assert!(ensure_installed(&context, "1.7.0", true).is_ok());
+        assert!(ensure_installed(&context, "1.7.2", false).is_err());
+        assert!(!context.home.join("engines/1.7.2").exists());
+    }
+
+    #[test]
+    fn cleanup_defers_active_installations_without_allowing_the_marked_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        let index = catalog::cache_moderated_fixture(&context, "cli");
+        let root = context.home.join("engines/1.7.2");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("binary"), b"quarantined").unwrap();
+        let guard = version_lock(&context, "1.7.2").unwrap();
+        purge_quarantined(&context, &index).unwrap();
+        assert!(root.exists());
+        assert!(ensure_installed(&context, "1.7.2", true).is_err());
+        drop(guard);
+        purge_quarantined(&context, &index).unwrap();
+        assert!(!root.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quarantine_cleanup_refuses_an_engines_parent_outside_the_profile() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        fs::create_dir_all(&context.home).unwrap();
+        let outside = directory.path().join("outside");
+        fs::create_dir_all(outside.join("1.7.2")).unwrap();
+        fs::write(outside.join("1.7.2/keep"), b"do not delete").unwrap();
+        std::os::unix::fs::symlink(&outside, context.home.join("engines")).unwrap();
+        let index = catalog::cache_moderated_fixture(&context, "cli");
+        assert!(purge_quarantined(&context, &index).is_err());
+        assert!(outside.join("1.7.2/keep").exists());
     }
 
     #[test]

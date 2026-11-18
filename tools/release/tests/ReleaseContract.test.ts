@@ -11,6 +11,7 @@ import {
   KNOWN_PLATFORMS,
   PLATFORMS,
   parseChecksums,
+  serializeCatalogEntry,
   validateEntry,
   validateCurrentEntry,
   validateIndex,
@@ -49,11 +50,13 @@ describe('shared release contract fixtures', () => {
     expect(() => validateEntry({ ...fixture.entry, publishedAt: '2026-11-01' })).toThrow('timestamp');
   });
   it('verifies exact Minisign bytes using distinct artifact and metadata trust anchors', () => {
-    for (const file of ['index.json', 'replacements.json']) {
+    for (const file of ['index.json', 'replacements.json', 'moderated-cli.json', 'moderated-launcher.json']) {
       expect(verifies(file, 'metadata.pub')).toBe(true);
       expect(verifies(file, 'artifact.pub')).toBe(false);
       expect(verifies(file, 'metadata.pub', true)).toBe(false);
     }
+    for (const file of ['moderated-cli.json', 'moderated-launcher.json'])
+      expect(() => validateIndex(JSON.parse(readFileSync(path.join(directory, file), 'utf8')))).not.toThrow();
     expect(verifies('SHASUMS256.txt', 'artifact.pub')).toBe(true);
     expect(verifies('SHASUMS256.txt', 'metadata.pub')).toBe(false);
   });
@@ -85,5 +88,17 @@ describe('shared release contract fixtures', () => {
     expect(validateIndex(mixed)).toEqual(mixed);
     expect(artifactName('cli', '2.1.0', 'win-x64')).toBe('uapkg-cli-2.1.0-win-x64.tar.gz');
     expect(artifactName('cli', '2.0.0', 'win32-x64')).toBe('uapkg-cli-2.0.0-win32-x64.tar.gz');
+  });
+  it('retains flagged receipts and requires quarantined public releases to have no files', () => {
+    for (const entry of fixture.validStatusEntries) expect(validateEntry(entry)).toEqual(entry);
+    for (const index of fixture.validStatusIndexes) expect(validateIndex(index)).toEqual(index);
+    for (const entry of fixture.invalidStatusEntries) expect(() => validateEntry(entry)).toThrow();
+    for (const index of fixture.invalidStatusIndexes) expect(() => validateIndex(index)).toThrow();
+  });
+  it('omits null status fields when serializing durable records', () => {
+    expect(JSON.parse(serializeCatalogEntry({ ...fixture.entry, yanked: null, quarantined: null }))).toEqual(
+      fixture.entry,
+    );
+    expect(JSON.parse(serializeCatalogEntry(fixture.validStatusEntries[2]))).toEqual(fixture.validStatusEntries[2]);
   });
 });

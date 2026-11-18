@@ -94,6 +94,37 @@ describe('durable release catalog publication', () => {
     expect(existsSync(path.join(target.directory, 'cli/1.6.0/entry.json'))).toBe(true);
     expect(existsSync(path.join(target.directory, 'launcher/0.2.0/entry.json'))).toBe(true);
   });
+  it('preserves independently managed status annotations during publication retries', () => {
+    const target = remote();
+    const published = record();
+    publishCatalog(published, target.adapter);
+    const file = path.join(target.directory, 'cli/1.6.0/entry.json');
+    const annotated = {
+      ...published.entry,
+      yanked: { at: '2026-11-18T12:34:56Z', reason: 'Broken release' },
+      quarantined: { at: '2026-11-18T13:00:00Z', reason: 'Security investigation' },
+    };
+    writeFileSync(file, `${JSON.stringify(annotated, null, 2)}\n`);
+    const original = readFileSync(file);
+    expect(publishCatalog(published, target.adapter)).toEqual({ changed: false, attempts: 1 });
+    expect(readFileSync(file)).toEqual(original);
+    expect(() =>
+      publishCatalog(
+        { ...published, checksums: Buffer.from(published.checksums.toString().replace(/^0/gm, '1')) },
+        target.adapter,
+      ),
+    ).toThrow('Immutable');
+    writeFileSync(file, JSON.stringify({ ...annotated, files: [...PLATFORMS].reverse() }));
+    expect(() => publishCatalog(published, target.adapter)).toThrow('Immutable');
+  });
+  it('omits null status annotations from initial publication', () => {
+    const target = remote();
+    const published = record();
+    publishCatalog({ ...published, entry: { ...published.entry, yanked: null, quarantined: null } }, target.adapter);
+    expect(JSON.parse(readFileSync(path.join(target.directory, 'cli/1.6.0/entry.json'), 'utf8'))).toEqual(
+      published.entry,
+    );
+  });
   it('rejects incomplete historical records and incomplete checksum sets', () => {
     const target = remote();
     mkdirSync(path.join(target.directory, 'cli/1.6.0'), { recursive: true });

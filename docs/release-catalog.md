@@ -68,9 +68,11 @@ launcher/0.2.0/SHASUMS256.txt.minisig
 ```
 
 `publishedAt` is the original full UTC GitHub publication timestamp, not the build
-or catalog retry time. An entry and its original checksum/signature bytes are
-immutable. Historical records remain after previews disappear from the public
-index. The branch contains no binaries, credentials or private signing keys.
+or catalog retry time. Release identity, publication time, original files, and
+checksum/signature bytes are immutable. Only the optional `yanked` and
+`quarantined` status objects may change. Historical records remain after previews
+disappear from the public index. The branch contains no binaries, credentials or
+private signing keys.
 
 The publisher downloads and verifies every intended GitHub asset before committing
 this record. The catalog commit is its final publication action. It starts from
@@ -107,8 +109,8 @@ alias chains are invalid.
 
 `date` is the UTC date of publication. `latest` selects the greatest stable SemVer.
 A preview alias follows the greatest numbered preview of the same stage and base,
-then its matching stable release. Exact numbered previews remain exact until a
-published replacement says otherwise.
+then its matching stable release. Exact numbered previews remain exact unless a
+published replacement or release status redirects them.
 
 ```json
 {
@@ -124,6 +126,51 @@ after their matching stable publication. Timely deadline-triggered builds are
 separate future work. The launcher does not calculate this interval, interpret a
 deadline, reject old policy by age, or infer replacement from a missing entry/404.
 Published metadata remains authoritative even when stale.
+
+### Yanked and quarantined releases
+
+Catalog entries and public releases can contain either or both of these objects:
+
+```json
+{
+  "yanked": { "at": "2026-11-18T12:34:56Z", "reason": "Regression in version selection" },
+  "quarantined": { "at": "2026-11-18T13:00:00Z", "reason": "Unsafe binary" }
+}
+```
+
+Status timestamps are full UTC ISO 8601 timestamps and reasons must be nonblank.
+Readers accept omitted or null statuses; writers omit nulls. Each status is
+independent. Removing one does not remove the other.
+
+Neither status is an eligible resolution. Stable releases fall back to the
+greatest lower healthy stable version available for the platform. Numbered
+previews fall back within the same base version and alpha/beta stage. Existing
+preview replacements apply first, so a retired preview's stable destination uses
+the stable fallback rule. No eligible predecessor means resolution fails. Build
+metadata does not make a release an earlier version. Configured selectors and
+project pins keep their original values.
+
+Yanked releases retain their published files and local caches. Quarantined
+releases remain in the index with `files: []`; their original files remain in the
+catalog entry. The launcher refuses acquisition and execution and removes managed
+cached copies across platforms. Failed removal never permits execution and is
+retried on a later invocation. Existing processes are not terminated. Quarantined
+preview records remain in the index even after ordinary preview retirement so
+clients can learn the status of old cached copies.
+
+The releases site returns `410 Gone` for quarantined archive URLs, while keeping
+release pages and original signed checksums available. GitHub Release assets are
+not removed. Yanked archive URLs remain downloadable. Unquarantine restores the
+original files without rebuilding or changing signed artifacts.
+
+Both product indexes are checked at most once every 24 hours during released
+launcher invocations, regardless of pins or automatic-update settings. Known
+verified statuses apply on every invocation, including offline operation. A
+flagged standalone launcher must replace itself with healthy `latest` before
+running ordinary commands, even when automatic updates are disabled. A
+package-managed launcher instead requires updating through its owner. Identity
+probes remain available for replacement verification; development bindings do
+not use published-release policy.
 
 `latest` preserves update-tracking intent. Eligible commands check the global CLI
 for a new stable release at most once every 24 hours and advance its active
@@ -198,3 +245,22 @@ The CLI workflow never rebuilds a launcher. The launcher workflow does not build
 CLI or require npm publication. Node/Vite+ are still repository packaging tools.
 The independent terminal harness assembles temporary test installations from a
 verified launcher and the CLI candidate; these are not published bundles.
+
+### Changing release status
+
+Run the `Release status` workflow on `main` with `product` (`cli` or `launcher`),
+an exact published `version`, and `operation` (`yank`, `unyank`, `quarantine`, or
+`unquarantine`). Supply a reason for yank/quarantine. Only GitHub account ID
+`10104630` may dispatch or rerun this workflow; every mutation attempt verifies
+both actor identities.
+
+The workflow changes only the selected status key in the existing catalog entry.
+Repeating the same reason preserves its timestamp; clearing an absent status does
+nothing. It does not upload, rebuild, delete, or resign artifacts. The normal
+catalog webhook rebuilds and deploys the signed public metadata. If that webhook
+is missed, run the infrastructure `Releases site` workflow on `main`.
+
+Release a launcher that understands these fields before setting any status.
+Older launchers reject annotated indexes and require a manual upgrade. Ensure
+launcher recovery targets also understand the updated index. Deploying this
+capability does not itself yank or quarantine an existing release.

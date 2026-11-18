@@ -152,5 +152,297 @@
       },
       "retireAt": "2026-11-15T12:34:56Z"
     }
+  ],
+  "validStatusEntries": [
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "yanked": {
+        "at": "2026-11-18T12:34:56Z",
+        "reason": "Broken release"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "quarantined": {
+        "at": "2026-11-18T12:34:56.123Z",
+        "reason": "Security investigation"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "yanked": {
+        "at": "2026-11-18T12:34:56Z",
+        "reason": "Broken release"
+      },
+      "quarantined": {
+        "at": "2026-11-18T12:34:56.123Z",
+        "reason": "Security investigation"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "yanked": null,
+      "quarantined": null
+    }
+  ],
+  "validStatusIndexes": [
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+          "yanked": {
+            "at": "2026-11-18T12:34:56Z",
+            "reason": "Broken release"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": [],
+          "quarantined": {
+            "at": "2026-11-18T12:34:56.123Z",
+            "reason": "Security investigation"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": [],
+          "yanked": {
+            "at": "2026-11-18T12:34:56Z",
+            "reason": "Broken release"
+          },
+          "quarantined": {
+            "at": "2026-11-18T12:34:56.123Z",
+            "reason": "Security investigation"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+          "yanked": null,
+          "quarantined": null
+        }
+      ]
+    }
+  ],
+  "invalidStatusEntries": [
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "yanked": {
+        "at": "2026-11-18T12:34:56Z",
+        "reason": "  "
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "yanked": {
+        "at": "2026-02-30T12:34:56Z",
+        "reason": "Broken release"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "quarantined": {
+        "at": "2026-11-18T12:34:56+00:00",
+        "reason": "Security investigation"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "yanked": {
+        "at": "2026-11-18T12:34:56Z",
+        "reason": "Broken release",
+        "extra": true
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+      "quarantined": {
+        "at": "2026-11-18T12:34:56.123Z"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "version": "2.0.0",
+      "publishedAt": "2026-11-01T12:34:56Z",
+      "tag": "@uapkg/cli@2.0.0",
+      "files": [],
+      "quarantined": {
+        "at": "2026-11-18T12:34:56.123Z",
+        "reason": "Security investigation"
+      }
+    }
+  ],
+  "invalidStatusIndexes": [
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": []
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+          "quarantined": {
+            "at": "2026-11-18T12:34:56.123Z",
+            "reason": "Security investigation"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": [],
+          "yanked": {
+            "at": "2026-11-18T12:34:56Z",
+            "reason": "Broken release"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {
+        "latest": "2.0.0"
+      },
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"],
+          "yanked": {
+            "at": "2026-11-18T12:34:56Z",
+            "reason": "Broken release"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {
+        "latest": "2.0.0"
+      },
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": [],
+          "quarantined": {
+            "at": "2026-11-18T12:34:56.123Z",
+            "reason": "Security investigation"
+          }
+        }
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "product": "cli",
+      "aliases": {},
+      "releases": [
+        {
+          "version": "2.0.0",
+          "date": "2026-11-01",
+          "files": [],
+          "quarantined": {
+            "at": "2026-11-18T12:34:56.123Z",
+            "reason": ""
+          }
+        }
+      ]
+    }
   ]
 }

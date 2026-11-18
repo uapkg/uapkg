@@ -262,7 +262,7 @@ fn diagnostics_reinstall_remembered_latest_without_advancing_or_check_bookkeepin
         &invocation,
         &settings,
         directory.path(),
-        |_, _| panic!("Remembered global latest must retain its exact version"),
+        |requested, _| catalog::resolve(&context, "cli", requested, true, false),
         |_| panic!("Diagnostics must not advance latest"),
         |version, offline, _| {
             assert_eq!(version, "1.9.0");

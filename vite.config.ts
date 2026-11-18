@@ -143,6 +143,8 @@ export default defineConfig({
       'launcher/target/**',
       'tools/release/fixtures/index.json',
       'tools/release/fixtures/replacements.json',
+      'tools/release/fixtures/moderated-cli.json',
+      'tools/release/fixtures/moderated-launcher.json',
     ],
     useTabs: false,
     tabWidth: 2,

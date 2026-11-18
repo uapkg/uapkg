@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "product": "launcher",
+  "aliases": {
+    "latest": "0.3.1"
+  },
+  "releases": [
+    {
+      "version": "0.3.3",
+      "date": "2026-11-18",
+      "files": [],
+      "quarantined": {
+        "at": "2026-11-18T12:00:00Z",
+        "reason": "Test release is broken."
+      }
+    },
+    {
+      "version": "0.3.2",
+      "date": "2026-11-17",
+      "files": [
+        "win-x64",
+        "win-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "linux-x64",
+        "linux-arm64",
+        "linux-x64-musl"
+      ],
+      "yanked": {
+        "at": "2026-11-18T12:00:00Z",
+        "reason": "Test release is broken."
+      }
+    },
+    {
+      "version": "0.3.1",
+      "date": "2026-11-16",
+      "files": [
+        "win-x64",
+        "win-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "linux-x64",
+        "linux-arm64",
+        "linux-x64-musl"
+      ]
+    }
+  ]
+}

@@ -73,10 +73,84 @@ fn base(version: &semver::Version) -> String {
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReleaseStatus {
+    pub at: String,
+    pub reason: String,
+}
+
+impl ReleaseStatus {
+    pub fn display_reason(&self) -> String {
+        self.reason.chars().filter(|character| !matches!(*character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+            .map(|character| if character.is_control() { ' ' } else { character }).take(500).collect()
+    }
+    fn validate(&self) -> Result<()> {
+        let bytes = self.at.as_bytes();
+        let parts = if matches!(bytes.len(), 20 | 24)
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes[10] == b'T'
+            && bytes[13] == b':'
+            && bytes[16] == b':'
+            && bytes[bytes.len() - 1] == b'Z'
+            && (bytes.len() == 20 || bytes[19] == b'.')
+            && bytes.iter().enumerate().all(|(i, c)| {
+                matches!(i, 4 | 7 | 10 | 13 | 16)
+                    || i == bytes.len() - 1
+                    || (bytes.len() == 24 && i == 19)
+                    || c.is_ascii_digit()
+            }) {
+            Some((
+                self.at[0..4].parse::<u32>()?,
+                self.at[5..7].parse::<u32>()?,
+                self.at[8..10].parse::<u32>()?,
+                self.at[11..13].parse::<u32>()?,
+                self.at[14..16].parse::<u32>()?,
+                self.at[17..19].parse::<u32>()?,
+            ))
+        } else {
+            None
+        };
+        let valid = parts.is_some_and(|(year, month, day, hour, minute, second)| {
+            let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+            let days = match month {
+                4 | 6 | 9 | 11 => 30,
+                2 if leap => 29,
+                2 => 28,
+                1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+                _ => 0,
+            };
+            day >= 1 && day <= days && hour < 24 && minute < 60 && second < 60
+        });
+        ensure!(
+            valid,
+            "Invalid release status timestamp; use a full UTC timestamp."
+        );
+        ensure!(
+            !self.reason.trim().is_empty(),
+            "Release status reason cannot be empty."
+        );
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Release {
     pub version: String,
     pub date: String,
     pub files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yanked: Option<ReleaseStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quarantined: Option<ReleaseStatus>,
+}
+impl Release {
+    pub fn unavailable(&self) -> Option<(&'static str, &ReleaseStatus)> {
+        self.quarantined
+            .as_ref()
+            .map(|status| ("quarantined", status))
+            .or_else(|| self.yanked.as_ref().map(|status| ("yanked", status)))
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -113,9 +187,15 @@ impl Index {
                 "Invalid release date."
             );
             let mut platforms = BTreeSet::new();
+            for status in [&release.yanked, &release.quarantined]
+                .into_iter()
+                .flatten()
+            {
+                status.validate()?;
+            }
             ensure!(
-                !release.files.is_empty(),
-                "A catalog release must contain platforms."
+                release.files.is_empty() == release.quarantined.is_some(),
+                "A quarantined catalog release must have no platforms; other releases must contain platforms."
             );
             for platform in &release.files {
                 ensure!(
@@ -129,6 +209,11 @@ impl Index {
             ensure!(
                 versions.contains(target),
                 "Alias target is not in the release index."
+            );
+            ensure!(
+                self.release(target)
+                    .is_some_and(|release| release.unavailable().is_none()),
+                "Alias target must not be yanked or quarantined."
             );
             match selector(alias)? {
                 Selector::Latest => ensure!(
@@ -161,11 +246,76 @@ impl Index {
             .iter()
             .find(|release| release.version == version)
             .with_context(|| format!("Release {version} is not in the published index."))?;
+        if let Some(status) = &release.quarantined {
+            anyhow::bail!(
+                "Release {version} is quarantined: {}. Download and execution are refused.",
+                status.display_reason()
+            );
+        }
         ensure!(
             release.files.iter().any(|file| file == platform),
             "Release {version} is unavailable for {platform}."
         );
         Ok(())
+    }
+
+    pub fn release(&self, version: &str) -> Option<&Release> {
+        self.releases
+            .iter()
+            .find(|release| release.version == version)
+    }
+
+    pub fn ensure_runnable(&self, version: &str) -> Result<()> {
+        if let Some((kind, status)) = self.release(version).and_then(Release::unavailable) {
+            anyhow::bail!(
+                "Release {version} is {kind}: {}. Execution is refused.",
+                status.display_reason()
+            );
+        }
+        Ok(())
+    }
+
+    /// Moderation never changes channels or treats build metadata as precedence.
+    pub fn resolve_release(&self, version: &str, platform: &str) -> Result<(String, Vec<String>)> {
+        let Some((kind, status)) = self.release(version).and_then(Release::unavailable) else {
+            return Ok((version.into(), Vec::new()));
+        };
+        let current = exact(version)?;
+        let stage = current.pre.as_str().split('.').next().unwrap_or_default();
+        let mut candidates = self
+            .releases
+            .iter()
+            .filter_map(|release| {
+                if release.unavailable().is_some()
+                    || !release.files.iter().any(|file| file == platform)
+                {
+                    return None;
+                }
+                let candidate = exact(&release.version).ok()?;
+                let channel = if current.pre.is_empty() {
+                    candidate.pre.is_empty()
+                } else {
+                    base(&candidate) == base(&current)
+                        && candidate.pre.as_str().starts_with(&format!("{stage}."))
+                };
+                (channel && candidate.cmp_precedence(&current).is_lt())
+                    .then_some((candidate, release))
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by(|(a, left), (b, right)| {
+            b.cmp_precedence(a)
+                .then_with(|| left.version.cmp(&right.version))
+        });
+        let replacement = candidates.first().map(|(_, release)| release.version.clone())
+            .with_context(|| format!("Release {version} is {kind}: {}. No previous un-yanked, un-quarantined release is available for {platform} in this channel.", status.display_reason()))?;
+        Ok((
+            replacement.clone(),
+            vec![format!(
+                "The requested {} release is {kind}: {version} -> {replacement}. Reason: {}",
+                self.product,
+                status.display_reason()
+            )],
+        ))
     }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -199,8 +349,9 @@ fn optional<T: serde::de::DeserializeOwned>(
     product: &str,
     name: &str,
     offline: bool,
+    validate: impl Fn(&T) -> Result<()>,
 ) -> Result<Option<T>> {
-    match github::document(context, product, name, offline) {
+    match github::document_validated(context, product, name, offline, validate) {
         Ok(value) => Ok(Some(value)),
         Err(error)
             if error.chain().any(|cause| {
@@ -215,11 +366,9 @@ fn optional<T: serde::de::DeserializeOwned>(
     }
 }
 pub fn index(context: &ContextPaths, product: &str, offline: bool) -> Result<Option<Index>> {
-    let value: Option<Index> = optional(context, product, "index.json", offline)?;
-    if let Some(index) = &value {
-        index.validate(product)?;
-    }
-    Ok(value)
+    optional(context, product, "index.json", offline, |index: &Index| {
+        index.validate(product)
+    })
 }
 
 pub fn replacements(
@@ -227,11 +376,13 @@ pub fn replacements(
     product: &str,
     offline: bool,
 ) -> Result<Option<Replacements>> {
-    let value: Option<Replacements> = optional(context, product, "replacements.json", offline)?;
-    if let Some(replacements) = &value {
-        replacements.validate(product)?;
-    }
-    Ok(value)
+    optional(
+        context,
+        product,
+        "replacements.json",
+        offline,
+        |replacements: &Replacements| replacements.validate(product),
+    )
 }
 
 pub fn refresh_index(context: &ContextPaths, product: &str) -> Result<Index> {
@@ -313,6 +464,10 @@ fn optional_resolution(
 ) -> Result<Option<Resolution>> {
     github::product(product)?;
     let kind = selector(requested)?;
+    let mut published = index(context, product, true)?;
+    if published.is_none() && !offline && kind != Selector::Exact {
+        published = index(context, product, false)?;
+    }
     let mut messages = Vec::new();
     let version = match kind {
         Selector::Exact => {
@@ -330,8 +485,7 @@ fn optional_resolution(
             }
         }
         Selector::Latest | Selector::Preview { .. } => {
-            let index = index(context, product, offline)?;
-            let latest = index
+            let latest = published
                 .as_ref()
                 .and_then(|index| index.aliases.get(requested).cloned());
             let active = active_version(context, product, requested)?;
@@ -355,6 +509,13 @@ fn optional_resolution(
             }
         }
     };
+    let version = if let Some(index) = &published {
+        let (version, notices) = index.resolve_release(&version, crate::model::platform()?)?;
+        messages.extend(notices);
+        version
+    } else {
+        version
+    };
     if let Selector::Preview { .. } = selector(requested)?
         && exact_version(&version)?.pre.is_empty()
     {
@@ -367,6 +528,9 @@ fn optional_resolution(
     }))
 }
 pub fn activate(context: &ContextPaths, product: &str, resolution: &Resolution) -> Result<()> {
+    if let Some(index) = index(context, product, true)? {
+        index.ensure_runnable(&resolution.version)?;
+    }
     if product == "launcher" {
         atomic_json(
             &context.home.join("catalog/launcher/tracking.json"),
@@ -381,11 +545,20 @@ pub fn activate(context: &ContextPaths, product: &str, resolution: &Resolution) 
     let _lock = lock(&directory.join("resolutions.lock"))?;
     let path = directory.join("resolutions.json");
     let mut state = read_resolutions(&path)?;
+    let index = index(context, product, true)?;
+    if let Some(index) = &index {
+        index.ensure_runnable(&resolution.version)?;
+    }
     if let Some(active) = state.active.get(&resolution.requested)
         && (active == &resolution.version
             || (product == "cli"
                 && resolution.requested == "latest"
-                && !candidate.cmp_precedence(&exact(active)?).is_gt()))
+                && !candidate.cmp_precedence(&exact(active)?).is_gt()
+                && !index.as_ref().is_some_and(|index| {
+                    index
+                        .release(active)
+                        .is_some_and(|release| release.unavailable().is_some())
+                })))
     {
         return Ok(());
     }
@@ -408,6 +581,31 @@ pub fn apply_notices(command: &mut std::process::Command, messages: &[String]) -
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn cache_moderated_fixture(context: &ContextPaths, product: &str) -> Index {
+    let (bytes, signature) = match product {
+        "cli" => (
+            include_str!("../../tools/release/fixtures/moderated-cli.json"),
+            include_str!("../../tools/release/fixtures/moderated-cli.json.minisig"),
+        ),
+        "launcher" => (
+            include_str!("../../tools/release/fixtures/moderated-launcher.json"),
+            include_str!("../../tools/release/fixtures/moderated-launcher.json.minisig"),
+        ),
+        _ => panic!("Unknown fixture product"),
+    };
+    atomic_json(
+        &context
+            .home
+            .join("catalog")
+            .join(product)
+            .join("index.json.verified.json"),
+        &serde_json::json!({"bytes":bytes,"signature":signature}),
+    )
+    .unwrap();
+    index(context, product, true).unwrap().unwrap()
 }
 
 #[cfg(test)]
@@ -459,6 +657,21 @@ mod tests {
         }
         let index: Index = serde_json::from_value(fixture["index"].clone()).unwrap();
         index.validate("cli").unwrap();
+        for value in fixture["validStatusIndexes"].as_array().unwrap() {
+            serde_json::from_value::<Index>(value.clone())
+                .unwrap()
+                .validate("cli")
+                .unwrap();
+        }
+        for value in fixture["invalidStatusIndexes"].as_array().unwrap() {
+            assert!(
+                serde_json::from_value::<Index>(value.clone())
+                    .map_err(anyhow::Error::from)
+                    .and_then(|index| index.validate("cli"))
+                    .is_err(),
+                "{value}"
+            );
+        }
         assert!(index.validate("launcher").is_err());
         let payload = include_bytes!("../../tools/release/fixtures/index.json");
         let signature = include_str!("../../tools/release/fixtures/index.json.minisig");
@@ -501,6 +714,8 @@ mod tests {
         index.releases.push(Release {
             version: "3.0.0".into(),
             date: "2026-11-17".into(),
+            yanked: None,
+            quarantined: None,
             files: PLATFORMS
                 .iter()
                 .map(|platform| (*platform).into())
@@ -784,5 +999,93 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn signed_moderation_redirects_exact_and_remembered_latest_and_allows_rollback_activation() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        cache_moderated_fixture(&context, "cli");
+        atomic_json(
+            &context.home.join("catalog/cli/resolutions.json"),
+            &serde_json::json!({"active":{"latest":"1.7.2"}}),
+        )
+        .unwrap();
+        for requested in ["1.7.2", "1.7.1", "latest"] {
+            let resolution = resolve(&context, "cli", requested, true, false).unwrap();
+            assert_eq!(resolution.version, "1.7.0");
+            assert!(
+                resolution
+                    .messages
+                    .iter()
+                    .any(|message| message.contains("Reason:"))
+            );
+        }
+        let resolution = resolve(&context, "cli", "latest", true, false).unwrap();
+        activate(&context, "cli", &resolution).unwrap();
+        assert_eq!(
+            active_version(&context, "cli", "latest")
+                .unwrap()
+                .as_deref(),
+            Some("1.7.0")
+        );
+        assert!(
+            activate(
+                &context,
+                "cli",
+                &Resolution {
+                    requested: "latest".into(),
+                    version: "1.7.2".into(),
+                    messages: vec![]
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn moderation_preserves_channels_uses_numeric_precedence_and_skips_build_ties() {
+        let index: Index = serde_json::from_value(serde_json::json!({
+            "schemaVersion":1,"product":"cli","aliases":{},"releases":[
+                {"version":"2.0.0-beta.11","date":"2026-11-18","files":[],"quarantined":{"at":"2026-11-18T00:00:00Z","reason":"broken"}},
+                {"version":"2.0.0-beta.10","date":"2026-11-18","files":["win-x64"]},
+                {"version":"2.0.0-beta.9","date":"2026-11-18","files":["win-x64"]},
+                {"version":"2.0.0-alpha.99","date":"2026-11-18","files":["win-x64"]},
+                {"version":"1.9.0-beta.99","date":"2026-11-18","files":["win-x64"]},
+                {"version":"2.0.0","date":"2026-11-18","files":["win-x64"],"yanked":{"at":"2026-11-18T00:00:00Z","reason":"broken"}},
+                {"version":"2.0.0+healthy-build","date":"2026-11-18","files":["win-x64"]},
+                {"version":"1.8.0+build.2","date":"2026-11-18","files":["win-x64"]},
+                {"version":"1.8.0+build.1","date":"2026-11-18","files":["win-x64"]},
+                {"version":"1.9.0","date":"2026-11-18","files":["linux-x64"]}
+            ]})).unwrap();
+        index.validate("cli").unwrap();
+        assert_eq!(
+            index.resolve_release("2.0.0-beta.11", "win-x64").unwrap().0,
+            "2.0.0-beta.10"
+        );
+        assert_eq!(
+            index.resolve_release("2.0.0", "win-x64").unwrap().0,
+            "1.8.0+build.1"
+        );
+        assert!(index.resolve_release("2.0.0-beta.11", "linux-x64").is_err());
+        let mut empty = index.clone();
+        empty
+            .releases
+            .retain(|release| release.version == "2.0.0" || release.version.starts_with("2.0.0+"));
+        assert!(empty.resolve_release("2.0.0", "win-x64").is_err());
+    }
+
+    #[test]
+    fn status_serialization_omits_nulls_and_notices_strip_control_characters() {
+        let release: Release = serde_json::from_value(serde_json::json!({"version":"1.0.0","date":"2026-11-18","files":["win-x64"],"yanked":null,"quarantined":null})).unwrap();
+        let value = serde_json::to_value(&release).unwrap();
+        assert!(value.get("yanked").is_none() && value.get("quarantined").is_none());
+        let status = ReleaseStatus {
+            at: "2026-11-18T00:00:00Z".into(),
+            reason: format!("bad\n\u{1b}[31m{}", "x".repeat(3000)),
+        };
+        let reason = status.display_reason();
+        assert_eq!(reason.chars().count(), 500);
+        assert!(!reason.chars().any(char::is_control));
     }
 }

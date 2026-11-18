@@ -180,6 +180,17 @@ pub fn lock(path: &Path) -> Result<File> {
     Ok(file)
 }
 
+pub(crate) fn try_lock(path: &Path) -> Result<Option<File>> {
+    let file = open_lock(path)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(fs::TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("Could not lock {}.", path.display()))
+        }
+    }
+}
+
 pub fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let directory = path.parent().context("Metadata path has no parent.")?;
     fs::create_dir_all(directory)?;

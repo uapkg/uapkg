@@ -152,6 +152,7 @@ fn available_output(
             .iter()
             .filter(|release| {
                 release.files.iter().any(|file| file == target)
+                    && release.unavailable().is_none()
                     && !replacements
                         .is_some_and(|map| map.replacements.contains_key(&release.version))
             })
@@ -211,6 +212,8 @@ mod tests {
                     version,
                     date: "2026-11-17".into(),
                     files: vec!["win-x64".into()],
+                    yanked: None,
+                    quarantined: None,
                 })
                 .collect(),
         };

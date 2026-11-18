@@ -202,7 +202,9 @@ exact stable CLIs run locally. Preview and alias selection uses the last verifie
 metadata and remembered resolution when the site is unavailable. Metadata does
 not expire because a local clock crosses a retirement deadline. If known metadata
 requires a replacement that is not installed, the launcher fails instead of
-running the retired preview. Install required versions before disconnecting.
+running the retired or flagged release. Known yank and quarantine statuses also
+apply to exact pins and installed caches. Install required versions before
+disconnecting.
 
 The launcher verifies `index.json` and `replacements.json` with its embedded
 catalog key. It verifies each archive against `SHASUMS256.txt`, signed with a
@@ -222,13 +224,21 @@ uapkg launcher-update 0.3.0-beta
 uapkg version install latest
 ```
 
-The first eligible command checks for launcher updates, and subsequent commands
-check at most once every 24 hours per installation. The default CLI checks on the
-same cadence when the command selects a configuration default of `latest`. New stable
-versions are installed automatically. The original command continues with the
-updated launcher or CLI. If a check or automatic installation fails, the command
-can still use the installed version. Offline runs, diagnostics, launcher
-management commands, and development bindings skip periodic checks.
+Released launcher invocations check both product indexes at most once every 24
+hours, including pinned versions, diagnostics, and launcher management commands.
+Eligible commands install new stable versions automatically. The original command
+continues with the updated launcher or CLI. Optional update failures can retain a
+healthy installed version. Offline runs use verified cached metadata; development
+bindings and identity-only launcher probes skip published-release checks.
+
+Yanked and quarantined versions are excluded from execution and resolution. A
+flagged stable CLI falls back to the greatest lower healthy stable available for
+the platform. A flagged preview falls back within its base version and alpha/beta
+stage, after applying existing preview-retirement mappings. Configured selectors
+and project pins are unchanged. Resolution fails if no eligible predecessor
+exists. Yanked caches are retained; quarantined versions are removed from managed
+caches across platforms. Locked files are retried later, and the flagged version
+is never selected while cleanup is pending.
 
 Use either setting to keep daily checks and install updates manually:
 
@@ -253,6 +263,14 @@ explicit exact launcher version stays selected until the next manual update.
 Standalone launchers can update themselves. Use the original package manager to
 update installations owned by npm, WinGet, Homebrew, or Scoop. The installation
 receipt records which tool owns the launcher.
+
+A yanked or quarantined standalone launcher must update to healthy `latest` before
+ordinary commands can run, even if automatic updates are disabled. This recovery
+may install an earlier version and resumes the original command after successful
+replacement. Offline or failed recovery blocks ordinary commands. Package-managed
+installations instead require an update through their package manager.
+`launcher-update` remains available for recovery, and `launcher --version` and
+`launcher --platform` remain available for replacement verification.
 
 Updates verify the staged executable's version before replacement. A verified
 backup and transaction journal support recovery after interruption, including
@@ -329,8 +347,9 @@ It follows the launcher's version selection rules, including project pins and
 explicit overrides. Diagnostics for launcher commands use the global default.
 Missing selected CLIs are installed while online, and successful alias
 resolutions are remembered for later invocations. Use `--offline` to require an
-already installed CLI. Diagnostics skip periodic update checks and launcher
-update recovery. Development bindings report that local checkout execution
+already installed CLI. Diagnostics skip optional upgrades and ordinary transaction
+recovery, while still checking release policy and requiring recovery from a
+flagged launcher. Development bindings report that local checkout execution
 overrides project selection.
 
 The report uses a fixed list of fields. It does not print credentials, environment

@@ -169,6 +169,18 @@ fn fetch_document(
     })
 }
 
+fn accept_document<T: DeserializeOwned>(
+    cache: &Path,
+    document: &SignedDocument,
+    key: &str,
+    validate: impl FnOnce(&T) -> Result<()>,
+) -> Result<T> {
+    let value = parse(document, key)?;
+    validate(&value)?;
+    atomic_json(cache, document)?;
+    Ok(value)
+}
+
 /// Optional upgrade attempts only install from fresh authenticated metadata.
 pub fn refresh_document<T: DeserializeOwned>(
     context: &ContextPaths,
@@ -179,10 +191,12 @@ pub fn refresh_document<T: DeserializeOwned>(
     let key = catalog_key();
     let timeout = Duration::from_secs(3);
     let document = fetch_document(&client_with_timeout(timeout)?, product_name, name, timeout)?;
-    let value = parse(&document, key)?;
-    validate(&value)?;
-    atomic_json(&catalog_cache(context, product_name, name), &document)?;
-    Ok(value)
+    accept_document(
+        &catalog_cache(context, product_name, name),
+        &document,
+        key,
+        validate,
+    )
 }
 
 /// Only network unavailability falls back to authenticated cached metadata.
@@ -193,6 +207,22 @@ pub fn document<T: DeserializeOwned>(
     name: &str,
     offline: bool,
 ) -> Result<T> {
+    document_validated(context, product_name, name, offline, |_| Ok(()))
+}
+
+pub fn network_unavailable(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<reqwest::Error>().is_some())
+}
+
+pub fn document_validated<T: DeserializeOwned>(
+    context: &ContextPaths,
+    product_name: &str,
+    name: &str,
+    offline: bool,
+    validate: impl Fn(&T) -> Result<()>,
+) -> Result<T> {
     product(product_name)?;
     let key = catalog_key();
     let cache = catalog_cache(context, product_name, name);
@@ -200,9 +230,7 @@ pub fn document<T: DeserializeOwned>(
         let client = client()?;
         match fetch_document(&client, product_name, name, Duration::from_secs(10)) {
             Ok(document) => {
-                let parsed = parse(&document, key)?;
-                atomic_json(&cache, &document)?;
-                return Ok(parsed);
+                return accept_document(&cache, &document, key, validate);
             }
             Err(error)
                 if error
@@ -213,7 +241,9 @@ pub fn document<T: DeserializeOwned>(
     }
     let document: SignedDocument = crate::model::read_json(&cache)
         .with_context(|| format!("No verified {product_name} {name} is available offline. Connect to releases.uapkg.dev and retry."))?;
-    parse(&document, key)
+    let parsed = parse(&document, key)?;
+    validate(&parsed)?;
+    Ok(parsed)
 }
 pub fn checksum(bytes: &[u8], name: &str) -> Result<String> {
     let content = std::str::from_utf8(bytes)?;
@@ -318,6 +348,40 @@ fn save_download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_signed_schema_cannot_replace_previously_verified_cached_policy() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("index.json.verified.json");
+        let document = SignedDocument {
+            bytes: include_str!("../../tools/release/fixtures/moderated-cli.json").into(),
+            signature: include_str!("../../tools/release/fixtures/moderated-cli.json.minisig")
+                .into(),
+        };
+        accept_document::<crate::catalog::Index>(&cache, &document, catalog_key(), |index| {
+            index.validate("cli")
+        })
+        .unwrap();
+        let before = fs::read(&cache).unwrap();
+        assert!(
+            accept_document::<crate::catalog::Index>(&cache, &document, catalog_key(), |index| {
+                index.validate("launcher")
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&cache).unwrap(), before);
+        let invalid = SignedDocument {
+            bytes: "{}".into(),
+            signature: document.signature,
+        };
+        assert!(
+            accept_document::<crate::catalog::Index>(&cache, &invalid, catalog_key(), |index| {
+                index.validate("cli")
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&cache).unwrap(), before);
+    }
 
     #[test]
     fn embedded_production_keys_are_valid_distinct_and_separate_from_test_keys() {

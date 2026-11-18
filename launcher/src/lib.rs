@@ -36,9 +36,21 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
         }
     }
     let context = ContextPaths::load()?;
-    if !debug_info {
-        updater::recover_installation(&context)?;
+    if !debug_info && let Some(target) = updater::recover_installation(&context)? {
+        let recovered = ContextPaths::for_executable(target)?;
+        return updater::resume_required(&recovered, &args);
     }
+    let explicit_updater = invocation.command.as_deref() == Some("launcher-update") && !debug_info;
+    let policy = if context.ownership() != "development" && !explicit_updater {
+        let refreshed = maintenance::refresh_policy(&context, invocation.offline)?;
+        // Explicit updater commands remain available even if latest is absent.
+        if updater::enforce_policy(&context, invocation.offline)? {
+            return updater::resume_required(&context, &args);
+        }
+        refreshed
+    } else {
+        maintenance::PolicyRefresh::default()
+    };
     if invocation.scope() == Scope::Launcher && !debug_info {
         return launcher_command(&context, &invocation);
     }
@@ -56,7 +68,11 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
     if let Some(settings) = &settings
         && preparation::allows_optional_maintenance(&invocation)
     {
-        let update = updater::maintain(&context, settings.auto_launcher_update);
+        let update = updater::maintain(
+            &context,
+            settings.auto_launcher_update,
+            policy.launcher_fresh,
+        );
         if update.restart
             && let Some(code) = updater::resume(&context, &args)?
         {
@@ -89,7 +105,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
         selection,
         mut resolution,
         installed,
-    } = preparation::prepare(&context, &invocation, &settings, &cwd)?;
+    } = preparation::prepare(&context, &invocation, &settings, &cwd, policy.cli_fresh)?;
     resolution.messages.extend(launcher_notices);
     let diagnostic = diagnostics::for_release(
         &context,
@@ -225,11 +241,18 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
 
 fn track_explicit_cli_check(
     context: &ContextPaths,
-    version: &str,
+    _version: &str,
     offline: bool,
 ) -> Result<Option<std::fs::File>> {
-    if version == "latest" && !offline && context.ownership() != "development" {
-        return maintenance::claim(&maintenance::cli_directory(context), true);
+    if !offline && context.ownership() != "development" {
+        let guard = maintenance::claim(&maintenance::cli_directory(context), true)?;
+        let index = catalog::index(context, "cli", false)?;
+        if let Some(index) = index
+            && let Err(error) = engines::purge_quarantined(context, &index)
+        {
+            eprintln!("uapkg: Could not finish quarantined CLI cleanup. {error:#}");
+        }
+        return Ok(guard);
     }
     Ok(None)
 }

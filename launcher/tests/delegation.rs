@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -68,6 +69,32 @@ process.exit(Number(process.env.UAPKG_TEST_EXIT || '0'));
 }
 
 fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
+    // These tests exercise delegation from installed fixtures. Daily network
+    // discovery is covered separately and must not depend on the live service.
+    if !args.contains(&"--offline") {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        write(
+            &home.join("catalog/cli/checks/check.json"),
+            json!({"lastAttempt":now}),
+        );
+        let executable = Path::new(env!("CARGO_BIN_EXE_uapkg"))
+            .canonicalize()
+            .unwrap();
+        let identity: String = Sha256::digest(executable.as_os_str().as_encoded_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        write(
+            &home
+                .join("catalog/launcher/checks")
+                .join(identity)
+                .join("check.json"),
+            json!({"lastAttempt":now}),
+        );
+    }
     Command::new(env!("CARGO_BIN_EXE_uapkg"))
         .args(args)
         .current_dir(cwd)
@@ -174,7 +201,7 @@ fn local_list_orders_all_selections_before_valid_current_platform_installations(
     );
     assert_eq!(fs::read(home.join("config.json")).unwrap(), configuration);
     assert_eq!(fs::read(dir.path().join("uapkg.json")).unwrap(), manifest);
-    for name in ["catalog", "staging", "locks", "maintenance"] {
+    for name in ["staging", "locks", "maintenance"] {
         assert!(!home.join(name).exists(), "Listing created {name}");
     }
     assert!(!home.join("engines/1.7.2").exists());
@@ -214,7 +241,7 @@ fn local_list_merges_roles_and_names_only_the_roles_using_an_alias() {
         fs::read(home.join("catalog/cli/resolutions.json")).unwrap(),
         resolutions
     );
-    assert_eq!(fs::read_dir(home.join("catalog/cli")).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(home.join("catalog/cli")).unwrap().count(), 2);
     assert!(!home.join("staging").exists());
 }
 
@@ -227,7 +254,7 @@ fn local_list_includes_generated_defaults_and_keeps_uncached_aliases_visible() {
         listed(run(&home, dir.path(), &["version", "list"])),
         format!("latest (global default, unresolved)\n{footer}")
     );
-    assert!(!home.exists());
+    assert!(!home.join("config.json").exists());
     fixture_cache(&home, "1.7.0", platform().unwrap());
     assert_eq!(
         listed(run(&home, dir.path(), &["version", "list"])),
@@ -242,7 +269,7 @@ fn local_list_includes_generated_defaults_and_keeps_uncached_aliases_visible() {
         listed(run(&home, dir.path(), &["version", "list"])),
         format!("latest (global default, unresolved)\n\n1.7.0\n{footer}")
     );
-    assert!(!home.join("catalog").exists());
+    assert!(!home.join("catalog/cli/index.json.verified.json").exists());
 }
 
 #[test]

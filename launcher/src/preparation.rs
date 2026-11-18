@@ -25,6 +25,7 @@ pub(crate) fn prepare(
     invocation: &Invocation,
     settings: &Settings,
     cwd: &Path,
+    fresh: bool,
 ) -> Result<PreparedCli> {
     prepare_with(
         context,
@@ -32,7 +33,9 @@ pub(crate) fn prepare(
         settings,
         cwd,
         |version, offline| catalog::resolve(context, "cli", version, offline, false),
-        |resolution| maintenance::maintain_cli(context, resolution, settings.auto_cli_update),
+        |resolution| {
+            maintenance::maintain_cli(context, resolution, settings.auto_cli_update, fresh)
+        },
         |version, offline, reason| {
             engines::ensure_installed_with_reason(context, version, offline, Some(reason))
         },
@@ -72,15 +75,14 @@ fn prepare_with(
     } else {
         None
     };
-    let mut resolution = if let Some(version) = active {
-        Resolution {
-            requested: "latest".into(),
-            version,
-            messages: vec![],
-        }
-    } else {
-        resolve(&selection.version, invocation.offline)?
-    };
+    let mut resolution = resolve(&selection.version, invocation.offline)?;
+    if known_active {
+        // Optional stable-update reminders belong to maintenance; policy
+        // notices still apply to diagnostics and disabled automatic updates.
+        resolution
+            .messages
+            .retain(|message| !message.starts_with("A new cli version is available:"));
+    }
     let updated = if known_active && allow_optional_maintenance {
         update(&mut resolution)
     } else {
@@ -95,9 +97,7 @@ fn prepare_with(
         )?,
     };
     selection.version.clone_from(&resolution.version);
-    if !known_active {
-        catalog::activate(context, "cli", &resolution)?;
-    }
+    catalog::activate(context, "cli", &resolution)?;
     drop(bootstrap);
     Ok(PreparedCli {
         selection,

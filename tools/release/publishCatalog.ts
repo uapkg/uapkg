@@ -6,7 +6,9 @@ import {
   CHECKSUM_FILE,
   CHECKSUM_SIGNATURE,
   parseChecksums,
+  serializeCatalogEntry,
   validateCurrentEntry,
+  validateEntry,
   type CatalogEntry,
 } from './ReleaseContract.ts';
 
@@ -35,7 +37,7 @@ export function publishCatalog(
   parseChecksums(record.checksums.toString('utf8'), entry.product, entry.version, entry.files);
   if (!record.signature.length) throw new Error('A verified checksum signature is required.');
   const files = new Map<string, Buffer>([
-    ['entry.json', Buffer.from(`${JSON.stringify(entry, null, 2)}\n`)],
+    ['entry.json', Buffer.from(serializeCatalogEntry(entry))],
     [CHECKSUM_FILE, record.checksums],
     [CHECKSUM_SIGNATURE, record.signature],
   ]);
@@ -45,10 +47,24 @@ export function publishCatalog(
       const directory = path.join(attempt.directory, entry.product, entry.version);
       const present = [...files].filter(([name]) => existsSync(path.join(directory, name)));
       if (present.length) {
-        if (
-          present.length !== files.size ||
-          present.some(([name, bytes]) => !readFileSync(path.join(directory, name)).equals(bytes))
-        )
+        const matches = (name: string, bytes: Buffer): boolean => {
+          const existing = readFileSync(path.join(directory, name));
+          if (name !== 'entry.json') return existing.equals(bytes);
+          try {
+            const previous = validateEntry(JSON.parse(existing.toString('utf8')));
+            return (
+              previous.schemaVersion === entry.schemaVersion &&
+              previous.product === entry.product &&
+              previous.version === entry.version &&
+              previous.publishedAt === entry.publishedAt &&
+              previous.tag === entry.tag &&
+              JSON.stringify(previous.files) === JSON.stringify(entry.files)
+            );
+          } catch {
+            return false;
+          }
+        };
+        if (present.length !== files.size || present.some(([name, bytes]) => !matches(name, bytes)))
           throw new Error(`Immutable catalog record differs: ${entry.product}/${entry.version}.`);
         return { changed: false, attempts: count };
       }
@@ -65,7 +81,10 @@ export function publishCatalog(
 }
 
 /** Requires the runner's GitHub credential helper; no tokens are written into this branch. */
-export function createCatalogAdapter(repository: string): CatalogAdapter {
+export function createCatalogAdapter(
+  repository: string,
+  message = 'Publish verified release catalog record',
+): CatalogAdapter {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('Expected an exact GitHub repository.');
   const remote = `https://github.com/${repository}.git`;
   const branch = 'refs/heads/catalog-release';
@@ -107,7 +126,7 @@ export function createCatalogAdapter(repository: string): CatalogAdapter {
               'commit',
               '--quiet',
               '-m',
-              'Publish verified release catalog record',
+              message,
             ]);
             if (git(['push', 'origin', `HEAD:${branch}`], true) !== null) return true;
             // Only branch contention is retryable. Permission/network failures surface.

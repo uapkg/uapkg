@@ -48,12 +48,17 @@ signatures. Artifact URLs use
 `/<product>/<version>/uapkg-<product>-<version>-<platform>.tar.gz`, redirecting to
 GitHub Releases. Per-version `SHASUMS256.txt` and its signature authenticate the
 archive. No GitHub REST release discovery, npm provider, or combined bundle exists.
+Quarantined archive URLs return `410`; original GitHub assets and signed checksums
+remain available.
 
 Selectors are exact stable/numbered alpha or beta versions, `latest`, and
 base-scoped alpha/beta aliases. Ordinary `latest` commands preserve the activated
 stable version. Explicit install/default commands advance it. Preview aliases
-follow signed mappings; exact previews only change through an explicit same-base
-stable replacement. There is no client retirement clock or metadata-age cutoff.
+follow signed mappings; exact previews can change through a same-base stable
+replacement or status fallback. Status policy applies after those mappings: yanked and
+quarantined versions fall back to the greatest lower healthy version for the
+platform, staying stable or within a preview's base/stage. There is no client
+retirement clock or metadata-age cutoff.
 
 `~/.uapkg/engines/<version>/<platform>/` contains the extracted engine and an atomic
 installation receipt. `~/.uapkg/catalog/<product>/` caches signed metadata and
@@ -68,12 +73,18 @@ the same default, global, intermediary, and local layers as `@uapkg/config`. Its
 embedded JSON Schema and defaults are generated from that package, with no native
 schema copy. Invalid overrides warn and retain earlier valid values. The CLI
 persists configuration changes; the crate never writes. `version default`
-continues to manage the global setting. Automatic updates default to on. An eligible
-command checks each product at most once in 24 hours. The installed CLI version
-for `latest` is recorded separately from configuration. Project
+continues to manage the global setting. Automatic updates default to on. Each
+released invocation checks each product at most once in 24 hours, including pins
+and diagnostics. Cached yank/quarantine policy applies on every invocation. The
+installed CLI version for `latest` is recorded separately from configuration. Project
 `uapkgVersion` and overrides use the same dedicated selector contract. Source
 selection and cached npm engines are unsupported. Installation ownership remains
 independent and restricts launcher replacement to standalone installations.
+Quarantine purges managed CLI caches across platforms; yank retains them. Both
+statuses require standalone launcher recovery before ordinary commands, regardless
+of automatic-update settings. Package-owned launchers block those commands with
+owner-specific update guidance. Identity probes remain available and development
+bindings are exempt.
 
 Run `vp run launcher:schema` to regenerate the embedded schema and
 `vp run launcher:schema:check` to check it without writing. Repository build

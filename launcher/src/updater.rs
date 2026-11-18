@@ -17,21 +17,140 @@ use std::{
 };
 
 const JOURNAL: &str = "uapkg-update.json";
+const BACKUP_RECORD: &str = "uapkg-backup.json";
 
-pub fn recover_installation(context: &ContextPaths) -> Result<()> {
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BackupRecord {
+    schema_version: u32,
+    version: String,
+    backup: String,
+    sha256: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StagedRelease {
+    schema_version: u32,
+    version: String,
+    platform: String,
+}
+
+fn stage_lock(directory: &Path, version: &str) -> Result<fs::File> {
+    exact_version(version)?;
+    lock(&directory.join(format!("uapkg-stage-{version}.lock")))
+}
+
+pub(crate) fn purge_quarantined(context: &ContextPaths, index: &Index) -> Result<()> {
+    if context.ownership() != "standalone" {
+        return Ok(());
+    }
+    let directory = context
+        .executable
+        .parent()
+        .context("Launcher has no installation directory.")?;
+    let canonical = directory.canonicalize()?;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".uapkg-update-")
+            || !entry.file_type()?.is_dir()
+        {
+            continue;
+        }
+        ensure!(
+            !fs::symlink_metadata(entry.path())?.file_type().is_symlink()
+                && entry.path().canonicalize()?.starts_with(&canonical),
+            "Refusing launcher stage cleanup outside its installation directory."
+        );
+        let Ok(staged) = read_json::<StagedRelease>(&entry.path().join(".release.json")) else {
+            continue;
+        };
+        if staged.schema_version != 1
+            || exact_version(&staged.version).is_err()
+            || !index
+                .release(&staged.version)
+                .is_some_and(|release| release.quarantined.is_some())
+        {
+            continue;
+        }
+        let Some(_guard) = crate::storage::try_lock(
+            &directory.join(format!("uapkg-stage-{}.lock", staged.version)),
+        )?
+        else {
+            eprintln!(
+                "uapkg: Cleanup of quarantined launcher {} is deferred while its installation is active.",
+                staged.version
+            );
+            continue;
+        };
+        if entry.path().exists() {
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
+    // Keep transaction-owned backups until recovery or replacement commits.
+    if directory.join(JOURNAL).exists() {
+        return Ok(());
+    }
+    let name = context
+        .executable
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Launcher file name must be UTF-8.")?;
+    let backup = directory.join(if cfg!(windows) {
+        format!("{name}.backup.exe")
+    } else {
+        format!("{name}.backup")
+    });
+    if backup.is_file() && !fs::symlink_metadata(&backup)?.file_type().is_symlink() {
+        let _guard = lock(&directory.join("uapkg-update.lock"))?;
+        if !directory.join(JOURNAL).exists()
+            && let Ok(record) = read_json::<BackupRecord>(&directory.join(BACKUP_RECORD))
+            && record.schema_version == 1
+            && backup.file_name().and_then(|name| name.to_str()) == Some(record.backup.as_str())
+            && archive::sha256(&backup).ok().as_deref() == Some(record.sha256.as_str())
+            && index
+                .release(&record.version)
+                .is_some_and(|release| release.quarantined.is_some())
+        {
+            remove_backup(&backup)?;
+            fs::remove_file(directory.join(BACKUP_RECORD))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn recover_installation(context: &ContextPaths) -> Result<Option<PathBuf>> {
     let directory = context
         .executable
         .parent()
         .context("Launcher has no installation directory.")?;
     if !directory.join(JOURNAL).exists() {
-        return Ok(());
+        return Ok(None);
     }
     ensure!(
         context.ownership() == "standalone",
         "An update recovery record exists, but {} owns this launcher installation. Restore or update it through its original installation method. No installation files were changed.",
         context.ownership()
     );
-    recover(&context.executable)
+    let transaction: Transaction = read_json(&directory.join(JOURNAL))?;
+    let (target, _) = paths(directory, &transaction)?;
+    let before = archive::sha256(&target).ok();
+    match recover(&context.executable) {
+        Ok(()) => {}
+        Err(error)
+            if !directory.join(JOURNAL).exists()
+                && archive::sha256(&target).ok().as_deref()
+                    == Some(&transaction.previous_sha256) =>
+        {
+            eprintln!("uapkg: {error:#}");
+        }
+        Err(error) => return Err(error),
+    }
+    let moved = context.executable != target || before != archive::sha256(&target).ok();
+    Ok(moved.then_some(target))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -170,6 +289,9 @@ fn finish_transaction(directory: &Path, backup: &Path) -> Result<()> {
     if backup.exists() {
         remove_backup(backup)?;
     }
+    if directory.join(BACKUP_RECORD).exists() {
+        fs::remove_file(directory.join(BACKUP_RECORD))?;
+    }
     fs::remove_file(directory.join(JOURNAL))?;
     Ok(())
 }
@@ -219,6 +341,7 @@ enum UpdateMode {
     Automatic,
     ManualLatest,
     ManualSelected,
+    Required,
 }
 
 enum Replacement {
@@ -263,41 +386,30 @@ fn update_notices(current: &str, next: &str, owner: &str, requested: &str) -> Ve
 
 /// A launcher update is optional for a delegated command. Reuse a verified
 /// index for reminders and require a fresh index before automatic replacement.
-pub fn maintain(context: &ContextPaths, auto_update: bool) -> UpdateMaintenance {
+pub fn maintain(context: &ContextPaths, auto_update: bool, fresh: bool) -> UpdateMaintenance {
     if context.ownership() == "development" {
         return UpdateMaintenance::default();
     }
-    maintain_from_catalog(context, auto_update).unwrap_or_else(|error| {
+    maintain_from_catalog(context, auto_update, fresh).unwrap_or_else(|error| {
         eprintln!("uapkg: Could not check for launcher updates. {error:#}");
         UpdateMaintenance::default()
     })
 }
 
-fn maintain_from_catalog(context: &ContextPaths, auto_update: bool) -> Result<UpdateMaintenance> {
+fn maintain_from_catalog(
+    context: &ContextPaths,
+    auto_update: bool,
+    fresh: bool,
+) -> Result<UpdateMaintenance> {
     let requested = tracked_selector(context)?;
     if catalog::selector(&requested)? == Selector::Exact {
         return Ok(UpdateMaintenance::default());
     }
 
-    let attempt = maintenance::claim(&maintenance::launcher_directory(context), false)?;
-    let fresh = if attempt.is_some() {
-        match catalog::refresh_index(context, "launcher") {
-            Ok(index) => Some(index),
-            Err(error) => {
-                eprintln!("uapkg: Could not check for launcher updates. {error:#}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let perform_update = fresh.is_some() && auto_update && context.ownership() == "standalone";
-    let index = match fresh {
-        Some(index) => index,
-        None => match catalog::index(context, "launcher", true) {
-            Ok(Some(index)) => index,
-            _ => return Ok(UpdateMaintenance::default()),
-        },
+    let perform_update = fresh && auto_update && context.ownership() == "standalone";
+    let index = match catalog::index(context, "launcher", true) {
+        Ok(Some(index)) => index,
+        _ => return Ok(UpdateMaintenance::default()),
     };
     let Some(next) = index.aliases.get(&requested) else {
         return Ok(UpdateMaintenance::default());
@@ -346,9 +458,18 @@ pub fn update(context: &ContextPaths, requested: Option<&str>) -> Result<()> {
     let selector = catalog::selector(requested)?;
     let _attempt = maintenance::claim(&maintenance::launcher_directory(context), true)?
         .context("Could not reserve the launcher update check.")?;
-    let resolution = catalog::resolve(context, "launcher", requested, false, true)?;
+    let index = catalog::index(context, "launcher", false)?
+        .context("No verified launcher index is available.")?;
+    if let Err(error) = purge_quarantined(context, &index) {
+        eprintln!("uapkg: Could not finish quarantined launcher cleanup. {error:#}");
+    }
+    let resolution = catalog::resolve(context, "launcher", requested, true, true)?;
     let current = exact_version(crate::model::VERSION)?;
-    if selector == Selector::Latest
+    let required = index
+        .release(crate::model::VERSION)
+        .is_some_and(|release| release.unavailable().is_some());
+    if !required
+        && selector == Selector::Latest
         && exact_version(&resolution.version)?
             .cmp_precedence(&current)
             .is_le()
@@ -358,10 +479,9 @@ pub fn update(context: &ContextPaths, requested: Option<&str>) -> Result<()> {
         return Ok(());
     }
     catalog::emit(&resolution.messages);
-    let offline = selector != Selector::Exact;
-    let index = catalog::index(context, "launcher", offline)?
-        .context("No verified launcher index is available.")?;
-    let mode = if selector == Selector::Latest {
+    let mode = if required {
+        UpdateMode::Required
+    } else if selector == Selector::Latest {
         UpdateMode::ManualLatest
     } else {
         UpdateMode::ManualSelected
@@ -394,14 +514,24 @@ fn install(
         github::client()?
     };
     let target = platform()?;
+    index.ensure_runnable(version)?;
     index.supports(version, target)?;
     let directory = context
         .executable
         .parent()
         .context("Launcher has no installation directory.")?;
+    let _stage_guard = stage_lock(directory, version)?;
     let temporary = tempfile::Builder::new()
         .prefix(".uapkg-update-")
         .tempdir_in(directory)?;
+    atomic_json(
+        &temporary.path().join(".release.json"),
+        &StagedRelease {
+            schema_version: 1,
+            version: version.into(),
+            platform: target.into(),
+        },
+    )?;
     let archive_path = temporary.path().join("launcher.tar.gz");
     github::download_artifact(&client, "launcher", version, target, &archive_path)?;
     let extracted = temporary.path().join("launcher");
@@ -411,12 +541,79 @@ fn install(
         next.is_file(),
         "Launcher archive does not contain its executable."
     );
-    replace_staged_with_mode(context, &next, version, mode)
+    replace_staged_with_policy(context, &next, version, mode, Some(index))
+}
+
+/// A marked running launcher may only execute the updater and identity probes.
+/// This path deliberately ignores tracking pins and optional update settings.
+pub fn enforce_policy(context: &ContextPaths, offline: bool) -> Result<bool> {
+    let Some(index) = catalog::index(context, "launcher", true)? else {
+        return Ok(false);
+    };
+    enforce_policy_with(
+        context,
+        crate::model::VERSION,
+        offline,
+        &index,
+        |version, index| {
+            install(context, version, index, UpdateMode::Required).map(|result| match result {
+                Replacement::Installed => version.into(),
+                Replacement::AlreadyPresent(version) => version,
+            })
+        },
+    )
+}
+
+fn enforce_policy_with(
+    context: &ContextPaths,
+    current: &str,
+    offline: bool,
+    index: &Index,
+    install: impl FnOnce(&str, &Index) -> Result<String>,
+) -> Result<bool> {
+    let Some((kind, status)) = index
+        .release(current)
+        .and_then(catalog::Release::unavailable)
+    else {
+        return Ok(false);
+    };
+    let message = format!("Launcher {current} is {kind}: {}.", status.display_reason());
+    ownership_instructions(context.ownership()).with_context(|| message.clone())?;
+    ensure!(
+        !offline,
+        "{message} Ordinary commands are refused. Connect and run `uapkg launcher-update` to recover."
+    );
+    let next = index.target("latest").with_context(|| {
+        format!("{message} No healthy latest launcher is available; ordinary commands are refused.")
+    })?;
+    index.ensure_runnable(&next)?;
+    index.supports(&next, platform()?)?;
+    eprintln!("uapkg: {message} Installing healthy launcher {next} before continuing.");
+    let installed = install(&next, index).with_context(|| format!("{message} Required recovery failed; the command was refused. Run `uapkg launcher-update` to retry."))?;
+    catalog::activate(
+        context,
+        "launcher",
+        &catalog::Resolution {
+            requested: "latest".into(),
+            version: installed,
+            messages: vec![],
+        },
+    )?;
+    Ok(true)
 }
 
 /// Start the already checked replacement with the original arguments and
 /// inherited process context. Only a failure before launch permits fallback.
 pub fn resume(context: &ContextPaths, args: &[OsString]) -> Result<Option<i32>> {
+    resume_mode(context, args, false)
+}
+
+pub fn resume_required(context: &ContextPaths, args: &[OsString]) -> Result<i32> {
+    resume_mode(context, args, true)?
+        .context("The healthy launcher could not be started; the command was refused.")
+}
+
+fn resume_mode(context: &ContextPaths, args: &[OsString], required: bool) -> Result<Option<i32>> {
     let mut command = Command::new(&context.executable);
     command
         .args(args)
@@ -444,6 +641,10 @@ pub fn resume(context: &ContextPaths, args: &[OsString]) -> Result<Option<i32>> 
         }
     };
 
+    if required {
+        return Err(error)
+            .context("Could not start the healthy replacement launcher; the command was refused.");
+    }
     eprintln!(
         "uapkg: Could not start the updated launcher. Continuing this command with the running launcher. {error}"
     );
@@ -472,6 +673,16 @@ fn replace_staged_with_mode(
     version: &str,
     mode: UpdateMode,
 ) -> Result<Replacement> {
+    replace_staged_with_policy(context, next, version, mode, None)
+}
+
+fn replace_staged_with_policy(
+    context: &ContextPaths,
+    next: &Path,
+    version: &str,
+    mode: UpdateMode,
+    policy: Option<&Index>,
+) -> Result<Replacement> {
     ownership_instructions(context.ownership())?;
     exact_version(version)?;
     let directory = context
@@ -479,6 +690,11 @@ fn replace_staged_with_mode(
         .parent()
         .context("Launcher has no installation directory.")?;
     let _lock = lock(&directory.join("uapkg-update.lock"))?;
+    let latest_policy = catalog::index(context, "launcher", true)?;
+    let policy = latest_policy.as_ref().or(policy);
+    if let Some(policy) = policy {
+        policy.ensure_runnable(version)?;
+    }
     ensure!(
         !directory.join(JOURNAL).exists(),
         "An earlier launcher update needs recovery. Run UAPKG again before updating."
@@ -489,7 +705,15 @@ fn replace_staged_with_mode(
         let live = reported_version(&context.executable)
             .context("Could not check the installed launcher version.")?
             .context("The installed launcher did not report its version.")?;
-        if keep_installed(&live, version, crate::model::VERSION, mode)? {
+        exact_version(&live)?;
+        let keep = if mode == UpdateMode::Required {
+            live == version
+                || (live != crate::model::VERSION
+                    && policy.is_some_and(|policy| policy.ensure_runnable(&live).is_ok()))
+        } else {
+            keep_installed(&live, version, crate::model::VERSION, mode)?
+        };
+        if keep {
             return Ok(Replacement::AlreadyPresent(live));
         }
     }
@@ -529,6 +753,15 @@ fn replace_staged_with_mode(
         archive::sha256(&backup)? == previous_sha256,
         "Could not verify the launcher backup."
     );
+    atomic_json(
+        &directory.join(BACKUP_RECORD),
+        &BackupRecord {
+            schema_version: 1,
+            version: crate::model::VERSION.into(),
+            backup: backup_name.clone(),
+            sha256: previous_sha256.clone(),
+        },
+    )?;
     let transaction = Transaction {
         schema_version: 1,
         executable: name.to_owned(),
@@ -571,6 +804,169 @@ mod tests {
     use super::*;
 
     #[test]
+    fn marked_launcher_requires_healthy_latest_recovery_even_when_it_is_a_downgrade() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("uapkg"),
+            receipt: None,
+        };
+        let index = catalog::cache_moderated_fixture(&context, "launcher");
+        for current in ["0.3.3", "0.3.2"] {
+            let mut attempted = false;
+            assert!(
+                enforce_policy_with(&context, current, false, &index, |version, _| {
+                    attempted = true;
+                    assert_eq!(version, "0.3.1");
+                    Ok(version.into())
+                })
+                .unwrap()
+            );
+            assert!(attempted);
+            assert!(
+                enforce_policy_with(&context, current, true, &index, |_, _| panic!(
+                    "Offline recovery must not download"
+                ))
+                .is_err()
+            );
+            assert!(
+                enforce_policy_with(&context, current, false, &index, |_, _| bail!(
+                    "download failed"
+                ))
+                .unwrap_err()
+                .to_string()
+                .contains("command was refused")
+            );
+        }
+        assert!(
+            !enforce_policy_with(&context, "0.3.1", false, &index, |_, _| panic!(
+                "Healthy launcher must continue"
+            ))
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn cleanup_removes_only_identified_quarantined_launcher_stages() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("uapkg"),
+            receipt: None,
+        };
+        let index = catalog::cache_moderated_fixture(&context, "launcher");
+        for (name, version) in [
+            (".uapkg-update-bad", "0.3.3"),
+            (".uapkg-update-yanked", "0.3.2"),
+        ] {
+            let stage = directory.path().join(name);
+            atomic_json(
+                &stage.join(".release.json"),
+                &StagedRelease {
+                    schema_version: 1,
+                    version: version.into(),
+                    platform: platform().unwrap().into(),
+                },
+            )
+            .unwrap();
+            fs::write(stage.join("launcher.tar.gz"), b"abandoned archive").unwrap();
+        }
+        let unknown = directory.path().join(".uapkg-update-unknown");
+        fs::create_dir_all(&unknown).unwrap();
+        fs::write(unknown.join("launcher.tar.gz"), b"unidentified archive").unwrap();
+        purge_quarantined(&context, &index).unwrap();
+        assert!(!directory.path().join(".uapkg-update-bad").exists());
+        assert!(directory.path().join(".uapkg-update-yanked").exists());
+        assert!(unknown.exists());
+    }
+
+    #[test]
+    fn backup_cleanup_requires_recorded_identity_and_never_executes_backup_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("uapkg"),
+            receipt: None,
+        };
+        let index = catalog::cache_moderated_fixture(&context, "launcher");
+        let name = if cfg!(windows) {
+            "uapkg.backup.exe"
+        } else {
+            "uapkg.backup"
+        };
+        let backup = directory.path().join(name);
+        fs::write(&backup, b"arbitrary backup bytes; must not be executed").unwrap();
+        purge_quarantined(&context, &index).unwrap();
+        assert!(backup.exists(), "An unidentified orphan must be preserved");
+        atomic_json(
+            &directory.path().join(BACKUP_RECORD),
+            &BackupRecord {
+                schema_version: 1,
+                version: "0.3.3".into(),
+                backup: name.into(),
+                sha256: "0".repeat(64),
+            },
+        )
+        .unwrap();
+        purge_quarantined(&context, &index).unwrap();
+        assert!(backup.exists(), "A hash mismatch must preserve the orphan");
+        atomic_json(
+            &directory.path().join(BACKUP_RECORD),
+            &BackupRecord {
+                schema_version: 1,
+                version: "0.3.3".into(),
+                backup: name.into(),
+                sha256: archive::sha256(&backup).unwrap(),
+            },
+        )
+        .unwrap();
+        purge_quarantined(&context, &index).unwrap();
+        assert!(!backup.exists());
+        assert!(!directory.path().join(BACKUP_RECORD).exists());
+    }
+
+    #[test]
+    fn required_restart_failure_never_permits_continuing_on_the_running_launcher() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("missing-launcher"),
+            receipt: None,
+        };
+        assert!(
+            resume_required(&context, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("command was refused")
+        );
+    }
+
+    #[test]
+    fn package_owned_marked_launchers_refuse_commands_without_modifying_installation() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("uapkg"),
+            receipt: None,
+        };
+        let index = catalog::cache_moderated_fixture(&context, "launcher");
+        for owner in ["npm", "homebrew", "winget", "scoop"] {
+            context.receipt = Some(crate::model::Receipt {
+                schema_version: 1,
+                install_method: owner.into(),
+                default_cli_version: None,
+                development: None,
+            });
+            let error = enforce_policy_with(&context, "0.3.3", false, &index, |_, _| {
+                panic!("Package owner must perform the update")
+            })
+            .unwrap_err();
+            assert!(format!("{error:#}").to_lowercase().contains(owner));
+        }
+        assert!(!context.executable.exists());
+    }
+
+    #[test]
     fn automatic_replacement_hands_off_to_a_launcher_installed_by_another_process() {
         for candidate in ["0.9.0", "0.10.0", "0.11.0"] {
             assert!(keep_installed("0.10.0", candidate, "0.8.0", UpdateMode::Automatic).unwrap());
@@ -595,7 +991,7 @@ mod tests {
             &serde_json::json!({"selector":"0.1.2", "version":"0.1.2"}),
         )
         .unwrap();
-        let action = maintain(&context, true);
+        let action = maintain(&context, true, false);
         assert_eq!(tracked_selector(&context).unwrap(), "0.1.2");
         assert!(!action.restart);
         assert!(action.notices.is_empty());

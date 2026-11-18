@@ -26,7 +26,15 @@ export type ReleasePlatform = (typeof KNOWN_PLATFORMS)[number];
 export const CHECKSUM_FILE = 'SHASUMS256.txt';
 export const CHECKSUM_SIGNATURE = `${CHECKSUM_FILE}.minisig`;
 
-export interface CatalogEntry {
+export interface ReleaseStatus {
+  at: string;
+  reason: string;
+}
+export interface ReleaseStatuses {
+  yanked?: ReleaseStatus | null;
+  quarantined?: ReleaseStatus | null;
+}
+export interface CatalogEntry extends ReleaseStatuses {
   schemaVersion: 1;
   product: ReleaseProduct;
   version: string;
@@ -34,7 +42,7 @@ export interface CatalogEntry {
   tag: string;
   files: ReleasePlatform[];
 }
-export interface PublicRelease {
+export interface PublicRelease extends ReleaseStatuses {
   version: string;
   date: string;
   files: ReleasePlatform[];
@@ -51,12 +59,43 @@ export interface ProductReplacements {
   replacements: Record<string, string>;
 }
 
-function object(value: unknown, keys: string[]): Record<string, unknown> {
+function object(value: unknown, keys: string[], optional: string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected a release object.');
   const record = value as Record<string, unknown>;
-  if (Object.keys(record).sort().join(',') !== [...keys].sort().join(','))
+  if (
+    keys.some((key) => !Object.hasOwn(record, key)) ||
+    Object.keys(record).some((key) => !keys.includes(key) && !optional.includes(key))
+  )
     throw new Error('Unexpected release fields.');
   return record;
+}
+function assertTimestamp(value: unknown): asserts value is string {
+  if (
+    typeof value !== 'string' ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) ||
+    !Number.isFinite(Date.parse(value)) ||
+    new Date(value).toISOString().replace('.000Z', 'Z') !== value.replace('.000Z', 'Z')
+  )
+    throw new Error('Expected a full UTC timestamp.');
+}
+export function validateReleaseStatus(value: unknown): ReleaseStatus {
+  const status = object(value, ['at', 'reason']);
+  assertTimestamp(status.at);
+  if (typeof status.reason !== 'string' || status.reason.trim().length === 0)
+    throw new Error('Expected a nonempty release status reason.');
+  return status as unknown as ReleaseStatus;
+}
+function assertStatuses(value: Record<string, unknown>): void {
+  for (const key of ['yanked', 'quarantined']) {
+    if (value[key] !== undefined && value[key] !== null) validateReleaseStatus(value[key]);
+  }
+}
+/** Public writers omit absent statuses; readers also accept explicit null. */
+export function serializeCatalogEntry(entry: CatalogEntry): string {
+  const value = { ...validateEntry(entry) };
+  if (value.yanked == null) delete value.yanked;
+  if (value.quarantined == null) delete value.quarantined;
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 export function assertExactVersion(value: unknown): asserts value is string {
   if (typeof value !== 'string') throw new Error('Expected an exact version.');
@@ -104,19 +143,17 @@ export function artifactName(product: ReleaseProduct, version: string, platform:
   return `uapkg-${product}-${version}-${platform}.tar.gz`;
 }
 export function validateEntry(value: unknown): CatalogEntry {
-  const entry = object(value, ['schemaVersion', 'product', 'version', 'publishedAt', 'tag', 'files']);
+  const entry = object(
+    value,
+    ['schemaVersion', 'product', 'version', 'publishedAt', 'tag', 'files'],
+    ['yanked', 'quarantined'],
+  );
   if (entry.schemaVersion !== 1) throw new Error('Unsupported release schema.');
   assertProduct(entry.product);
   assertExactVersion(entry.version);
   assertFiles(entry.files, true);
-  if (
-    typeof entry.publishedAt !== 'string' ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(entry.publishedAt) ||
-    !Number.isFinite(Date.parse(entry.publishedAt)) ||
-    new Date(entry.publishedAt).toISOString().replace('.000Z', 'Z') !== entry.publishedAt.replace('.000Z', 'Z')
-  ) {
-    throw new Error('Expected a full UTC publication timestamp.');
-  }
+  assertTimestamp(entry.publishedAt);
+  assertStatuses(entry);
   if (entry.tag !== releaseTag(entry.product, entry.version)) throw new Error('Release tag differs from its identity.');
   return entry as unknown as CatalogEntry;
 }
@@ -135,10 +172,16 @@ export function validateIndex(value: unknown): ProductIndex {
   if (index.schemaVersion !== 1 || !Array.isArray(index.releases)) throw new Error('Unsupported product index.');
   assertProduct(index.product);
   const versions = new Set<string>();
+  const unavailable = new Set<string>();
   for (const value of index.releases) {
-    const release = object(value, ['version', 'date', 'files']);
+    const release = object(value, ['version', 'date', 'files'], ['yanked', 'quarantined']);
     assertExactVersion(release.version);
-    assertFiles(release.files);
+    assertStatuses(release);
+    if (release.quarantined != null) {
+      if (!Array.isArray(release.files) || release.files.length !== 0)
+        throw new Error('Quarantined public releases must have no files.');
+    } else assertFiles(release.files);
+    if (release.yanked != null || release.quarantined != null) unavailable.add(release.version);
     if (versions.has(release.version)) throw new Error('Duplicate release version.');
     versions.add(release.version);
     if (
@@ -154,6 +197,7 @@ export function validateIndex(value: unknown): ProductIndex {
   for (const [alias, target] of Object.entries(index.aliases)) {
     assertExactVersion(target);
     if (!versions.has(target)) throw new Error('Aliases must target a listed exact release.');
+    if (unavailable.has(target)) throw new Error('Aliases must target an available release.');
     const parsed = parse(target)!;
     if (alias === 'latest') {
       if (parsed.prerelease.length) throw new Error('latest must target a stable release.');

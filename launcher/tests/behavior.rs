@@ -620,6 +620,7 @@ fn run_cli(binary: &Path, home: &Path, cwd: &Path, args: &[&str]) -> Output {
         .args(args)
         .env("HOME", home.parent().unwrap())
         .env("USERPROFILE", home.parent().unwrap())
+        .env("UAPKG_OFFLINE", "1")
         .current_dir(cwd)
         .output()
         .unwrap()
@@ -661,6 +662,34 @@ fn launcher_build_identity_does_not_load_profiles_or_recover_updates() {
             b"invalid profile or transaction"
         );
     }
+}
+
+#[test]
+fn explicit_launcher_update_remains_available_when_cli_policy_is_damaged() {
+    let directory = tempfile::tempdir().unwrap();
+    let home = directory.path().join(".uapkg");
+    let cache = home.join("catalog/cli/index.json.verified.json");
+    fs::create_dir_all(cache.parent().unwrap()).unwrap();
+    fs::write(&cache, b"damaged CLI policy").unwrap();
+    let binary = Path::new(env!("CARGO_BIN_EXE_uapkg"));
+    let help = run_cli(
+        binary,
+        &home,
+        directory.path(),
+        &["launcher-update", "--help"],
+    );
+    assert!(help.status.success(), "{help:?}");
+    let updater = run_cli(
+        binary,
+        &home,
+        directory.path(),
+        &["launcher-update", "--offline"],
+    );
+    assert!(String::from_utf8_lossy(&updater.stderr).contains("require an online connection"));
+    let ordinary = run_cli(binary, &home, directory.path(), &["launcher", "--help"]);
+    assert!(!ordinary.status.success());
+    assert!(String::from_utf8_lossy(&ordinary.stderr).contains("Invalid JSON"));
+    assert_eq!(fs::read(cache).unwrap(), b"damaged CLI policy");
 }
 
 #[test]

@@ -15,6 +15,73 @@ use std::{
 
 const DAY: u64 = 24 * 60 * 60;
 
+#[derive(Default)]
+pub(crate) struct PolicyRefresh {
+    pub cli_fresh: bool,
+    pub launcher_fresh: bool,
+}
+
+/// Discovery is independent of selectors and optional automatic upgrades. Known
+/// signed policy is enforced even while offline or while another checker runs.
+pub(crate) fn refresh_policy(context: &ContextPaths, offline: bool) -> Result<PolicyRefresh> {
+    let cli = refresh_product(context, "cli", offline)?;
+    if let Some(index) = catalog::index(context, "cli", true)?
+        && let Err(error) = engines::purge_quarantined(context, &index)
+    {
+        eprintln!(
+            "uapkg: Could not finish quarantined CLI cleanup; execution remains blocked for those versions. {error:#}"
+        );
+    }
+    let launcher = refresh_product(context, "launcher", offline)?;
+    if let Some(index) = catalog::index(context, "launcher", true)?
+        && let Err(error) = crate::updater::purge_quarantined(context, &index)
+    {
+        eprintln!("uapkg: Could not finish quarantined launcher cleanup. {error:#}");
+    }
+    Ok(PolicyRefresh {
+        cli_fresh: cli,
+        launcher_fresh: launcher,
+    })
+}
+
+fn refresh_product(context: &ContextPaths, product: &str, offline: bool) -> Result<bool> {
+    refresh_product_with(context, product, offline, || {
+        catalog::refresh_index(context, product)
+    })
+}
+
+fn refresh_product_with(
+    context: &ContextPaths,
+    product: &str,
+    offline: bool,
+    refresh: impl FnOnce() -> Result<Index>,
+) -> Result<bool> {
+    catalog::index(context, product, true)?;
+    if offline {
+        return Ok(false);
+    }
+    let directory = if product == "cli" {
+        cli_directory(context)
+    } else {
+        launcher_directory(context)
+    };
+    let Some(_attempt) = claim(&directory, false)? else {
+        return Ok(false);
+    };
+    match refresh() {
+        Ok(_) => Ok(true),
+        Err(error) if crate::github::network_unavailable(&error) => {
+            eprintln!(
+                "uapkg: Could not refresh {product} release policy. Using verified cached policy. {error:#}"
+            );
+            Ok(false)
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("Could not verify {product} release policy."))
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Check {
@@ -78,16 +145,19 @@ pub fn maintain_cli(
     context: &ContextPaths,
     resolution: &mut Resolution,
     auto_update: bool,
+    fresh: bool,
 ) -> Option<InstalledEngine> {
-    maintain_cli_with(
+    let index = catalog::index(context, "cli", true).ok().flatten()?;
+    maintain_cli_selected(
         context,
         resolution,
-        auto_update,
-        || catalog::refresh_index(context, "cli"),
+        auto_update && fresh,
+        &index,
         |version, index| engines::install_cli_update(context, version, index),
     )
 }
 
+#[cfg(test)]
 fn maintain_cli_with(
     context: &ContextPaths,
     resolution: &mut Resolution,
@@ -96,13 +166,25 @@ fn maintain_cli_with(
     install: impl FnOnce(&str, &Index) -> Result<InstalledEngine>,
 ) -> Option<InstalledEngine> {
     let guard = claim(&cli_directory(context), false).ok().flatten();
-    // Another invocation may have advanced latest after this one read it.
-    if let Ok(Some(active)) = catalog::active_version(context, "cli", "latest") {
-        resolution.version = active;
-    }
     let fresh = guard.as_ref().and_then(|_| refresh().ok());
     let can_install = auto_update && fresh.is_some();
     let index = fresh.or_else(|| catalog::index(context, "cli", true).ok().flatten())?;
+    maintain_cli_selected(context, resolution, can_install, &index, install)
+}
+
+fn maintain_cli_selected(
+    context: &ContextPaths,
+    resolution: &mut Resolution,
+    can_install: bool,
+    index: &Index,
+    install: impl FnOnce(&str, &Index) -> Result<InstalledEngine>,
+) -> Option<InstalledEngine> {
+    // Never reintroduce a revoked active version after required fallback.
+    if let Ok(Some(active)) = catalog::active_version(context, "cli", "latest")
+        && index.ensure_runnable(&active).is_ok()
+    {
+        resolution.version = active;
+    }
     let latest = index.aliases.get("latest")?;
     let current = exact_version(&resolution.version).ok()?;
     if !exact_version(latest).ok()?.cmp_precedence(&current).is_gt()
@@ -117,7 +199,7 @@ fn maintain_cli_with(
             version: latest.clone(),
             messages: vec![],
         };
-        if let Ok(installed) = install(latest, &index)
+        if let Ok(installed) = install(latest, index)
             && catalog::activate(context, "cli", &update).is_ok()
         {
             resolution.version = catalog::active_version(context, "cli", "latest")
@@ -144,6 +226,41 @@ fn maintain_cli_with(
 mod tests {
     use super::*;
     use anyhow::bail;
+
+    #[test]
+    fn daily_policy_checks_are_independent_of_selectors_and_offline_never_refreshes() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("uapkg"),
+            receipt: None,
+        };
+        let index = catalog::cache_moderated_fixture(&context, "cli");
+        assert!(
+            !refresh_product_with(&context, "cli", true, || panic!(
+                "Offline policy must use signed cached state"
+            ))
+            .unwrap()
+        );
+        assert!(!cli_directory(&context).exists());
+        assert!(refresh_product_with(&context, "cli", false, || Ok(index)).unwrap());
+        assert!(
+            !refresh_product_with(&context, "cli", false, || panic!(
+                "Policy refresh must be daily"
+            ))
+            .unwrap()
+        );
+        assert!(
+            refresh_product_with(&context, "launcher", false, || bail!("invalid signature"))
+                .is_err()
+        );
+        assert!(
+            !refresh_product_with(&context, "launcher", false, || panic!(
+                "A failed attempt is also paced"
+            ))
+            .unwrap()
+        );
+    }
 
     fn cli_fixture(root: &Path) -> (ContextPaths, Resolution, Index) {
         let context = ContextPaths {
