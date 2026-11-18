@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { UAPKGBuildMode } from '@uapkg/common';
 import type { UAPKGBuildMetadata } from '../src/build/BuildMetadata.ts';
 
-export const DEVELOPMENT_BANNER_TEXT = 'DEVELOPMENT BUILD';
+export const DEVELOPMENT_BANNER_TEXT = 'DEVELOPMENT BUILD [CLI]';
 
 interface PackageJson {
   readonly version: string;

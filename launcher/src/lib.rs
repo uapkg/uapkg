@@ -1,4 +1,5 @@
 pub mod archive;
+mod banner;
 pub mod catalog;
 pub mod diagnostics;
 pub mod engines;
@@ -18,6 +19,7 @@ use std::{ffi::OsString, io::Write, process::Command};
 use storage::ContextPaths;
 
 pub fn run(args: Vec<OsString>) -> Result<i32> {
+    banner::development();
     let invocation = Invocation::parse(args.clone())?;
     let debug_info = diagnostics::requested(&invocation.args);
     // Build identity checks validate staged executables without loading a

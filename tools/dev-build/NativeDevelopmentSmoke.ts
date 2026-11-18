@@ -137,12 +137,13 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
           `${shell} resolution`,
         );
         assert.equal(lines.at(-1), displayVersion, `${shell} version`);
-        assert.match(result.stderr, /DEVELOPMENT BUILD/, `${shell} banner`);
+        assert.match(result.stderr, /DEVELOPMENT BUILD \[LAUNCHER\]/, `${shell} launcher banner`);
+        assert.match(result.stderr, /DEVELOPMENT BUILD \[CLI\]/, `${shell} CLI banner`);
       }
     };
     const version = invoke(['--offline', '--version']);
     assert.equal(version.stdout.trim(), metadata.displayVersion);
-    assert.match(version.stderr, /DEVELOPMENT BUILD/);
+    assert.match(version.stderr, /DEVELOPMENT BUILD \[LAUNCHER\]\r?\nDEVELOPMENT BUILD \[CLI\]/);
     verifyWindowsShells(metadata.displayVersion);
     assert.equal(invoke(['version', 'current']).stdout.trim(), sourceManifest.version);
     invoke(['config', 'set', 'launcher.defaultCliVersion', 'latest', '--global']);

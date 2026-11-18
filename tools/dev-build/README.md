@@ -81,7 +81,9 @@ silently switching to a downloaded engine.
 ## Profiles and trust roots
 
 The engine stamps its build mode before loading configuration. Development
-commands print `DEVELOPMENT BUILD` on stderr and use `~/.uapkg-development` for
+launchers print `DEVELOPMENT BUILD [LAUNCHER]` on stderr with a dark red background;
+the CLI prints `DEVELOPMENT BUILD [CLI]` with its blue background. Both use plain
+text when color is disabled or stderr is redirected. Development commands use `~/.uapkg-development` for
 the native installation, global configuration, registry caches, authentication
 metadata, and locks. Production commands use `~/.uapkg`. Linking, unlinking,
 watching, and cleaning preserve configuration, caches, and authentication data

@@ -91,7 +91,13 @@ executable, and preserves the existing journal, verified backup, rollback, and
 Windows cleanup behavior. After automatic replacement, the new launcher runs the
 original command with its arguments, working directory, and terminal streams.
 
-The `development` Cargo feature permits receipts bound to an absolute checkout,
+The `development` Cargo feature prints `DEVELOPMENT BUILD [LAUNCHER]` on stderr
+before command processing.
+The banner uses white text on a dark red background (RGB 128, 0, 0), or plain text
+when stderr is redirected or color is disabled. The development CLI follows with
+its blue `DEVELOPMENT BUILD [CLI]` banner.
+
+Development receipts bind the launcher to an absolute checkout,
 Node executable, and CLI entrypoint. They use `~/.uapkg-development` and execute
 local code without release selection. Explicit overrides are rejected; use an
 official launcher to exercise release routing.

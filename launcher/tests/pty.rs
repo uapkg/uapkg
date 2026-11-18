@@ -22,7 +22,7 @@ fn node_path() -> PathBuf {
     String::from_utf8(output.stdout).unwrap().trim().into()
 }
 
-fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32) {
+fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32, color: bool) {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     let launcher_name = if cfg!(windows) { "uapkg.exe" } else { "uapkg" };
@@ -79,6 +79,15 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32)
     command.cwd(root);
     command.env("HOME", root);
     command.env("USERPROFILE", root);
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    if color {
+        command.env_remove("NO_COLOR");
+        command.env("FORCE_COLOR", "1");
+    } else {
+        command.env("NO_COLOR", "1");
+        command.env("FORCE_COLOR", "0");
+    }
     let mut child = pair.slave.spawn_command(command).unwrap();
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().unwrap();
@@ -138,6 +147,16 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32)
         "Missing {expected:?}: {transcript}"
     );
     assert_eq!(
+        transcript.matches("DEVELOPMENT BUILD [LAUNCHER]").count(),
+        usize::from(cfg!(feature = "development")),
+        "{transcript}"
+    );
+    assert_eq!(
+        transcript.contains("48;2;128;0;0"),
+        cfg!(feature = "development") && color,
+        "Expected the dark red background only for a color-enabled development launcher: {transcript:?}"
+    );
+    assert_eq!(
         result.expect("Launcher did not exit").exit_code(),
         exit_code
     );
@@ -155,6 +174,7 @@ process.stdin.once('data', data => process.stdout.write(`KEY:${data.toString()}\
         b"k",
         "KEY:k",
         37,
+        true,
     );
 }
 
@@ -169,5 +189,6 @@ console.log(`READY:${process.stdin.isTTY}:${process.stdout.isTTY}:${process.stde
         b"\x03",
         "SIGNAL:SIGINT",
         130,
+        false,
     );
 }

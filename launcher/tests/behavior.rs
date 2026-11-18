@@ -645,7 +645,14 @@ fn launcher_build_identity_does_not_load_profiles_or_recover_updates() {
             String::from_utf8(output.stdout).unwrap(),
             format!("{expected}\n")
         );
-        assert!(output.stderr.is_empty());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            if cfg!(feature = "development") {
+                "DEVELOPMENT BUILD [LAUNCHER]\n"
+            } else {
+                ""
+            }
+        );
     }
     assert!(!home.exists());
     for name in ["uapkg-install.json", "uapkg-update.json"] {

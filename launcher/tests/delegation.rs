@@ -90,7 +90,14 @@ fn selected(output: Output, expected: &str) -> Value {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stderr), "fixture-stderr");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        if cfg!(feature = "development") {
+            "DEVELOPMENT BUILD [LAUNCHER]\nfixture-stderr"
+        } else {
+            "fixture-stderr"
+        }
+    );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body["version"], expected);
     body
@@ -112,7 +119,15 @@ fn fixture_cache(home: &Path, version: &str, target: &str) {
 
 fn listed(output: Output) -> String {
     assert!(output.status.success(), "{output:?}");
-    assert!(output.stderr.is_empty(), "{output:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        if cfg!(feature = "development") {
+            "DEVELOPMENT BUILD [LAUNCHER]\n"
+        } else {
+            ""
+        },
+        "{output:?}"
+    );
     String::from_utf8(output.stdout).unwrap()
 }
 

@@ -116,7 +116,7 @@ describe('CLI build mode', () => {
   it('renders the requested blue-background and white-text development banner', () => {
     const launcher = renderCliLauncher();
 
-    expect(launcher).toContain('\\u001B[44m\\u001B[37mDEVELOPMENT BUILD\\u001B[0m');
+    expect(launcher).toContain('\\u001B[44m\\u001B[37mDEVELOPMENT BUILD [CLI]\\u001B[0m');
     expect(launcher).toContain('process.stderr.write');
   });
 
