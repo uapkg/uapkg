@@ -37,6 +37,7 @@ describe('shared launcher configuration', () => {
       defaultCliVersion: 'latest',
       autoLauncherUpdate: true,
       autoCLIUpdate: true,
+      autoUpdate: { minimumReleaseAge: '3d' },
     });
     expect(config.get('launcher.defaultCliVersion')).toBe('latest');
     expect(config.getWithOrigin('launcher.defaultCliVersion')).toMatchObject({ source: 'default', value: 'latest' });
@@ -67,6 +68,7 @@ describe('shared launcher configuration', () => {
       defaultCliVersion: '3.0.0',
       autoLauncherUpdate: true,
       autoCLIUpdate: true,
+      autoUpdate: { minimumReleaseAge: '3d' },
     });
     expect(config.get('launcher', { scope: 'global' })).toEqual({ defaultCliVersion: '1.2.3' });
     expect(config.trace('launcher.defaultCliVersion').map(({ source, value }) => ({ source, value }))).toEqual([
@@ -90,6 +92,7 @@ describe('shared launcher configuration', () => {
       autoLauncherUpdate: true,
       autoCLIUpdate: false,
       defaultCliVersion: '3.0.0',
+      autoUpdate: { minimumReleaseAge: '3d' },
     });
     expect(config.getWithOrigin('launcher.autoLauncherUpdate')).toMatchObject({ source: 'intermediary', value: true });
     expect(config.getWithOrigin('launcher.autoCLIUpdate')).toMatchObject({ source: 'local', value: false });
@@ -101,6 +104,72 @@ describe('shared launcher configuration', () => {
     expect(parseConfigCliValue(property, 'false')).toEqual({ ok: true, value: false, diagnostics: [] });
     expect(parseConfigCliValue(property, 'yes').ok).toBe(false);
     expect(partialConfigSchema.safeParse({ launcher: { [key]: 'false' } }).success).toBe(false);
+  });
+
+  it.each(['0', '0s', '3d', '1w2d3h4m5s', '15m'])(
+    'supports setting the automatic update minimum release age: %s',
+    (value) => {
+      const property = 'launcher.autoUpdate.minimumReleaseAge';
+      expect(isLeafConfigPath(property)).toBe(true);
+      expect(isLeafConfigPath('launcher.autoUpdate')).toBe(false);
+      expect(parseConfigCliValue(property, value)).toEqual({ ok: true, value, diagnostics: [] });
+      expect(partialConfigSchema.parse({ launcher: { autoUpdate: { minimumReleaseAge: value } } })).toEqual({
+        launcher: { autoUpdate: { minimumReleaseAge: value } },
+      });
+    },
+  );
+
+  it.each(['', '1h2d', '1.5h', 'P3D', '3d\n', 0, null])('rejects an invalid release age: %j', (value) => {
+    expect(partialConfigSchema.safeParse({ launcher: { autoUpdate: { minimumReleaseAge: value } } }).success).toBe(
+      false,
+    );
+  });
+
+  it('retains the earlier duration and traces invalid nested overrides', () => {
+    const { profile, project } = fixture();
+    write(path.join(profile, 'config.json'), { launcher: { autoUpdate: { minimumReleaseAge: '7d' } } });
+    write(path.join(project, '.uapkg', 'config.json'), {
+      launcher: { autoUpdate: { minimumReleaseAge: 'invalid' }, autoCLIUpdate: false },
+    });
+    const config = createConfig({ cwd: project });
+    const property = 'launcher.autoUpdate.minimumReleaseAge';
+    expect(config.get(property)).toBe('7d');
+    expect(config.get('launcher.autoCLIUpdate')).toBe(false);
+    expect(config.getWithOrigin(property)).toMatchObject({ source: 'global', value: '7d' });
+    expect(config.getWithOrigin('launcher.autoUpdate')).toMatchObject({
+      source: 'global',
+      value: { minimumReleaseAge: '7d' },
+    });
+    expect(config.trace(property).at(-1)).toMatchObject({
+      source: 'local',
+      status: 'ignored',
+      reason: expect.stringContaining('retaining "7d"'),
+    });
+    expect(config.getDiagnostics()).toMatchObject([{ data: { path: property, ignored: true } }]);
+  });
+
+  it('traces an ignored nested container on its duration leaf', () => {
+    const { profile, project } = fixture();
+    write(path.join(profile, 'config.json'), { launcher: { autoUpdate: { minimumReleaseAge: '7d' } } });
+    write(path.join(project, '.uapkg', 'config.json'), { launcher: { autoUpdate: false } });
+    const config = createConfig({ cwd: project });
+    expect(config.get('launcher.autoUpdate.minimumReleaseAge')).toBe('7d');
+    expect(config.trace('launcher.autoUpdate.minimumReleaseAge').at(-1)).toMatchObject({ status: 'ignored' });
+    expect(config.getDiagnostics()).toMatchObject([{ data: { path: 'launcher.autoUpdate', ignored: true } }]);
+  });
+
+  it('does not attribute launcher object origins to containers with no accepted leaves', () => {
+    const { profile, project } = fixture();
+    write(path.join(profile, 'config.json'), { launcher: { autoUpdate: { minimumReleaseAge: '7d' } } });
+    write(path.join(project, '.uapkg', 'config.json'), {
+      launcher: { autoUpdate: { minimumReleaseAge: 'invalid' } },
+    });
+    const config = createConfig({ cwd: project });
+    expect(config.getWithOrigin('launcher')).toMatchObject({ source: 'global' });
+    expect(config.getWithOrigin('launcher.autoUpdate')).toMatchObject({
+      source: 'global',
+      value: { minimumReleaseAge: '7d' },
+    });
   });
 
   it.each(['1.2.3', '2.0.0-beta.1', '1.2.3+build.2', 'latest', '2.0.0-alpha', '2.0.0-beta'])(

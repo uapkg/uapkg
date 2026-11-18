@@ -3,6 +3,7 @@ use crate::{
     catalog::{self, Index, Selector},
     github, maintenance,
     model::{exact_version, platform, read_json, relative_path},
+    release_age::{self, MinimumReleaseAge, automatic_candidate},
     storage::{ContextPaths, ExtraFields, atomic_json, lock},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -385,11 +386,16 @@ fn update_notices(current: &str, next: &str, owner: &str, requested: &str) -> Ve
 
 /// A launcher update is optional for a delegated command. Reuse a verified
 /// index for reminders and require a fresh index before automatic replacement.
-pub fn maintain(context: &ContextPaths, auto_update: bool, fresh: bool) -> UpdateMaintenance {
+pub fn maintain(
+    context: &ContextPaths,
+    auto_update: bool,
+    fresh: bool,
+    minimum_age: MinimumReleaseAge,
+) -> UpdateMaintenance {
     if context.ownership() == "development" {
         return UpdateMaintenance::default();
     }
-    maintain_from_catalog(context, auto_update, fresh).unwrap_or_else(|error| {
+    maintain_from_catalog(context, auto_update, fresh, minimum_age).unwrap_or_else(|error| {
         eprintln!("uapkg: Could not check for launcher updates. {error:#}");
         UpdateMaintenance::default()
     })
@@ -399,6 +405,7 @@ fn maintain_from_catalog(
     context: &ContextPaths,
     auto_update: bool,
     fresh: bool,
+    minimum_age: MinimumReleaseAge,
 ) -> Result<UpdateMaintenance> {
     let requested = tracked_selector(context)?;
     if catalog::selector(&requested)? == Selector::Exact {
@@ -410,20 +417,39 @@ fn maintain_from_catalog(
         Ok(Some(index)) => index,
         _ => return Ok(UpdateMaintenance::default()),
     };
-    let Some(next) = index.aliases.get(&requested) else {
+    maintain_selected(
+        context,
+        &requested,
+        crate::model::VERSION,
+        &index,
+        perform_update.then(|| (minimum_age, release_age::now())),
+        |next, index| install(context, next, index, UpdateMode::Automatic),
+    )
+}
+
+fn maintain_selected(
+    context: &ContextPaths,
+    requested: &str,
+    current: &str,
+    index: &Index,
+    automatic: Option<(MinimumReleaseAge, Option<jiff::Timestamp>)>,
+    install: impl FnOnce(&str, &Index) -> Result<Replacement>,
+) -> Result<UpdateMaintenance> {
+    let Some(next) = index.aliases.get(requested) else {
         return Ok(UpdateMaintenance::default());
     };
-    let current = crate::model::VERSION;
     if !exact_version(next)?
         .cmp_precedence(&exact_version(current)?)
         .is_gt()
-        || index.supports(next, platform()?).is_err()
     {
         return Ok(UpdateMaintenance::default());
     }
 
-    if perform_update {
-        match install(context, next, &index, UpdateMode::Automatic) {
+    if let Some((minimum_age, now)) = automatic
+        && let Some(next) =
+            automatic_candidate(index, requested, current, platform()?, minimum_age, now)
+    {
+        match install(next, index) {
             Ok(Replacement::Installed) => {
                 // Maintenance keeps following the existing selector. The next
                 // launcher can reuse that intent with the timestamp we saved.
@@ -447,7 +473,7 @@ fn maintain_from_catalog(
 
     Ok(UpdateMaintenance {
         restart: false,
-        notices: update_notices(current, next, context.ownership(), &requested),
+        notices: update_notices(current, next, context.ownership(), requested),
     })
 }
 
@@ -1122,10 +1148,71 @@ mod tests {
             &serde_json::json!({"selector":"0.1.2", "version":"0.1.2", "futureMetadata":{"nested":[null,1]}}),
         )
         .unwrap();
-        let action = maintain(&context, true, false);
+        let action = maintain(&context, true, false, MinimumReleaseAge::parse("3d"));
         assert_eq!(tracked_selector(&context).unwrap(), "0.1.2");
         assert!(!action.restart);
         assert!(action.notices.is_empty());
         assert!(!maintenance::launcher_directory(&context).exists());
+    }
+
+    #[test]
+    fn automatic_launcher_maintenance_obeys_cooldown_without_changing_aliases() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = ContextPaths {
+            home: directory.path().join("profile"),
+            executable: directory.path().join("uapkg"),
+            receipt: None,
+        };
+        let index: Index = serde_json::from_value(serde_json::json!({
+            "schemaVersion":1,"product":"launcher","aliases":{"latest":"1.2.0"},
+            "releases":[
+                {"version":"1.0.0","date":"2026-11-01","files":[platform().unwrap()]},
+                {"version":"1.1.0","date":"2026-11-15T12:00:00Z","files":[platform().unwrap()]},
+                {"version":"1.2.0","date":"2026-11-18T12:00:00Z","files":[platform().unwrap()]}
+            ]
+        }))
+        .unwrap();
+        let now = Some("2026-11-18T12:00:00Z".parse().unwrap());
+        for (current, age, automatic, expected) in [
+            ("1.0.0", "3d", true, Some("1.1.0")),
+            ("1.0.0", "0", true, Some("1.2.0")),
+            ("1.0.0", "1w", true, None),
+            ("1.1.0", "3d", true, None),
+            ("1.2.0", "0s", true, None),
+            ("1.0.0", "0", false, None),
+        ] {
+            let mut attempted = false;
+            let result = maintain_selected(
+                &context,
+                "latest",
+                current,
+                &index,
+                automatic.then_some((MinimumReleaseAge::parse(age), now)),
+                |version, _| {
+                    attempted = true;
+                    assert_eq!(Some(version), expected);
+                    Ok(Replacement::Installed)
+                },
+            )
+            .unwrap();
+            assert_eq!(attempted, expected.is_some());
+            assert_eq!(result.restart, expected.is_some());
+            if !result.restart && current != "1.2.0" {
+                assert!(result.notices.iter().any(|notice| notice.contains("1.2.0")));
+            }
+            assert_eq!(index.aliases["latest"], "1.2.0");
+            assert!(!context.home.exists());
+        }
+        let result = maintain_selected(
+            &context,
+            "latest",
+            "1.0.0",
+            &index,
+            Some((MinimumReleaseAge::parse("3d"), now)),
+            |_, _| anyhow::bail!("integrity verification failed"),
+        )
+        .unwrap();
+        assert!(!result.restart);
+        assert!(!result.notices.is_empty());
     }
 }

@@ -1,5 +1,5 @@
 import { resolveUapkgBuildMode } from '@uapkg/common';
-import { CliVersionSelectorSchema, RegistryURLSchema } from '@uapkg/common-schema';
+import { CliVersionSelectorSchema, DurationStringSchema, RegistryURLSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 
 const DEVELOPMENT_REGISTRY_URL = 'https://github.com/uapkg/registry-dev-tmp';
@@ -16,6 +16,14 @@ export const launcherConfigSchema = z
     defaultCliVersion: CliVersionSelectorSchema.describe('a CLI version selector such as latest or 1.2.3').optional(),
     autoLauncherUpdate: z.boolean().describe('a boolean (true or false)').optional(),
     autoCLIUpdate: z.boolean().describe('a boolean (true or false)').optional(),
+    autoUpdate: z
+      .object({
+        minimumReleaseAge: DurationStringSchema.describe(
+          'Minimum release age for automatic updates. Supports weeks, days, hours, minutes, and seconds in descending order; 0 disables the cooldown.',
+        ).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -196,6 +204,7 @@ export function getDefaultConfig(): ResolvedConfig {
       defaultCliVersion: CliVersionSelectorSchema.parse('latest'),
       autoLauncherUpdate: true,
       autoCLIUpdate: true,
+      autoUpdate: { minimumReleaseAge: DurationStringSchema.parse('3d') },
     },
     registries: {
       default: {

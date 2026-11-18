@@ -56,7 +56,12 @@ pub(crate) fn local(context: &ContextPaths, invocation: &Invocation, cwd: &Path)
     let mut selected: Vec<SelectedVersion> = Vec::new();
     for (role, requested) in selections {
         let Some(requested) = requested else { continue };
-        let resolution = catalog::cached_resolution(context, "cli", requested)?;
+        let resolution = catalog::cached_selection(
+            context,
+            "cli",
+            requested,
+            matches!(role, "project pin" | "cli override"),
+        )?;
         let resolved = resolution.is_some();
         let version = resolution.map_or_else(|| requested.to_owned(), |value| value.version);
         let tag = Tag {
@@ -483,6 +488,44 @@ mod tests {
                 "1.9.0 (global default, installed) (used as alias `latest`)\n2.1.0-beta.10 (project pin, not installed) (used as alias `2.1.0-beta`)\n2.0.0 (cli override, installed)\n\n{LOCAL_FOOTER}\n"
             )
         );
+    }
+
+    #[test]
+    fn local_latest_pins_and_overrides_show_the_published_target() {
+        let root = tempfile::tempdir().unwrap();
+        let context = context(root.path());
+        let cwd = root.path().join("project");
+        published(&context);
+        atomic_json(
+            &context.home.join("config.json"),
+            &serde_json::json!({"launcher":{"defaultCliVersion":"latest"}}),
+        )
+        .unwrap();
+        atomic_json(
+            &context.home.join("catalog/cli/resolutions.json"),
+            &serde_json::json!({"active":{"latest":"1.9.0"}}),
+        )
+        .unwrap();
+        atomic_json(
+            &cwd.join("uapkg.json"),
+            &serde_json::json!({"kind":"project","uapkgVersion":"latest"}),
+        )
+        .unwrap();
+        installed(&context, "1.9.0");
+        let tracking = context.home.join("catalog/cli/resolutions.json");
+        let before = fs::read(&tracking).unwrap();
+        assert_eq!(
+            local(
+                &context,
+                &invocation(&["version", "list", "--cli-version=latest"]),
+                &cwd
+            )
+            .unwrap(),
+            format!(
+                "1.9.0 (global default, installed) (used as alias `latest`)\n2.0.0 (project pin, cli override, not installed) (project pin uses alias `latest`; cli override uses alias `latest`)\n\n{LOCAL_FOOTER}\n"
+            )
+        );
+        assert_eq!(fs::read(tracking).unwrap(), before);
     }
 
     #[test]

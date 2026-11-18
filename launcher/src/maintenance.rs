@@ -2,6 +2,7 @@ use crate::{
     catalog::{self, Index, Resolution},
     engines::{self, InstalledEngine},
     model::{exact_version, platform, read_json},
+    release_age::{self, MinimumReleaseAge, automatic_candidate},
     storage::{ContextPaths, ExtraFields, atomic_json, lock, open_lock, preserve_json_fields},
 };
 use anyhow::{Context, Result};
@@ -152,6 +153,7 @@ pub fn maintain_cli(
     resolution: &mut Resolution,
     auto_update: bool,
     fresh: bool,
+    minimum_age: MinimumReleaseAge,
 ) -> Option<InstalledEngine> {
     let index = catalog::index(context, "cli", true).ok().flatten()?;
     maintain_cli_selected(
@@ -159,6 +161,8 @@ pub fn maintain_cli(
         resolution,
         auto_update && fresh,
         &index,
+        minimum_age,
+        release_age::now(),
         |version, index| engines::install_cli_update(context, version, index),
     )
 }
@@ -175,7 +179,15 @@ fn maintain_cli_with(
     let fresh = guard.as_ref().and_then(|_| refresh().ok());
     let can_install = auto_update && fresh.is_some();
     let index = fresh.or_else(|| catalog::index(context, "cli", true).ok().flatten())?;
-    maintain_cli_selected(context, resolution, can_install, &index, install)
+    maintain_cli_selected(
+        context,
+        resolution,
+        can_install,
+        &index,
+        MinimumReleaseAge::parse("0"),
+        release_age::now(),
+        install,
+    )
 }
 
 fn maintain_cli_selected(
@@ -183,6 +195,8 @@ fn maintain_cli_selected(
     resolution: &mut Resolution,
     can_install: bool,
     index: &Index,
+    minimum_age: MinimumReleaseAge,
+    now: Option<jiff::Timestamp>,
     install: impl FnOnce(&str, &Index) -> Result<InstalledEngine>,
 ) -> Option<InstalledEngine> {
     // Never reintroduce a revoked active version after required fallback.
@@ -193,19 +207,26 @@ fn maintain_cli_selected(
     }
     let latest = index.aliases.get("latest")?;
     let current = exact_version(&resolution.version).ok()?;
-    if !exact_version(latest).ok()?.cmp_precedence(&current).is_gt()
-        || index.supports(latest, platform().ok()?).is_err()
-    {
+    if !exact_version(latest).ok()?.cmp_precedence(&current).is_gt() {
         return None;
     }
 
-    if can_install {
+    if can_install
+        && let Some(next) = automatic_candidate(
+            index,
+            "latest",
+            &resolution.version,
+            platform().ok()?,
+            minimum_age,
+            now,
+        )
+    {
         let update = Resolution {
             requested: "latest".into(),
-            version: latest.clone(),
+            version: next.into(),
             messages: vec![],
         };
-        if let Ok(installed) = install(latest, index)
+        if let Ok(installed) = install(next, index)
             && catalog::activate(context, "cli", &update).is_ok()
         {
             resolution.version = catalog::active_version(context, "cli", "latest")
@@ -438,6 +459,83 @@ mod tests {
         assert_eq!(
             catalog::active_version(&context, "cli", "latest")?.as_deref(),
             Some("2.0.0")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cli_maintenance_installs_an_eligible_intermediate_and_keeps_latest_intent() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (context, mut active, mut index) = cli_fixture(directory.path());
+        index
+            .releases
+            .iter_mut()
+            .find(|release| release.version == "2.0.0")
+            .unwrap()
+            .date = "2026-11-18T12:00:00Z".into();
+        index.releases.push(catalog::Release {
+            version: "1.10.0".into(),
+            date: "2026-11-15T12:00:00Z".into(),
+            files: vec![platform()?.into()],
+            yanked: None,
+            quarantined: None,
+            extra_fields: ExtraFields::new(),
+        });
+        let now = Some("2026-11-18T12:00:00Z".parse().unwrap());
+        let installed = maintain_cli_selected(
+            &context,
+            &mut active,
+            true,
+            &index,
+            MinimumReleaseAge::parse("3d"),
+            now,
+            |version, _| {
+                assert_eq!(version, "1.10.0");
+                Ok(InstalledEngine {
+                    root: directory.path().join(version),
+                    engine: crate::model::Engine {
+                        schema_version: 1,
+                        version: version.into(),
+                        platform: platform()?.into(),
+                        kind: "sea".into(),
+                        executable: "uapkg".into(),
+                        args: vec![],
+                        extra_fields: ExtraFields::new(),
+                    },
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(installed.engine.version, "1.10.0");
+        assert_eq!(active.version, "1.10.0");
+        assert_eq!(active.requested, "latest");
+        assert_eq!(index.aliases["latest"], "2.0.0");
+        assert!(
+            maintain_cli_selected(
+                &context,
+                &mut active,
+                true,
+                &index,
+                MinimumReleaseAge::parse("3d"),
+                now,
+                |_, _| panic!(
+                    "A young latest must not replace the already installed eligible version"
+                ),
+            )
+            .is_none()
+        );
+        assert_eq!(active.version, "1.10.0");
+        assert!(
+            active
+                .messages
+                .iter()
+                .any(|message| message.contains("1.10.0 -> 2.0.0"))
+        );
+        assert!(
+            !active
+                .messages
+                .iter()
+                .any(|message| message.contains("Could not automatically"))
         );
         Ok(())
     }

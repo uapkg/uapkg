@@ -95,19 +95,27 @@ alias chains are invalid.
   "releases": [
     {
       "version": "1.7.0-beta.2",
-      "date": "2026-11-15",
+      "date": "2026-11-15T12:34:56Z",
       "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
     },
     {
       "version": "1.6.0",
-      "date": "2026-11-14",
+      "date": "2026-11-14T12:34:56Z",
       "files": ["win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]
     }
   ]
 }
 ```
 
-`date` is the UTC date of publication. `latest` selects the greatest stable SemVer.
+`date` copies the original full UTC `publishedAt` timestamp from the release
+entry, preserving its precision. Index readers accept RFC 3339 timestamps with
+offsets and up to nine fractional digits, and historical `YYYY-MM-DD` dates as
+midnight UTC. Builders continue validating publication metadata strictly.
+Rebuilding the site backfills both product indexes from existing receipts without
+changing receipts, archives, or artifact signatures. Launchers through `0.3.5`
+reject full timestamps for the entire index and require manual replacement.
+Future date formats must preserve this reader contract or use a separately
+versioned protocol. `latest` selects the greatest stable SemVer.
 A preview alias follows the greatest numbered preview of the same stage and base,
 then its matching stable release. Exact numbered previews remain exact unless a
 published replacement or release status redirects them.

@@ -130,6 +130,12 @@ impl ContextPaths {
                 .get("launcher.autoCLIUpdate")
                 .and_then(|value| value.as_bool())
                 .context("Embedded config schema is missing autoCLIUpdate.")?,
+            minimum_release_age: crate::release_age::MinimumReleaseAge::parse(
+                resolved
+                    .get("launcher.autoUpdate.minimumReleaseAge")
+                    .and_then(|value| value.as_str())
+                    .context("Embedded config schema is missing minimumReleaseAge.")?,
+            ),
             global_cli_version,
             config_source: resolved
                 .origin(version_path)

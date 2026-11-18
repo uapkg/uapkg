@@ -9,6 +9,7 @@ import { ConfigMerger } from '#config/merge/ConfigMerger.ts';
 import { getValueByPath } from '#config/schema/pathSchema.ts';
 import { ConfigSemanticValidator } from '#config/core/ConfigSemanticValidator.ts';
 import { projectLauncherLayers } from '#config/core/LauncherConfigProjection.ts';
+import { isRecordValue } from '#config/schema/runtime/ConfigSchemaIntrospection.ts';
 
 export class ConfigResolver {
   constructor(
@@ -42,11 +43,16 @@ export class ConfigResolver {
     const launcherPath = pathToProperty === 'launcher' || pathToProperty.startsWith('launcher.');
     const projection = launcherPath ? projectLauncherLayers(layers) : null;
     const effectiveLayers = projection?.layers ?? layers;
+    const resolvedValue = projection ? getValueByPath(this.resolveAll(layers).value, pathToProperty) : null;
+    const launcherObject = launcherPath && isRecordValue(resolvedValue);
     for (const [index, layer] of effectiveLayers.entries()) {
       if (
-        pathToProperty === 'launcher' &&
+        launcherObject &&
         !Object.entries(projection?.decisions[index] ?? {}).some(
-          ([property, decision]) => property.startsWith('launcher.') && decision.status === 'accepted',
+          ([property, decision]) =>
+            property.startsWith(`${pathToProperty}.`) &&
+            decision.status === 'accepted' &&
+            !isRecordValue(getValueByPath(layer.values, property)),
         )
       )
         continue;
@@ -59,7 +65,7 @@ export class ConfigResolver {
     }
 
     return {
-      value: pathToProperty === 'launcher' ? this.resolveAll(layers).value.launcher : value,
+      value: launcherObject ? resolvedValue : value,
       source,
       file,
     };
@@ -68,15 +74,20 @@ export class ConfigResolver {
   trace(layers: ConfigLayer[], pathToProperty: string): ConfigTraceEntry[] {
     const launcherPath = pathToProperty === 'launcher' || pathToProperty.startsWith('launcher.');
     const projection = launcherPath ? projectLauncherLayers(layers) : null;
-    return layers.map((layer, index) => ({
-      source: layer.source,
-      file: layer.file,
-      value: getValueByPath(layer.values, pathToProperty),
-      ...(projection?.decisions[index]?.[pathToProperty] ??
-        (projection?.decisions[index]?.launcher?.status === 'ignored'
-          ? projection.decisions[index].launcher
-          : undefined) ??
-        projection?.decisions[index]?.$),
-    }));
+    return layers.map((layer, index) => {
+      const decisions = projection?.decisions[index];
+      let decision = decisions?.[pathToProperty];
+      let ancestor = pathToProperty;
+      while (!decision && ancestor.includes('.')) {
+        ancestor = ancestor.slice(0, ancestor.lastIndexOf('.'));
+        if (decisions?.[ancestor]?.status === 'ignored') decision = decisions[ancestor];
+      }
+      return {
+        source: layer.source,
+        file: layer.file,
+        value: getValueByPath(layer.values, pathToProperty),
+        ...(decision ?? decisions?.$),
+      };
+    });
   }
 }

@@ -139,6 +139,8 @@ impl ReleaseStatus {
 #[serde(rename_all = "camelCase")]
 pub struct Release {
     pub version: String,
+    // Publication time is optional policy input, not acquisition/integrity evidence.
+    #[serde(default)]
     pub date: String,
     pub files: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -178,19 +180,6 @@ impl Index {
             ensure!(
                 versions.insert(&release.version),
                 "Duplicate catalog release."
-            );
-            ensure!(
-                release.date.len() == 10
-                    && release
-                        .date
-                        .bytes()
-                        .enumerate()
-                        .all(|(i, b)| if i == 4 || i == 7 {
-                            b == b'-'
-                        } else {
-                            b.is_ascii_digit()
-                        }),
-                "Invalid release date."
             );
             let mut platforms = BTreeSet::new();
             for status in [&release.yanked, &release.quarantined]
@@ -471,6 +460,19 @@ pub(crate) fn cached_resolution(
     requested: &str,
 ) -> Result<Option<Resolution>> {
     optional_resolution(context, product, requested, true, false)
+}
+
+pub(crate) fn cached_selection(
+    context: &ContextPaths,
+    product: &str,
+    requested: &str,
+    explicit: bool,
+) -> Result<Option<Resolution>> {
+    if explicit {
+        optional_resolution(context, product, requested, true, true)
+    } else {
+        cached_resolution(context, product, requested)
+    }
 }
 
 fn optional_resolution(
@@ -1170,7 +1172,7 @@ mod tests {
             value[key] = serde_json::json!(false);
             invalid(value);
         }
-        for key in ["version", "date", "files"] {
+        for key in ["version", "files"] {
             let mut value = valid.clone();
             value["releases"][0].as_object_mut().unwrap().remove(key);
             invalid(value);
@@ -1178,6 +1180,9 @@ mod tests {
             value["releases"][0][key] = serde_json::json!(false);
             invalid(value);
         }
+        let mut value = valid.clone();
+        value["releases"][0]["date"] = serde_json::json!(false);
+        invalid(value);
         for key in ["at", "reason"] {
             let mut value = valid.clone();
             value["releases"][0]["quarantined"]

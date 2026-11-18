@@ -1,7 +1,14 @@
 import { createConfigInvalidValueDiagnostic, type Diagnostic } from '@uapkg/diagnostics';
 import type { ConfigLayer, ConfigTraceEntry, ConfigValueWithOrigin } from '#config/contracts/ConfigTypes.ts';
 import { launcherConfigSchema } from '#config/schema/configSchema.ts';
-import { describeValueType, isRecordValue } from '#config/schema/runtime/ConfigSchemaIntrospection.ts';
+import {
+  describeValueType,
+  getConfigSchemaNodeKind,
+  getObjectShape,
+  isRecordValue,
+  unwrapConfigSchema,
+} from '#config/schema/runtime/ConfigSchemaIntrospection.ts';
+import type { z } from 'zod';
 
 type Decision = Pick<ConfigTraceEntry, 'status' | 'reason'>;
 
@@ -19,7 +26,6 @@ export function projectLauncherLayers(layers: readonly ConfigLayer[]): {
     decisions.push(decision);
     if (layer.ignoredReason) decision.$ = { status: 'ignored', reason: layer.ignoredReason };
     if (!Object.hasOwn(layer.values, 'launcher')) return layer;
-    const raw = layer.values.launcher;
     const values = { ...layer.values };
     const ignore = (property: string, expected: string, received: unknown) => {
       const retained = origins.get(property);
@@ -37,25 +43,33 @@ export function projectLauncherLayers(layers: readonly ConfigLayer[]): {
         }),
       );
     };
-    if (!isRecordValue(raw)) {
-      ignore('launcher', 'an object', raw);
-      delete values.launcher;
-      return { ...layer, values };
-    }
-    const launcher = { ...raw };
-    decision.launcher = { status: 'accepted' };
-    for (const [key, schema] of Object.entries(launcherConfigSchema.shape)) {
-      if (!Object.hasOwn(raw, key)) continue;
-      const property = `launcher.${key}`;
-      if (!schema.safeParse(raw[key]).success) {
-        ignore(property, schema.unwrap().description ?? 'a valid value', raw[key]);
-        delete launcher[key];
-      } else {
+    const project = (schema: z.ZodType, raw: unknown, property: string): { value: unknown } | null => {
+      if (getConfigSchemaNodeKind(schema) === 'object') {
+        if (!isRecordValue(raw)) {
+          ignore(property, 'an object', raw);
+          return null;
+        }
+        const object = { ...raw };
         decision[property] = { status: 'accepted' };
-        origins.set(property, { source: layer.source, file: layer.file, value: raw[key] });
+        for (const [key, child] of Object.entries(getObjectShape(schema))) {
+          if (!Object.hasOwn(raw, key)) continue;
+          const projected = project(child, raw[key], `${property}.${key}`);
+          if (projected) object[key] = projected.value;
+          else delete object[key];
+        }
+        return { value: object };
       }
-    }
-    values.launcher = launcher;
+      if (!schema.safeParse(raw).success) {
+        ignore(property, unwrapConfigSchema(schema).description ?? 'a valid value', raw);
+        return null;
+      }
+      decision[property] = { status: 'accepted' };
+      origins.set(property, { source: layer.source, file: layer.file, value: raw });
+      return { value: raw };
+    };
+    const launcher = project(launcherConfigSchema, layer.values.launcher, 'launcher');
+    if (launcher) values.launcher = launcher.value;
+    else delete values.launcher;
     return { ...layer, values };
   });
   return { layers: projected, decisions, diagnostics };

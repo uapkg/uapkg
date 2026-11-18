@@ -8,6 +8,7 @@ mod listings;
 mod maintenance;
 pub mod model;
 mod preparation;
+pub mod release_age;
 pub mod routing;
 pub mod storage;
 pub mod updater;
@@ -72,6 +73,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
             &context,
             settings.auto_launcher_update,
             policy.launcher_fresh,
+            settings.minimum_release_age,
         );
         if update.restart
             && let Some(code) = updater::resume(&context, &args)?
@@ -194,7 +196,7 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
                 &std::env::current_dir()?,
                 uapkg_slim_config::Scope::Effective,
             )?;
-            let version = if let Some(receipt) = context
+            let (version, explicit) = if let Some(receipt) = context
                 .receipt
                 .as_ref()
                 .filter(|receipt| receipt.development.is_some())
@@ -203,20 +205,25 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
                     invocation.override_version.is_none(),
                     "--cli-version is unavailable for a development checkout binding."
                 );
-                receipt
-                    .default_cli_version
-                    .clone()
-                    .context("Development binding is missing its CLI version.")?
+                (
+                    receipt
+                        .default_cli_version
+                        .clone()
+                        .context("Development binding is missing its CLI version.")?,
+                    false,
+                )
             } else {
-                routing::select(
+                let selection = routing::select(
                     invocation,
                     Scope::Project,
                     &std::env::current_dir()?,
                     context.default_version(&settings),
-                )?
-                .version
+                )?;
+                let explicit = !selection.uses_default_latest();
+                (selection.version, explicit)
             };
-            let resolution = catalog::resolve(context, "cli", &version, invocation.offline, false)?;
+            let resolution =
+                catalog::resolve(context, "cli", &version, invocation.offline, explicit)?;
             catalog::emit(&resolution.messages);
             println!("{}", resolution.version);
             catalog::emit(&resolution.messages);

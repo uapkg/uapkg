@@ -215,6 +215,15 @@ fn cached(root: &Path, version: &str, platform: &str) -> Result<InstalledEngine>
     })
 }
 
+pub(crate) fn installed(context: &ContextPaths, version: &str) -> Result<Option<InstalledEngine>> {
+    let target = platform()?;
+    let root = context.cache_dir(version, target)?;
+    if !root.try_exists()? {
+        return Ok(None);
+    }
+    cached(&root, version, target).map(Some)
+}
+
 pub fn ensure_installed(
     context: &ContextPaths,
     version: &str,

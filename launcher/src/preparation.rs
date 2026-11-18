@@ -32,9 +32,15 @@ pub(crate) fn prepare(
         invocation,
         settings,
         cwd,
-        |version, offline| catalog::resolve(context, "cli", version, offline, false),
+        |version, offline, explicit| catalog::resolve(context, "cli", version, offline, explicit),
         |resolution| {
-            maintenance::maintain_cli(context, resolution, settings.auto_cli_update, fresh)
+            maintenance::maintain_cli(
+                context,
+                resolution,
+                settings.auto_cli_update,
+                fresh,
+                settings.minimum_release_age,
+            )
         },
         |version, offline, reason| {
             engines::ensure_installed_with_reason(context, version, offline, Some(reason))
@@ -49,7 +55,7 @@ fn prepare_with(
     invocation: &Invocation,
     settings: &Settings,
     cwd: &Path,
-    resolve: impl FnOnce(&str, bool) -> Result<Resolution>,
+    resolve: impl FnOnce(&str, bool, bool) -> Result<Resolution>,
     update: impl FnOnce(&mut Resolution) -> Option<InstalledEngine>,
     install: impl FnOnce(&str, bool, &str) -> Result<InstalledEngine>,
 ) -> Result<PreparedCli> {
@@ -65,17 +71,33 @@ fn prepare_with(
     } else {
         None
     };
-    let known_active = active.is_some();
+    let required_fallback = match active.as_deref() {
+        Some(version) => catalog::index(context, "cli", true)?
+            .is_some_and(|index| index.ensure_runnable(version).is_err()),
+        None => false,
+    };
+    let known_active = !required_fallback
+        && active
+            .as_deref()
+            .map(|version| engines::installed(context, version))
+            .transpose()?
+            .flatten()
+            .is_some();
     // Required bootstrap also paces ordinary update checks. Diagnostics skip
     // that optional bookkeeping while retaining normal required acquisition.
-    let bootstrap = if default_latest && allow_optional_maintenance && !known_active {
-        maintenance::claim(&maintenance::cli_directory(context), false)
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-    let mut resolution = resolve(&selection.version, invocation.offline)?;
+    let bootstrap =
+        if default_latest && allow_optional_maintenance && !known_active && !required_fallback {
+            maintenance::claim(&maintenance::cli_directory(context), false)
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+    let mut resolution = resolve(
+        &selection.version,
+        invocation.offline,
+        !default_latest || (!known_active && !required_fallback),
+    )?;
     if known_active {
         // Optional stable-update reminders belong to maintenance; policy
         // notices still apply to diagnostics and disabled automatic updates.

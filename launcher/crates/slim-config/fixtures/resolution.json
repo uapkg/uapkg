@@ -4,11 +4,21 @@
     "cwd": "empty/nested",
     "manifests": [],
     "files": {},
-    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "default",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": []
   },
@@ -23,12 +33,20 @@
       "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"3.0.0-beta.2\",\"autoCLIUpdate\":false}}"
     },
     "expected": {
-      "launcher": { "defaultCliVersion": "3.0.0-beta.2", "autoLauncherUpdate": true, "autoCLIUpdate": false }
+      "launcher": {
+        "defaultCliVersion": "3.0.0-beta.2",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
     },
     "origins": {
       "launcher.defaultCliVersion": "local",
       "launcher.autoLauncherUpdate": "intermediary",
-      "launcher.autoCLIUpdate": "local"
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": []
   },
@@ -40,11 +58,21 @@
       "profile/config.json": "{\"launcher\":{\"defaultCliVersion\":\"1.2.3\",\"autoLauncherUpdate\":false}}",
       "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":{},\"autoCLIUpdate\":false}}"
     },
-    "expected": { "launcher": { "defaultCliVersion": "1.2.3", "autoLauncherUpdate": false, "autoCLIUpdate": false } },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "1.2.3",
+        "autoLauncherUpdate": false,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "global",
       "launcher.autoLauncherUpdate": "global",
-      "launcher.autoCLIUpdate": "local"
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": ["launcher.defaultCliVersion"]
   },
@@ -55,11 +83,21 @@
     "files": {
       "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"^1.2.3\",\"autoCLIUpdate\":\"false\"}}"
     },
-    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "default",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": ["launcher.defaultCliVersion", "launcher.autoCLIUpdate"]
   },
@@ -71,11 +109,21 @@
       "profile/config.json": "{\"launcher\":{\"defaultCliVersion\":\"1.2.3\"}}",
       "project/.uapkg/config.json": "{\"launcher\":null}"
     },
-    "expected": { "launcher": { "defaultCliVersion": "1.2.3", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "1.2.3",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "global",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": ["launcher"]
   },
@@ -87,11 +135,21 @@
       "profile/config.json": "{ broken",
       "project/.uapkg/config.json": "{\"launcher\":{\"autoLauncherUpdate\":false}}"
     },
-    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": false, "autoCLIUpdate": true } },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": false,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "default",
       "launcher.autoLauncherUpdate": "local",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": ["$"]
   },
@@ -99,12 +157,24 @@
     "name": "nonobject root is ignored",
     "cwd": "project",
     "manifests": ["project/uapkg.json"],
-    "files": { "project/.uapkg/config.json": "[]" },
-    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "files": {
+      "project/.uapkg/config.json": "[]"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "default",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": ["$"]
   },
@@ -112,12 +182,25 @@
     "name": "empty files and BOM whitespace",
     "cwd": "project",
     "manifests": ["project/uapkg.json"],
-    "files": { "profile/config.json": "", "project/.uapkg/config.json": "\ufeff \r\n\t" },
-    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "files": {
+      "profile/config.json": "",
+      "project/.uapkg/config.json": "\ufeff \r\n\t"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "default",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": []
   },
@@ -129,11 +212,21 @@
       "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"9.0.0\"}}",
       "project/nested/.uapkg/config.json": "{\"launcher\":{\"autoCLIUpdate\":false}}"
     },
-    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": false } },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
     "origins": {
       "launcher.defaultCliVersion": "default",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "local"
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": []
   },
@@ -146,13 +239,176 @@
       "project/plugin/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"2.0.0-alpha\"}}"
     },
     "expected": {
-      "launcher": { "defaultCliVersion": "2.0.0-alpha", "autoLauncherUpdate": true, "autoCLIUpdate": true }
+      "launcher": {
+        "defaultCliVersion": "2.0.0-alpha",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
     },
     "origins": {
       "launcher.defaultCliVersion": "intermediary",
       "launcher.autoLauncherUpdate": "default",
-      "launcher.autoCLIUpdate": "default"
+      "launcher.autoCLIUpdate": "default",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
     },
     "ignored": []
+  },
+  {
+    "name": "nested minimum release age walks all config layers",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"1w\"}}}",
+      "project/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"2d\"}}}",
+      "project/area/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"1h30m\"}}}",
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"15m\"},\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "15m"
+        }
+      }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "local"
+    },
+    "ignored": []
+  },
+  {
+    "name": "invalid nested duration retains global value and valid sibling",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"7d\"}}}",
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"1m2h\"},\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "7d"
+        }
+      }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "global"
+    },
+    "ignored": ["launcher.autoUpdate.minimumReleaseAge"]
+  },
+  {
+    "name": "invalid nested container retains global duration and valid sibling",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"7d\"}}}",
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":false,\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "7d"
+        }
+      }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "global"
+    },
+    "ignored": ["launcher.autoUpdate"]
+  },
+  {
+    "name": "bare zero is a duration string shorthand",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"0\"},\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "0"
+        }
+      }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "local"
+    },
+    "ignored": []
+  },
+  {
+    "name": "duration grammar rejects a trailing newline",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":\"3d\\n\"},\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
+    },
+    "ignored": ["launcher.autoUpdate.minimumReleaseAge"]
+  },
+  {
+    "name": "numeric zero is not a duration string",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"autoUpdate\":{\"minimumReleaseAge\":0},\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": {
+        "defaultCliVersion": "latest",
+        "autoLauncherUpdate": true,
+        "autoCLIUpdate": false,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
+      }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local",
+      "launcher.autoUpdate.minimumReleaseAge": "default"
+    },
+    "ignored": ["launcher.autoUpdate.minimumReleaseAge"]
   }
 ]

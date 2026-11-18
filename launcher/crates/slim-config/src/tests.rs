@@ -72,7 +72,7 @@ fn invalid_leaf_retains_an_earlier_value_without_discarding_valid_siblings() {
     let result = fixture.resolve(Scope::Effective);
     assert_eq!(
         result.value,
-        json!({"launcher":{"defaultCliVersion":"2.0.0","autoLauncherUpdate":true,"autoCLIUpdate":true}})
+        json!({"launcher":{"defaultCliVersion":"2.0.0","autoLauncherUpdate":true,"autoCLIUpdate":true,"autoUpdate":{"minimumReleaseAge":"3d"}}})
     );
     assert_eq!(
         result.origin("launcher.defaultCliVersion").unwrap().source,

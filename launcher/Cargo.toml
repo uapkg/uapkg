@@ -27,6 +27,7 @@ development = ["dep:colored"]
 anyhow = "1.0.104"
 colored = { version = "3.1.1", optional = true }
 flate2 = "1.1.11"
+jiff = { version = "1.0.1", default-features = false, features = ["std"] }
 minisign-verify = "0.3.0"
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls", "system-proxy"] }
 self-replace = "1.5.1"

@@ -33,6 +33,10 @@ describe('native schema contract', () => {
     const schema = createSlimConfigSchema();
     expect(schema.default).toEqual({ launcher: getDefaultConfig().launcher });
     expect(Object.keys(schema.properties as object)).toEqual(['launcher']);
+    expect(schema).toHaveProperty(
+      'properties.launcher.properties.autoUpdate.properties.minimumReleaseAge.default',
+      '3d',
+    );
     expect(
       JSON.parse(fs.readFileSync(new URL('generated/slim-config.schema.json', artifactDirectory), 'utf8')),
     ).toEqual(schema);

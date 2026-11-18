@@ -93,6 +93,7 @@ pub struct Settings {
     pub default_cli_version: Option<String>,
     pub auto_launcher_update: bool,
     pub auto_cli_update: bool,
+    pub minimum_release_age: crate::release_age::MinimumReleaseAge,
     pub global_cli_version: Option<String>,
     pub config_source: uapkg_slim_config::Source,
     pub config_file: Option<PathBuf>,

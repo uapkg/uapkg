@@ -78,6 +78,20 @@ function assertTimestamp(value: unknown): asserts value is string {
   )
     throw new Error('Expected a full UTC timestamp.');
 }
+function assertReleaseDate(value: unknown): asserts value is string {
+  if (typeof value !== 'string') throw new Error('Expected a release date or RFC 3339 timestamp.');
+  const match =
+    /^(\d{4}-\d{2}-\d{2})(?:T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d))?(?![\s\S])/.exec(
+      value,
+    );
+  if (
+    !match ||
+    !Number.isFinite(Date.parse(value)) ||
+    !Number.isFinite(Date.parse(match[1])) ||
+    new Date(match[1]).toISOString().slice(0, 10) !== match[1]
+  )
+    throw new Error('Expected a release date or RFC 3339 timestamp.');
+}
 export function validateReleaseStatus(value: unknown): ReleaseStatus {
   const status = object(value, ['at', 'reason']);
   assertTimestamp(status.at);
@@ -184,13 +198,7 @@ export function validateIndex(value: unknown): ProductIndex {
     if (release.yanked != null || release.quarantined != null) unavailable.add(release.version);
     if (versions.has(release.version)) throw new Error('Duplicate release version.');
     versions.add(release.version);
-    if (
-      typeof release.date !== 'string' ||
-      !/^\d{4}-\d{2}-\d{2}$/.test(release.date) ||
-      !Number.isFinite(Date.parse(release.date)) ||
-      new Date(release.date).toISOString().slice(0, 10) !== release.date
-    )
-      throw new Error('Expected a release date.');
+    assertReleaseDate(release.date);
   }
   if (!index.aliases || typeof index.aliases !== 'object' || Array.isArray(index.aliases))
     throw new Error('Expected release aliases.');

@@ -12,6 +12,8 @@ export type { ConcurrencyCount } from '#common-schema/primitives/ConcurrencyCoun
 export { ConcurrencyCountSchema } from '#common-schema/primitives/ConcurrencyCount.ts';
 export type { DurationSeconds } from '#common-schema/primitives/DurationSeconds.ts';
 export { DurationSecondsSchema } from '#common-schema/primitives/DurationSeconds.ts';
+export type { DurationString } from '#common-schema/primitives/DurationString.ts';
+export { DurationStringSchema } from '#common-schema/primitives/DurationString.ts';
 export type { GitTree } from '#common-schema/primitives/GitTree.ts';
 export { GitTreeSchema } from '#common-schema/primitives/GitTree.ts';
 export type { InstallPath } from '#common-schema/primitives/InstallPath.ts';

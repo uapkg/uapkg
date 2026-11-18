@@ -100,7 +100,7 @@ defaults, `~/.uapkg/config.json`, intermediary `.uapkg/config.json` files from t
 nearest manifest directory toward the working directory, and the working
 directory's `.uapkg/config.json`. Later valid values override earlier ones. Without
 an ancestor manifest, only the working directory's local config is considered.
-All three `launcher` settings support these layers. The built-in CLI default is
+All `launcher` settings support these layers. The built-in CLI default is
 `latest`; installation receipts do not supply a release CLI fallback.
 
 `version default` continues to read and write the global default. Use
@@ -257,6 +257,42 @@ uapkg config set launcher.autoCLIUpdate false
 These commands use normal configuration scope: local inside a project and global
 outside one. Add `--global` to edit the profile's policy from inside a project.
 Local and intermediary policies override the global values.
+
+Automatic CLI upgrades and launcher self-updates share a minimum release age:
+
+```json
+{
+  "launcher": {
+    "autoUpdate": {
+      "minimumReleaseAge": "3d"
+    }
+  }
+}
+```
+
+The default is `3d`. Use integer weeks (`w`), days (`d`), hours (`h`), minutes
+(`m`), or seconds (`s`), in that order, such as `1w2d`, `12h`, or `30m`.
+Days are exactly 24 hours and weeks are seven days. Values are strings of 1–64
+characters; spaces, fractions, signs, duplicate units, months, and years are not
+supported. `"0"`, `"0s"`, and other zero-valued durations disable the cooldown.
+Positive durations beyond the launcher's supported range allow no automatic
+update. The minimum age does not change the daily check interval.
+
+An automatic update selects the highest healthy release newer than the installed
+version that meets the minimum age, within its published channel. The launcher
+keeps using the installed version until an eligible update is available and never
+downgrades it because of the cooldown. Availability notices still refer to the
+actual published alias target. Explicit installs, `--cli-version`, project pins
+(including aliases), and initial installation bypass the age check. Required
+release-safety recovery remains independent.
+
+Release indexes retain full RFC 3339 publication timestamps, including fractional
+seconds. Historical date-only values mean midnight UTC. Eligibility is inclusive:
+the release is old enough when its elapsed age reaches the configured duration.
+Missing, invalid, or future publication timestamps exclude a release from
+automatic updates while the cooldown is enabled; they do not block otherwise
+valid explicit or initial installation. Aliases always keep their published
+meaning.
 
 Use `uapkg config get <key>` to see the effective value. Both settings default to
 `true`. They require CLI 1.7.1 or later. To edit these settings while using an

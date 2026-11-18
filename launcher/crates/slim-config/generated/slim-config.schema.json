@@ -21,13 +21,33 @@
           "type": "boolean",
           "description": "a boolean (true or false)",
           "default": true
+        },
+        "autoUpdate": {
+          "type": "object",
+          "properties": {
+            "minimumReleaseAge": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^(?:0|(?:[0-9]+w)?(?:[0-9]+d)?(?:[0-9]+h)?(?:[0-9]+m)?(?:[0-9]+s)?)(?![\\s\\S])",
+              "description": "Minimum release age for automatic updates. Supports weeks, days, hours, minutes, and seconds in descending order; 0 disables the cooldown.",
+              "default": "3d"
+            }
+          },
+          "additionalProperties": false,
+          "default": {
+            "minimumReleaseAge": "3d"
+          }
         }
       },
       "additionalProperties": false,
       "default": {
         "defaultCliVersion": "latest",
         "autoLauncherUpdate": true,
-        "autoCLIUpdate": true
+        "autoCLIUpdate": true,
+        "autoUpdate": {
+          "minimumReleaseAge": "3d"
+        }
       }
     }
   },
@@ -36,7 +56,10 @@
     "launcher": {
       "defaultCliVersion": "latest",
       "autoLauncherUpdate": true,
-      "autoCLIUpdate": true
+      "autoCLIUpdate": true,
+      "autoUpdate": {
+        "minimumReleaseAge": "3d"
+      }
     }
   }
 }

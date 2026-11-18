@@ -9,11 +9,15 @@ export function createSlimConfigSchema(): Record<string, unknown> {
   if (!launcher || typeof launcher === 'boolean' || !launcher.properties) {
     throw new Error('The launcher config schema must be an object');
   }
-  schema.default = defaults;
-  launcher.default = defaults.launcher;
-  for (const [key, value] of Object.entries(defaults.launcher)) {
-    const property = launcher.properties[key];
-    if (property && typeof property !== 'boolean') property.default = value;
-  }
+  applyDefaults(schema, defaults);
   return schema;
+}
+
+function applyDefaults(schema: z.core.JSONSchema.BaseSchema, value: unknown): void {
+  schema.default = value;
+  if (!schema.properties || typeof value !== 'object' || value === null || Array.isArray(value)) return;
+  for (const [key, child] of Object.entries(schema.properties)) {
+    if (typeof child === 'boolean' || !Object.hasOwn(value, key)) continue;
+    applyDefaults(child, (value as Record<string, unknown>)[key]);
+  }
 }

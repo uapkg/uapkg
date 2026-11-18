@@ -35,6 +35,38 @@ function verifies(file: string, key: string, mutate = false): boolean {
   }
 }
 describe('shared release contract fixtures', () => {
+  it('accepts historical dates and full publication timestamps without changing their precision', () => {
+    const withDate = (date: unknown) => ({
+      ...fixture.index,
+      releases: fixture.index.releases.map((release: Record<string, unknown>) => ({ ...release, date })),
+    });
+    for (const date of [
+      '2024-02-29',
+      '2026-11-18T12:34:56Z',
+      '2026-11-18T12:34:56.123456789Z',
+      '2026-11-18T14:34:56.123+02:00',
+      '2026-11-18T10:34:56-02:00',
+    ])
+      expect(validateIndex(withDate(date))).toEqual(withDate(date));
+    for (const date of [
+      undefined,
+      null,
+      0,
+      '',
+      '2026-02-29',
+      '2026-02-30T00:00:00Z',
+      '2026-11-18T24:00:00Z',
+      '2026-11-18T12:60:00Z',
+      '2026-11-18T12:00:60Z',
+      '2026-11-18T12:00:00',
+      '2026-11-18T12:00:00+24:00',
+      '2026-11-18T12:00:00+00:60',
+      '2026-11-18T12:00:00.1234567890Z',
+      '2026-11-18\n',
+      '2026-11-18T12:00:00Z\n',
+    ])
+      expect(() => validateIndex(withDate(date))).toThrow('release date');
+  });
   it('uses canonical versions, reserved aliases and numeric SemVer ordering', () => {
     for (const version of fixture.validVersions) expect(() => assertExactVersion(version)).not.toThrow();
     for (const version of fixture.invalidVersions) expect(() => assertExactVersion(version)).toThrow();

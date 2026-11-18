@@ -170,10 +170,10 @@ fn diagnostics_and_commands_install_the_selected_missing_engine_online() -> Resu
             &invocation,
             &settings,
             &cwd,
-            |requested, offline| {
+            |requested, offline, explicit| {
                 assert_eq!(requested, expected);
                 assert!(!offline, "{args:?}");
-                catalog::resolve(&context, "cli", requested, true, false)
+                catalog::resolve(&context, "cli", requested, true, explicit)
             },
             |_| panic!("Exact selections must not run latest maintenance"),
             |version, offline, explanation| {
@@ -217,9 +217,9 @@ fn cached_engines_are_reused_online_and_offline_without_a_downloader() -> Result
             &invocation,
             &settings,
             directory.path(),
-            |requested, passed_offline| {
+            |requested, passed_offline, explicit| {
                 assert_eq!(passed_offline, offline);
-                catalog::resolve(&context, "cli", requested, true, false)
+                catalog::resolve(&context, "cli", requested, true, explicit)
             },
             |_| panic!("Diagnostics must skip optional maintenance"),
             |version, passed_offline, _| {
@@ -236,7 +236,7 @@ fn cached_engines_are_reused_online_and_offline_without_a_downloader() -> Result
 }
 
 #[test]
-fn diagnostics_reinstall_remembered_latest_without_advancing_or_check_bookkeeping() -> Result<()> {
+fn diagnostics_bootstrap_latest_when_the_remembered_engine_is_missing() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let context = context(directory.path());
     let settings = settings(&context, Some("latest"))?;
@@ -255,8 +255,6 @@ fn diagnostics_reinstall_remembered_latest_without_advancing_or_check_bookkeepin
     })?;
     assert!(installed.root.starts_with(&context.home));
     fs::remove_dir_all(&installed.root)?;
-    let tracking = context.home.join("catalog/cli/resolutions.json");
-    let before = fs::read(&tracking)?;
     let invocation = invocation(&["--debug-info"], false)?;
     assert!(!allows_optional_maintenance(&invocation));
     let prepared = prepare_with(
@@ -264,19 +262,204 @@ fn diagnostics_reinstall_remembered_latest_without_advancing_or_check_bookkeepin
         &invocation,
         &settings,
         directory.path(),
-        |requested, _| catalog::resolve(&context, "cli", requested, true, false),
-        |_| panic!("Diagnostics must not advance latest"),
+        |requested, _, explicit| catalog::resolve(&context, "cli", requested, true, explicit),
+        |_| panic!("Diagnostics must skip optional updates"),
         |version, offline, _| {
-            assert_eq!(version, "1.9.0");
+            assert_eq!(version, "2.0.0");
             assert!(!offline);
             engines::install_cached(&context, version, offline, |stage| {
                 stage_engine(stage, version)
             })
         },
     )?;
-    assert_eq!(prepared.installed.engine.version, "1.9.0");
-    assert_eq!(fs::read(tracking)?, before);
+    assert_eq!(prepared.installed.engine.version, "2.0.0");
+    assert_eq!(
+        catalog::active_version(&context, "cli", "latest")?.as_deref(),
+        Some("2.0.0")
+    );
     assert!(!maintenance::cli_directory(&context).exists());
+    Ok(())
+}
+
+#[test]
+fn explicit_latest_selections_bypass_the_installed_default() -> Result<()> {
+    for (args, pin, expected, maintenance_expected) in [
+        (vec!["install"], None, "1.9.0", true),
+        (vec!["--debug-info"], None, "1.9.0", false),
+        (
+            vec!["install", "--cli-version=latest"],
+            None,
+            "2.0.0",
+            false,
+        ),
+        (vec!["install"], Some("latest"), "2.0.0", false),
+        (
+            vec!["install", "--debug-info"],
+            Some("latest"),
+            "2.0.0",
+            false,
+        ),
+    ] {
+        let directory = tempfile::tempdir()?;
+        let context = context(directory.path());
+        let settings = settings(&context, Some("latest"))?;
+        let cwd = project(directory.path(), pin)?;
+        published(&context)?;
+        engines::install_cached(&context, "1.9.0", false, |stage| {
+            stage_engine(stage, "1.9.0")
+        })?;
+        catalog::activate(
+            &context,
+            "cli",
+            &Resolution {
+                requested: "latest".into(),
+                version: "1.9.0".into(),
+                messages: vec![],
+            },
+        )?;
+        let invocation = invocation(&args, false)?;
+        let maintained = Cell::new(false);
+        let prepared = prepare_with(
+            &context,
+            &invocation,
+            &settings,
+            &cwd,
+            |requested, _, explicit| {
+                assert_eq!(explicit, expected == "2.0.0", "{args:?}");
+                catalog::resolve(&context, "cli", requested, true, explicit)
+            },
+            |_| {
+                maintained.set(true);
+                None
+            },
+            |version, offline, _| {
+                assert_eq!(version, expected, "{args:?}");
+                engines::install_cached(&context, version, offline, |stage| {
+                    stage_engine(stage, version)
+                })
+            },
+        )?;
+        assert_eq!(prepared.installed.engine.version, expected, "{args:?}");
+        assert_eq!(maintained.get(), maintenance_expected, "{args:?}");
+        assert_eq!(
+            catalog::index(&context, "cli", true)?.unwrap().aliases["latest"],
+            "2.0.0"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn initial_bootstrap_ignores_stale_tracking_and_disabled_automatic_updates() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let context = context(directory.path());
+    let mut settings = settings(&context, Some("latest"))?;
+    settings.auto_cli_update = false;
+    published(&context)?;
+    catalog::activate(
+        &context,
+        "cli",
+        &Resolution {
+            requested: "latest".into(),
+            version: "1.9.0".into(),
+            messages: vec![],
+        },
+    )?;
+    let invocation = invocation(&["install"], false)?;
+    let prepared = prepare_with(
+        &context,
+        &invocation,
+        &settings,
+        directory.path(),
+        |requested, _, explicit| {
+            assert!(explicit);
+            catalog::resolve(&context, "cli", requested, true, explicit)
+        },
+        |_| panic!("Initial installation must not run automatic updates"),
+        |version, offline, _| {
+            assert_eq!(version, "2.0.0");
+            engines::install_cached(&context, version, offline, |stage| {
+                stage_engine(stage, version)
+            })
+        },
+    )?;
+    assert_eq!(prepared.installed.engine.version, "2.0.0");
+    assert!(
+        maintenance::cli_directory(&context)
+            .join("check.json")
+            .is_file()
+    );
+    Ok(())
+}
+
+#[test]
+fn a_damaged_remembered_installation_is_reported_before_bootstrap() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let context = context(directory.path());
+    let settings = settings(&context, Some("latest"))?;
+    catalog::activate(
+        &context,
+        "cli",
+        &Resolution {
+            requested: "latest".into(),
+            version: "1.9.0".into(),
+            messages: vec![],
+        },
+    )?;
+    fs::create_dir_all(context.cache_dir("1.9.0", platform()?)?)?;
+    let invocation = invocation(&["install"], false)?;
+    let result = prepare_with(
+        &context,
+        &invocation,
+        &settings,
+        directory.path(),
+        |_, _, _| panic!("A corrupt installation must be repaired before resolving"),
+        |_| panic!("A corrupt installation must not trigger an automatic update"),
+        |_, _, _| panic!("A corrupt installation must not be silently replaced"),
+    );
+    assert!(result.is_err());
+    Ok(())
+}
+
+#[test]
+fn missing_quarantined_engines_still_follow_required_fallback() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let context = context(directory.path());
+    let settings = settings(&context, Some("latest"))?;
+    catalog::cache_moderated_fixture(&context, "cli");
+    atomic_json(
+        &context.home.join("catalog/cli/resolutions.json"),
+        &json!({"active":{"latest":"1.7.2"}}),
+    )?;
+    let invocation = invocation(&["install"], false)?;
+    let prepared = prepare_with(
+        &context,
+        &invocation,
+        &settings,
+        directory.path(),
+        |requested, _, explicit| {
+            assert!(
+                !explicit,
+                "Moderation recovery must preserve the requested release"
+            );
+            catalog::resolve(&context, "cli", requested, true, explicit)
+        },
+        |_| panic!("Required recovery must not use optional updates"),
+        |version, offline, _| {
+            assert_eq!(version, "1.7.0");
+            engines::install_cached(&context, version, offline, |stage| {
+                stage_engine(stage, version)
+            })
+        },
+    )?;
+    assert_eq!(prepared.installed.engine.version, "1.7.0");
+    assert!(
+        prepared
+            .resolution
+            .messages
+            .iter()
+            .any(|message| message.contains("quarantined"))
+    );
     Ok(())
 }
 
@@ -310,10 +493,10 @@ fn diagnostics_activate_aliases_only_after_a_successful_installation() -> Result
             &invocation,
             &settings,
             &cwd,
-            |selector, offline| {
+            |selector, offline, explicit| {
                 assert_eq!(selector, requested);
                 assert!(!offline);
-                catalog::resolve(&context, "cli", selector, true, false)
+                catalog::resolve(&context, "cli", selector, true, explicit)
             },
             |_| panic!("Diagnostics must skip optional latest updates"),
             |version, offline, _| {
@@ -373,9 +556,9 @@ fn failed_acquisition_preserves_selections_and_never_substitutes_a_cached_engine
         &invocation,
         &settings,
         &cwd,
-        |requested, offline| {
+        |requested, offline, explicit| {
             assert!(!offline);
-            catalog::resolve(&context, "cli", requested, true, false)
+            catalog::resolve(&context, "cli", requested, true, explicit)
         },
         |_| panic!("A project pin must not run global latest maintenance"),
         |version, offline, _| {
@@ -419,9 +602,9 @@ fn preview_replacements_install_the_published_target_instead_of_a_cached_preview
         &invocation,
         &settings,
         &cwd,
-        |requested, offline| {
+        |requested, offline, explicit| {
             assert!(!offline);
-            catalog::resolve(&context, "cli", requested, true, false)
+            catalog::resolve(&context, "cli", requested, true, explicit)
         },
         |_| panic!("Exact preview selections must not run latest maintenance"),
         |version, offline, reason| {
@@ -470,9 +653,9 @@ fn offline_diagnostics_resolve_cached_policy_but_never_download_missing_engines(
             &invocation,
             &settings,
             &cwd,
-            |requested, offline| {
+            |requested, offline, explicit| {
                 assert!(offline);
-                catalog::resolve(&context, "cli", requested, offline, false)
+                catalog::resolve(&context, "cli", requested, offline, explicit)
             },
             |_| panic!("Offline diagnostics must skip optional maintenance"),
             |version, offline, _| {
