@@ -18,7 +18,7 @@ Before releasing, run `vp run version:packages`. This applies pending changesets
 and synchronizes the launcher version into the Cargo workspace and lockfile.
 Commit the generated version, changelog, and lockfile changes and push them to
 `main` before manually running the `Release` workflow with the intended product
-and exact committed version. See [the release process](../docs/release-catalog.md#publishing-and-cutover).
+and exact committed version. See [the release process](../docs/release-catalog.md#publishing).
 
 Use `vp run launcher:version:sync` to synchronize Cargo version files without
 consuming changesets. `vp run launcher:version:check` checks for version drift

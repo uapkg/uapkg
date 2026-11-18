@@ -32,7 +32,7 @@ export async function fetchSmokeLauncher(version: string, output: string): Promi
       );
       if (!response.ok || !response.body)
         throw new Error(
-          `Could not download ${name}: HTTP ${response.status}. Publish a launcher for the current platform matrix before qualifying the CLI release.`,
+          `Could not download ${name}: HTTP ${response.status}. Choose a published launcher version with artifacts for all supported platforms.`,
         );
       const limit = name === archive ? 64 * 1024 * 1024 : 64 * 1024;
       const chunks: Uint8Array[] = [];

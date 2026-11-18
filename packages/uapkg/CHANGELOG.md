@@ -53,8 +53,7 @@
 
 - [`cfe8d3b`](https://github.com/uapkg/uapkg/commit/cfe8d3b49364d3c06e8988cb87fca704c0abb13e) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Add standalone Alpine Linux x64 support using official prebuilt Node binaries,
   and rename Windows distribution targets to `win-x64` and `win-arm64`.
-  The transition requires the new launcher and a CLI release using the new target
-  names. Historical archives and signed release records retain their original names.
+  Historical archives and signed release records retain their original names.
 
 ### Patch Changes
 

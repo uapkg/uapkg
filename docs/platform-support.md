@@ -66,36 +66,20 @@ kernel-keyring restrictions to verify refusal when neither secure backend is
 available. A missing D-Bus service alone does not establish that condition on a
 normal Linux host.
 
-## Windows names and musl release transition
-
-The release cutover targets launcher **0.3.0** followed by CLI **1.7.0** (the next
-minor release). Release qualification and publication must finish before these
-versions are available to install. Older releases retain their original archives
-and signatures, including the historical `win32-x64` and `win32-arm64` names.
-
-1. Deploy the catalog reader that accepts historical six-target and current
-   seven-target receipts.
-2. Publish and verify launcher 0.3.0 before publishing expanded catalog metadata.
-   The publisher uploads/verifies binaries before committing its catalog receipt.
-3. Qualify and publish CLI 1.7.0 using that published launcher for all seven targets.
-4. Replace older launchers manually from a verified archive. On Windows, select
-   a CLI version that contains the new `win-*` artifacts after it is published.
-
-Launchers through 0.2.0 reject unknown identifiers anywhere in a product index,
-even on platforms whose own name did not change. Their self-update path cannot
-be relied on after this transition. Download the appropriate new launcher and
-verify its checksum signature and archive hash as described in the
-[installation guide](launcher.md).
-
-Leave historical cache directories and their `engine.json` and `.installed.json`
-records intact. New Windows installations use `win-*` directories. Renaming an
-old directory does not convert its descriptor or signature. Historical Windows
-version pins report the target unavailable rather than aliasing `win32-*` to
-`win-*`; choose a new CLI version explicitly. Historical releases without musl
-artifacts likewise cannot be selected on musl. Keep existing configuration and
-credentials; do not delete the whole UAPKG profile.
+## Distribution identifiers and caches
 
 `uapkg launcher --platform` reports the running launcher's compiled distribution
 identifier without accessing the profile or network. Release packaging compares
 it with the requested Rust target so cross-compilation cannot label an artifact
 using the build machine's platform.
+
+Engine caches and signed release records are tied to a distribution identifier.
+Historical archives retain their original names and signatures, including
+`win32-x64` and `win32-arm64`. Cache entries are not relabeled or reused across
+identifiers; renaming a directory does not convert its descriptor or signature.
+
+A pinned CLI version must include an archive for the running platform. Releases
+without `win-*` archives report the target unavailable on current Windows
+launchers; releases without musl artifacts likewise cannot be selected on musl.
+Select a CLI version with the required archive as described in the
+[installation guide](launcher.md).

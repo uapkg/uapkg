@@ -15,8 +15,7 @@ checksum list. The site redirects artifact downloads to GitHub Releases.
 Supported platforms are `win-x64`, `win-arm64`, `darwin-x64`, `darwin-arm64`,
 `linux-x64`, `linux-arm64`, and `linux-x64-musl`. Unsuffixed Linux targets require
 glibc; Alpine x64 uses the musl target. ARM64 musl is not supported. See
-[platform requirements and the Windows naming transition](platform-support.md)
-before replacing an older launcher or choosing an Alpine image.
+[platform support](platform-support.md) for runtime requirements.
 Extract the launcher into a user-writable directory and add that directory to
 `PATH`. Then choose the initial CLI:
 
@@ -213,15 +212,6 @@ locks, and atomic activation; interrupted downloads leave existing versions inta
 
 A damaged cache error identifies the version directory to remove and reinstall.
 Do not delete the whole profile: it also contains configuration and credentials.
-
-The old `launcher.cliSource` setting is unsupported and ignored by the launcher's
-slim config reader; remove that one property
-from global configuration. Old source-specific `engines/npm` and
-`engines/github-releases` directories are ignored and may be removed manually.
-Cached npm engines and bundled-engine receipts are not migrated or executed.
-For the distribution cutover, install the new standalone launcher archive and
-select its default CLI; an older launcher cannot discover this distribution format.
-Keep unrelated configuration and authentication state.
 
 ## Launcher and CLI updates
 

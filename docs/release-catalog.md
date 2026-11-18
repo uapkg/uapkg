@@ -163,7 +163,7 @@ public key before switching that signer; old launchers require manual replacemen
 Preserve historical artifacts, checksums and their original signatures. An automated
 overlapping-key rotation would require its own explicit protocol and implementation.
 
-## Publishing and cutover
+## Publishing
 
 Use `vp run change` to record a `minor` or `patch` change. The `@uapkg/*` packages
 form the fixed CLI/library family. The private `uapkg-launcher` Changesets target
@@ -184,9 +184,8 @@ committed versions without changing files and runs in CI and release preflight.
    creates a version PR. npm packages publish independently when the product is
    `cli`; native publication has no npm-existence or npm-success gate.
 3. For a CLI release, supply an already published launcher version for all-seven-platform
-   terminal qualification. Publish launcher `0.3.0` before the next CLI minor release
-   (`1.7.0`) for the Windows naming and musl transition.
-   General CI can qualify CLI runtime candidates before the paired launcher exists.
+   terminal qualification. General CI can qualify CLI runtime candidates without a
+   paired published launcher.
 4. The workflow publishes immutable assets and checksums, verifies the remote bytes,
    and commits `catalog-release`. A complete existing release skips native rebuilding
    on retry. A partially uploaded release requires the original retained artifacts;
@@ -197,21 +196,5 @@ committed versions without changing files and runs in CI and release preflight.
 
 The CLI workflow never rebuilds a launcher. The launcher workflow does not build a
 CLI or require npm publication. Node/Vite+ are still repository packaging tools.
-Combined archives are removed. The independent terminal harness assembles temporary
-test installations from a verified launcher and the CLI candidate; these are not
-published bundles.
-
-Old launchers discover only CLI-tagged `release.json` assets. They cannot discover
-this new protocol unaided. Install the new launcher manually without deleting the
-user profile; the installer experience is tracked separately. Historical tags and
-release assets stay unchanged, and this cutover uses minor versions.
-
-For the seven-platform transition, first deploy the infrastructure reader that
-recognizes both platform matrices, then publish launcher `0.3.0`, then qualify and
-publish CLI `1.7.0` with that launcher. The updated launcher binaries must exist
-before expanded signed indexes activate. Launchers through `0.2.0` reject new
-identifiers anywhere in a product index, so all operating systems require manual
-launcher replacement at this cutover. Windows users must select a CLI release
-containing `win-*` artifacts; historical Windows pins report the target unavailable.
-Old `win32-*` caches are left intact and are not relabeled or reused. See
-[platform support and transition](platform-support.md).
+The independent terminal harness assembles temporary test installations from a
+verified launcher and the CLI candidate; these are not published bundles.
