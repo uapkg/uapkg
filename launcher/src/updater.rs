@@ -264,9 +264,7 @@ fn update_notices(current: &str, next: &str, owner: &str, requested: &str) -> Ve
 /// A launcher update is optional for a delegated command. Reuse a verified
 /// index for reminders and require a fresh index before automatic replacement.
 pub fn maintain(context: &ContextPaths, auto_update: bool) -> UpdateMaintenance {
-    if context.ownership() == "development"
-        || github::catalog_key().is_none_or(|key| key.trim().is_empty())
-    {
+    if context.ownership() == "development" {
         return UpdateMaintenance::default();
     }
     maintain_from_catalog(context, auto_update).unwrap_or_else(|error| {

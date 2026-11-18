@@ -200,7 +200,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
-      UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
       SMOKE_LAUNCHER_VERSION: ${{ inputs.smoke-launcher-version }}
     steps:
       - uses: actions/checkout@v7.0.1

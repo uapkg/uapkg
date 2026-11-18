@@ -255,6 +255,12 @@ a production build. Cargo runs from `launcher/`, where Rustup reads the exact
 Rust toolchain pin. `vp run launcher:format`, `launcher:lint`, and `launcher:test`
 provide Rust's standard formatting, linting, and tests.
 
+To build only the launcher with normal release selection and downloads, run
+`vp run launcher:build` from the repository root. The executable is written to
+`launcher/target/release/`. The production catalog and artifact public keys are
+embedded from tracked files; no GitHub authentication or public-key environment
+variables are needed. The `development` Cargo feature is not enabled.
+
 `build:link` installs the native launcher in `~/.uapkg-development/bin` and records the local
 checkout, engine entrypoint, and Vite-managed Node executable. This explicit
 development installation runs local code instead of downloading project pins.

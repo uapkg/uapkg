@@ -15,17 +15,18 @@ use std::{
     time::Duration,
 };
 
-pub fn catalog_key() -> Option<&'static str> {
+pub fn catalog_key() -> &'static str {
     #[cfg(test)]
     {
-        Some(include_str!("../../tools/release/fixtures/metadata.pub"))
+        include_str!("../../tools/release/fixtures/metadata.pub")
     }
     #[cfg(not(test))]
     {
-        option_env!("UAPKG_CATALOG_PUBLIC_KEY")
+        include_str!("../../docs/release-catalog-signing.pub")
     }
 }
 
+const ARTIFACT_PUBLIC_KEY: &str = include_str!("../../docs/release-signing.pub");
 const METADATA_LIMIT: u64 = 2 * 1024 * 1024;
 const DOWNLOAD_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 pub const ORIGIN: &str = "https://releases.uapkg.dev";
@@ -168,12 +169,6 @@ fn fetch_document(
     })
 }
 
-fn require_catalog_key() -> Result<&'static str> {
-    catalog_key()
-        .filter(|key| !key.trim().is_empty())
-        .context("This launcher has no catalog verification key. Install an official launcher.")
-}
-
 /// Optional upgrade attempts only install from fresh authenticated metadata.
 pub fn refresh_document<T: DeserializeOwned>(
     context: &ContextPaths,
@@ -181,7 +176,7 @@ pub fn refresh_document<T: DeserializeOwned>(
     name: &str,
     validate: impl FnOnce(&T) -> Result<()>,
 ) -> Result<T> {
-    let key = require_catalog_key()?;
+    let key = catalog_key();
     let timeout = Duration::from_secs(3);
     let document = fetch_document(&client_with_timeout(timeout)?, product_name, name, timeout)?;
     let value = parse(&document, key)?;
@@ -199,7 +194,7 @@ pub fn document<T: DeserializeOwned>(
     offline: bool,
 ) -> Result<T> {
     product(product_name)?;
-    let key = require_catalog_key()?;
+    let key = catalog_key();
     let cache = catalog_cache(context, product_name, name);
     if !offline {
         let client = client()?;
@@ -259,15 +254,12 @@ pub fn download_artifact(
     platform: &str,
     path: &Path,
 ) -> Result<()> {
-    let key = option_env!("UAPKG_RELEASE_PUBLIC_KEY")
-        .filter(|key| !key.trim().is_empty())
-        .context("This launcher has no artifact verification key. Install an official launcher.")?;
     let sums = metadata(client, url(product_name, Some(version), "SHASUMS256.txt")?)?;
     let signature = metadata(
         client,
         url(product_name, Some(version), "SHASUMS256.txt.minisig")?,
     )?;
-    verify(&sums, std::str::from_utf8(&signature)?, key)?;
+    verify(&sums, std::str::from_utf8(&signature)?, ARTIFACT_PUBLIC_KEY)?;
     let name = artifact_name(product_name, version, platform)?;
     let hash = checksum(&sums, &name)?;
     download(
@@ -326,6 +318,46 @@ fn save_download(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_production_keys_are_valid_distinct_and_separate_from_test_keys() {
+        let catalog = include_str!("../../docs/release-catalog-signing.pub");
+        let artifact = ARTIFACT_PUBLIC_KEY;
+        let fixture_catalog = include_str!("../../tools/release/fixtures/metadata.pub");
+        let fixture_artifact = include_str!("../../tools/release/fixtures/artifact.pub");
+        let keys = [catalog, artifact, fixture_catalog, fixture_artifact];
+        let mut encodings = std::collections::BTreeSet::new();
+        for key in keys {
+            PublicKey::decode(key).expect("Embedded Minisign keys must be well formed");
+            let encoding = key
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !line.starts_with("untrusted comment:"))
+                .unwrap();
+            assert!(
+                encodings.insert(encoding),
+                "Signing keys must be independent"
+            );
+        }
+        assert_eq!(catalog_key(), fixture_catalog);
+        assert!(
+            verify(
+                include_bytes!("../../tools/release/fixtures/index.json"),
+                include_str!("../../tools/release/fixtures/index.json.minisig"),
+                catalog,
+            )
+            .is_err()
+        );
+        assert!(
+            verify(
+                include_bytes!("../../tools/release/fixtures/SHASUMS256.txt"),
+                include_str!("../../tools/release/fixtures/SHASUMS256.txt.minisig"),
+                artifact,
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn downloads_are_bounded_with_or_without_content_length() {
         let directory = tempfile::tempdir().unwrap();

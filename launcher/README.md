@@ -22,11 +22,23 @@ cargo test --locked --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
 
-Official builds embed two independent Minisign public keys at compile time:
-`UAPKG_CATALOG_PUBLIC_KEY` authenticates indexes and replacement mappings;
-`UAPKG_RELEASE_PUBLIC_KEY` authenticates archive checksums. Runtime environment
-variables cannot replace these keys. A build without keys can execute installed
-exact engines but cannot resolve remote aliases or install artifacts.
+Normal builds embed two independent Minisign public keys from the repository:
+[`docs/release-catalog-signing.pub`](../docs/release-catalog-signing.pub)
+authenticates indexes and replacement mappings;
+[`docs/release-signing.pub`](../docs/release-signing.pub) authenticates archive
+checksums. Builds need no GitHub authentication or public-key environment
+variables. Runtime and compile-time environment variables cannot replace these
+keys. Unit tests use separate fixture keys.
+
+Build a launcher with normal release selection and downloads from the repository
+root:
+
+```sh
+vp run launcher:build
+```
+
+The executable is written to `launcher/target/release/` for the host platform.
+Release CI checks that its configured signing keys match the tracked public keys.
 
 ## Distribution contract
 

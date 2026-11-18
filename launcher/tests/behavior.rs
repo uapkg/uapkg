@@ -6,7 +6,7 @@ use std::{
     process::{Command, Output},
 };
 use uapkg_launcher::{
-    archive, diagnostics, engines, github,
+    archive, catalog, diagnostics, engines, github,
     model::{exact_version, platform, relative_path},
     routing::{Invocation, Scope, discover_project, select},
     storage::{ContextPaths, atomic_json, lock},
@@ -436,6 +436,26 @@ fn signed_release_metadata_rejects_tampering_and_wrong_version() {
     );
 }
 
+#[test]
+fn production_builds_embed_the_published_catalog_key_and_reject_test_signatures() {
+    assert_eq!(
+        github::catalog_key(),
+        include_str!("../../docs/release-catalog-signing.pub")
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let context = context(directory.path());
+    atomic_json(
+        &context.home.join("catalog/cli/index.json.verified.json"),
+        &json!({
+            "bytes":include_str!("../../tools/release/fixtures/index.json"),
+            "signature":include_str!("../../tools/release/fixtures/index.json.minisig"),
+        }),
+    )
+    .unwrap();
+    let error = catalog::index(&context, "cli", true).unwrap_err();
+    assert!(format!("{error:#}").contains("signature verification failed"));
+}
+
 fn tar_file(path: &Path, entries: &[(&str, &[u8], tar::EntryType)]) {
     let encoder = flate2::write::GzEncoder::new(
         fs::File::create(path).unwrap(),
@@ -661,7 +681,13 @@ fn launcher_management_never_delegates_or_requires_an_engine() {
         binary,
         &home,
         dir.path(),
-        &["config", "get", "launcher.cliSource", "--global"],
+        &[
+            "config",
+            "get",
+            "launcher.cliSource",
+            "--global",
+            "--offline",
+        ],
     );
     assert!(!cli_config.status.success());
     assert!(String::from_utf8_lossy(&cli_config.stderr).contains("No default CLI version"));

@@ -46,7 +46,7 @@ jobs:
           RELEASE_PRODUCT: ${{ inputs.product }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: vp exec node tools/release/publishNative.ts status "$RELEASE_PRODUCT" "$RELEASE_VERSION"
-      - name: Validate the committed product identity or completed-release retry
+      - name: Validate product identity and pinned verification keys
         id: identity
         env:
           RELEASE_COMPLETE: ${{ steps.status.outputs.complete }}

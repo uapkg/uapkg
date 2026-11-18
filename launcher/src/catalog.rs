@@ -200,16 +200,6 @@ fn optional<T: serde::de::DeserializeOwned>(
     name: &str,
     offline: bool,
 ) -> Result<Option<T>> {
-    if github::catalog_key().is_none()
-        && !context
-            .home
-            .join("catalog")
-            .join(product)
-            .join(format!("{name}.verified.json"))
-            .exists()
-    {
-        return Ok(None);
-    }
     match github::document(context, product, name, offline) {
         Ok(value) => Ok(Some(value)),
         Err(error)

@@ -488,6 +488,8 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
         vec!["install", "--registry", "--debug-info"],
         vec!["--version", "--debug-info"],
     ] {
+        let mut args = args;
+        args.insert(0, "--offline");
         let result = selected(run(&home, dir.path(), &args), "1.2.3");
         assert!(result["debugContext"].is_null(), "{args:?}");
     }

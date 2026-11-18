@@ -137,15 +137,22 @@ the requested and resolved versions on stderr.
 ## Signing and trust
 
 UAPKG's existing artifact key signs exact `SHASUMS256.txt` bytes with Minisign.
-`UAPKG_RELEASE_PUBLIC_KEY` is embedded in release launchers. The private
+The public key in [`release-signing.pub`](release-signing.pub) is embedded in
+normal launcher builds. The private
 `UAPKG_RELEASE_SECRET_KEY` is available only to the native publication job.
 
 Infrastructure uses a **distinct** private key for generated indexes and replacement
-documents. `UAPKG_CATALOG_PUBLIC_KEY` is embedded in launchers. A metadata key cannot
+documents. The public key in
+[`release-catalog-signing.pub`](release-catalog-signing.pub) is embedded in
+normal launcher builds. A metadata key cannot
 authorize an archive, and an artifact key cannot authorize an alias or replacement.
 All signatures include Minisign's trusted-comment signature; changing whitespace or
 JSON formatting changes signed bytes. Clients authenticate a document before using
 its contents and authenticate checksums before trusting downloaded archives.
+
+Local launcher builds use these tracked trust anchors without environment-variable
+setup. Release CI requires `UAPKG_RELEASE_PUBLIC_KEY` and
+`UAPKG_CATALOG_PUBLIC_KEY` to match the tracked keys before publication.
 
 Never rotate either production key by changing an unsigned endpoint. With the current
 single-key trust anchors, coordinate a launcher bootstrap carrying the replacement
