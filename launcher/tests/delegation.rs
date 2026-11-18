@@ -68,32 +68,34 @@ process.exit(Number(process.env.UAPKG_TEST_EXIT || '0'));
     );
 }
 
-fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
+fn seed_daily_checks(home: &Path, executable: &Path) {
     // These tests exercise delegation from installed fixtures. Daily network
     // discovery is covered separately and must not depend on the live service.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    write(
+        &home.join("catalog/cli/checks/check.json"),
+        json!({"lastAttempt":now}),
+    );
+    let executable = executable.canonicalize().unwrap();
+    let identity: String = Sha256::digest(executable.as_os_str().as_encoded_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    write(
+        &home
+            .join("catalog/launcher/checks")
+            .join(identity)
+            .join("check.json"),
+        json!({"lastAttempt":now}),
+    );
+}
+
+fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     if !args.contains(&"--offline") {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        write(
-            &home.join("catalog/cli/checks/check.json"),
-            json!({"lastAttempt":now}),
-        );
-        let executable = Path::new(env!("CARGO_BIN_EXE_uapkg"))
-            .canonicalize()
-            .unwrap();
-        let identity: String = Sha256::digest(executable.as_os_str().as_encoded_bytes())
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        write(
-            &home
-                .join("catalog/launcher/checks")
-                .join(identity)
-                .join("check.json"),
-            json!({"lastAttempt":now}),
-        );
+        seed_daily_checks(home, Path::new(env!("CARGO_BIN_EXE_uapkg")));
     }
     Command::new(env!("CARGO_BIN_EXE_uapkg"))
         .args(args)
@@ -735,6 +737,7 @@ fn diagnostics_leave_pending_update_recovery_files_unchanged() {
         json!({"schemaVersion":1,"executable":name,"backup":"saved-launcher","previousSha256":digest,"nextSha256":"0".repeat(64),"nextVersion":"0.2.0"}),
     );
     let before = fs::read(&journal).unwrap();
+    seed_daily_checks(&home, &executable);
     let output = Command::new(&executable)
         .arg("--debug-info")
         .current_dir(dir.path())
