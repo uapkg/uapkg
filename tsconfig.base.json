@@ -17,6 +17,7 @@
     "types": ["node"],
     "paths": {
       "@uapkg/config": ["./packages/uapkg-config/src/index.ts"],
+      "@uapkg/config/slim-schema": ["./packages/uapkg-config/src/slim-schema.ts"],
       "@uapkg/log": ["./packages/uapkg-log/src/index.ts"],
       "@uapkg/pack": ["./packages/uapkg-pack/src/index.ts"],
       "@uapkg/diagnostics": ["./packages/uapkg-diagnostics/src/index.ts"],

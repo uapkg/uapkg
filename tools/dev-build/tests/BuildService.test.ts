@@ -22,8 +22,9 @@ describe('BuildService', () => {
       ['run', '--cache', '-w', 'cli:build', '--', `--${mode}`],
       'D:/workspace',
     );
+    expect(run).toHaveBeenNthCalledWith(3, 'vp', ['run', 'launcher:schema'], 'D:/workspace');
     expect(run).toHaveBeenNthCalledWith(
-      3,
+      4,
       'cargo',
       [
         'build',
@@ -43,7 +44,7 @@ describe('BuildService', () => {
 
     service.buildCliWithDependencies();
 
-    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(3);
     expect(run).toHaveBeenCalledWith(
       'vp',
       ['run', '--cache', '-w', 'cli:build', '--', '--development'],
@@ -57,7 +58,8 @@ describe('BuildService', () => {
     const service = new BuildService(runner, 'D:/workspace');
 
     service.rebuildDevelopment(false, true);
-    expect(run).toHaveBeenCalledOnce();
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenNthCalledWith(1, 'vp', ['run', 'launcher:schema'], 'D:/workspace');
     expect(run).toHaveBeenCalledWith(
       'cargo',
       ['build', '--locked', '--target-dir', 'target/development', '--features', 'development'],

@@ -5,7 +5,12 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
+use uapkg_slim_config::{Resolver, Scope, Source, TraceStatus};
+
+static CONFIG_RESOLVER: LazyLock<std::result::Result<Resolver, String>> =
+    LazyLock::new(Resolver::new);
 
 pub struct ContextPaths {
     pub home: PathBuf,
@@ -86,51 +91,56 @@ impl ContextPaths {
     }
 
     pub fn settings(&self) -> Result<Settings> {
-        let path = self.home.join("config.json");
-        if !path.exists() {
-            return Ok(Settings::default());
+        self.settings_at(&self.home, Scope::Global)
+    }
+
+    pub fn settings_at(&self, cwd: &Path, scope: Scope) -> Result<Settings> {
+        let resolver = CONFIG_RESOLVER
+            .as_ref()
+            .map_err(|message| anyhow::anyhow!(message.clone()))?;
+        let resolved = resolver.resolve(&self.home, cwd, scope);
+        for diagnostic in &resolved.diagnostics {
+            eprintln!("uapkg: warning: {diagnostic}");
         }
-        let global: serde_json::Value = read_json(&path)?;
-        let global = global
-            .as_object()
-            .with_context(|| format!("{} must contain a JSON object.", path.display()))?;
-        let Some(launcher) = global.get("launcher") else {
-            return Ok(Settings::default());
-        };
-        let launcher = launcher
-            .as_object()
-            .with_context(|| format!("launcher in {} must be an object.", path.display()))?;
-        ensure!(
-            !launcher.contains_key("cliSource"),
-            "launcher.cliSource in {} is no longer supported. Remove that setting; launcher downloads use GitHub Releases through releases.uapkg.dev.",
-            path.display()
-        );
-        let mut settings = Settings::default();
-        if let Some(version) = launcher.get("defaultCliVersion") {
-            let version = version.as_str().with_context(|| {
-                format!(
-                    "launcher.defaultCliVersion in {} must be a CLI version selector.",
-                    path.display()
-                )
-            })?;
-            crate::catalog::selector(version).with_context(|| {
-                format!("Invalid launcher.defaultCliVersion in {}.", path.display())
-            })?;
-            settings.default_cli_version = Some(version.to_owned());
-        }
-        settings.auto_launcher_update = update_enabled(launcher.get("autoLauncherUpdate"));
-        settings.auto_cli_update = update_enabled(launcher.get("autoCLIUpdate"));
-        // The TypeScript config module owns validation and persistence of the
-        // full config tree. The launcher reads only its global settings.
-        Ok(settings)
+        let version_path = "launcher.defaultCliVersion";
+        let global_cli_version = resolved.trace.get(version_path).and_then(|entries| {
+            entries
+                .iter()
+                .rev()
+                .find(|entry| {
+                    entry.status == TraceStatus::Accepted
+                        && matches!(entry.origin.source, Source::Default | Source::Global)
+                })
+                .and_then(|entry| entry.value.as_str().map(str::to_owned))
+        });
+        // These are projections of the validated generated schema, not a second
+        // schema or a set of launcher-owned defaults.
+        Ok(Settings {
+            default_cli_version: resolved
+                .get(version_path)
+                .and_then(|value| value.as_str())
+                .map(str::to_owned),
+            auto_launcher_update: resolved
+                .get("launcher.autoLauncherUpdate")
+                .and_then(|value| value.as_bool())
+                .context("Embedded config schema is missing autoLauncherUpdate.")?,
+            auto_cli_update: resolved
+                .get("launcher.autoCLIUpdate")
+                .and_then(|value| value.as_bool())
+                .context("Embedded config schema is missing autoCLIUpdate.")?,
+            global_cli_version,
+            config_source: resolved
+                .origin(version_path)
+                .context("Embedded config schema is missing defaultCliVersion.")?
+                .source,
+            config_file: resolved
+                .origin(version_path)
+                .and_then(|origin| origin.file.clone()),
+        })
     }
 
     pub fn default_version<'a>(&'a self, settings: &'a Settings) -> Option<&'a str> {
-        settings.default_cli_version.as_deref().or_else(|| {
-            self.receipt
-                .as_ref()
-                .and_then(|r| r.default_cli_version.as_deref())
-        })
+        settings.default_cli_version.as_deref()
     }
 
     pub fn cache_dir(&self, version: &str, platform: &str) -> Result<PathBuf> {
@@ -148,12 +158,6 @@ impl ContextPaths {
             .map(|r| r.install_method.as_str())
             .unwrap_or(option_env!("UAPKG_INSTALL_METHOD").unwrap_or("standalone"))
     }
-}
-
-fn update_enabled(setting: Option<&serde_json::Value>) -> bool {
-    // Invalid values never authorize an automatic install. The CLI can still
-    // run and report or repair the invalid setting.
-    setting.is_none_or(|value| value.as_bool() == Some(true))
 }
 
 /// File locks release automatically on process termination; stale lock files are

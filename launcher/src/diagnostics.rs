@@ -20,6 +20,8 @@ pub struct LauncherContext {
     install_method: String,
     global_settings_state: &'static str,
     global_cli_version: Option<String>,
+    config_cli_version: Option<String>,
+    config_source: Option<&'static str>,
     project_cli_version: Option<String>,
     project_state: &'static str,
     override_cli_version: Option<String>,
@@ -93,8 +95,9 @@ fn build(
         } else {
             "unavailable"
         },
-        global_cli_version: settings
-            .and_then(|settings| context.default_version(settings).map(str::to_owned)),
+        global_cli_version: settings.and_then(|settings| settings.global_cli_version.clone()),
+        config_cli_version: settings.and_then(|settings| settings.default_cli_version.clone()),
+        config_source: settings.map(|settings| settings.config_source.as_str()),
         project_cli_version,
         project_state,
         override_cli_version: invocation.override_version.clone(),
@@ -133,8 +136,12 @@ pub fn for_development(context: &ContextPaths, invocation: &Invocation) -> Optio
     // A local checkout is runnable even when global configuration or an ancestor
     // manifest is damaged. Report only failure availability rather than raw
     // configuration, project paths, or errors from those failed reads.
-    let settings = context.settings().ok();
     let cwd = std::env::current_dir().ok();
+    let settings = cwd.as_ref().and_then(|cwd| {
+        context
+            .settings_at(cwd, uapkg_slim_config::Scope::Effective)
+            .ok()
+    });
     let selection = VersionSelection {
         version,
         reason: "development",

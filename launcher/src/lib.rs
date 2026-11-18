@@ -43,7 +43,12 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
     let settings = if context.ownership() == "development" {
         None
     } else {
-        Some(context.settings()?)
+        let config_scope = if invocation.scope() == Scope::Launcher {
+            uapkg_slim_config::Scope::Global
+        } else {
+            uapkg_slim_config::Scope::Effective
+        };
+        Some(context.settings_at(&std::env::current_dir()?, config_scope)?)
     };
     let mut launcher_notices = vec![];
     if let Some(settings) = &settings
@@ -167,7 +172,10 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
             return engines::delegate(context, &installed, &args, None, &resolution.messages);
         }
         (Some("version"), ["current"]) => {
-            let settings = context.settings()?;
+            let settings = context.settings_at(
+                &std::env::current_dir()?,
+                uapkg_slim_config::Scope::Effective,
+            )?;
             let version = if let Some(receipt) = context
                 .receipt
                 .as_ref()

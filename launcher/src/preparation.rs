@@ -56,8 +56,8 @@ fn prepare_with(
     };
     let mut selection = routing::select(invocation, scope, cwd, context.default_version(settings))?;
     let allow_optional_maintenance = allows_optional_maintenance(invocation);
-    let global_latest = selection.uses_global_latest();
-    let active = if global_latest {
+    let default_latest = selection.uses_default_latest();
+    let active = if default_latest {
         catalog::active_version(context, "cli", "latest")?
     } else {
         None
@@ -65,7 +65,7 @@ fn prepare_with(
     let known_active = active.is_some();
     // Required bootstrap also paces ordinary update checks. Diagnostics skip
     // that optional bookkeeping while retaining normal required acquisition.
-    let bootstrap = if global_latest && allow_optional_maintenance && !known_active {
+    let bootstrap = if default_latest && allow_optional_maintenance && !known_active {
         maintenance::claim(&maintenance::cli_directory(context), false)
             .ok()
             .flatten()

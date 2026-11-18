@@ -214,6 +214,8 @@ jobs:
           path: dist/official-node/linux-x64-musl
       - run: vp run --cache -w pack:libraries
       - run: vp run --cache -w cli:build -- --production
+      - name: Check embedded launcher config schema
+        run: vp run launcher:schema:check
       - name: Prepare the musl launcher and independent terminal harness
         shell: bash
         run: |

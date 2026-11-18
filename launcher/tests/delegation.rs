@@ -204,19 +204,19 @@ fn local_list_merges_roles_and_names_only_the_roles_using_an_alias() {
 }
 
 #[test]
-fn local_list_omits_unset_selections_and_keeps_uncached_aliases_visible() {
+fn local_list_includes_generated_defaults_and_keeps_uncached_aliases_visible() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".uapkg");
     let footer = "\nTo see the list of available versions, run `uapkg version list available`.\n";
     assert_eq!(
         listed(run(&home, dir.path(), &["version", "list"])),
-        format!("No CLI versions are installed for this platform.\n{footer}")
+        format!("latest (global default, unresolved)\n{footer}")
     );
     assert!(!home.exists());
     fixture_cache(&home, "1.7.0", platform().unwrap());
     assert_eq!(
         listed(run(&home, dir.path(), &["version", "list"])),
-        format!("1.7.0\n{footer}")
+        format!("latest (global default, unresolved)\n\n1.7.0\n{footer}")
     );
     write(&dir.path().join("uapkg.json"), json!({"kind":"project"}));
     write(
@@ -228,6 +228,111 @@ fn local_list_omits_unset_selections_and_keeps_uncached_aliases_visible() {
         format!("latest (global default, unresolved)\n\n1.7.0\n{footer}")
     );
     assert!(!home.join("catalog").exists());
+}
+
+#[test]
+fn layered_defaults_select_the_cli_without_changing_global_management_or_delegation() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    let project = dir.path().join("game");
+    let cwd = project.join("src");
+    write(&project.join("uapkg.json"), json!({"kind":"project"}));
+    write(
+        &home.join("config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.2.3"}}),
+    );
+    write(
+        &project.join(".uapkg/config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.2.4","autoLauncherUpdate":false}}),
+    );
+    write(
+        &cwd.join(".uapkg/config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.2.5","autoCLIUpdate":false}}),
+    );
+    fixture_engine(&home, "", "1.2.5");
+    fixture_engine(&home, "", "1.2.3");
+    let config = fs::read(cwd.join(".uapkg/config.json")).unwrap();
+    for command in ["install", "whoami"] {
+        selected(run(&home, &cwd, &[command, "--offline"]), "1.2.5");
+    }
+    let body = selected(
+        run(
+            &home,
+            &cwd,
+            &["config", "get", "launcher.defaultCliVersion", "--offline"],
+        ),
+        "1.2.5",
+    );
+    assert_eq!(
+        body["args"],
+        json!(["config", "get", "launcher.defaultCliVersion"])
+    );
+    let diagnostic = selected(run(&home, &cwd, &["--debug-info", "--offline"]), "1.2.5");
+    assert_eq!(diagnostic["debugContext"]["globalCliVersion"], "1.2.3");
+    assert_eq!(diagnostic["debugContext"]["configCliVersion"], "1.2.5");
+    assert_eq!(diagnostic["debugContext"]["configSource"], "local");
+    let global_diagnostic = selected(
+        run(
+            &home,
+            &cwd,
+            &["version", "default", "--debug-info", "--offline"],
+        ),
+        "1.2.3",
+    );
+    assert_eq!(global_diagnostic["debugContext"]["configSource"], "global");
+    assert_eq!(
+        String::from_utf8(run(&home, &cwd, &["version", "default"]).stdout).unwrap(),
+        "1.2.3\n"
+    );
+    assert_eq!(
+        String::from_utf8(run(&home, &cwd, &["version", "current", "--offline"]).stdout).unwrap(),
+        "1.2.5\n"
+    );
+    let listing = listed(run(&home, &cwd, &["version", "list"]));
+    assert!(listing.contains("1.2.3 (global default, installed)"));
+    assert!(listing.contains("1.2.5 (config default, installed)"));
+    assert_eq!(fs::read(cwd.join(".uapkg/config.json")).unwrap(), config);
+}
+
+#[test]
+fn invalid_local_default_warns_and_config_commands_still_delegate() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    let cwd = dir.path().join("game");
+    write(&cwd.join("uapkg.json"), json!({"kind":"project"}));
+    write(
+        &home.join("config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.2.3"}}),
+    );
+    let local = cwd.join(".uapkg/config.json");
+    write(
+        &local,
+        json!({"launcher":{"defaultCliVersion":{"private":"never print this object"},"autoCLIUpdate":false}}),
+    );
+    fixture_engine(&home, "", "1.2.3");
+    let original = fs::read(&local).unwrap();
+    let output = run(
+        &home,
+        &cwd,
+        &["config", "get", "launcher.defaultCliVersion", "--offline"],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body["version"], "1.2.3");
+    assert_eq!(
+        body["args"],
+        json!(["config", "get", "launcher.defaultCliVersion"])
+    );
+    let warning = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(warning.matches("uapkg: warning:").count(), 1);
+    assert!(warning.contains("launcher.defaultCliVersion"));
+    assert!(warning.contains("local config"));
+    assert!(warning.contains("expected"));
+    assert!(warning.contains("object"));
+    assert!(warning.contains("1.2.3"));
+    assert!(warning.contains("global config"));
+    assert!(!warning.contains("never print this object"));
+    assert_eq!(fs::read(&local).unwrap(), original);
 }
 
 #[test]
@@ -295,7 +400,8 @@ fn two_project_pins_global_commands_unknown_commands_and_override_delegate_corre
             .unwrap(),
         b.canonicalize().unwrap()
     );
-    selected(run(&home, &b, &["--offline", "whoami"]), "1.2.3");
+    fixture_engine(&home, "github-releases", "99.0.0");
+    selected(run(&home, &b, &["--offline", "whoami"]), "99.0.0");
     selected(
         run(
             &home,
@@ -420,7 +526,7 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
     );
     assert_eq!(
         context,
-        &json!({"schemaVersion":1,"launcherVersion":env!("CARGO_PKG_VERSION"),"launcherPath":launcher_path,"installMethod":"standalone","globalSettingsState":"available","globalCliVersion":"1.2.3","projectCliVersion":"2.0.0","projectState":"pinned","overrideCliVersion":null,"selectedCliVersion":"2.0.0","selectionReason":"project-pin","engineKind":"node","offline":true})
+        &json!({"schemaVersion":1,"launcherVersion":env!("CARGO_PKG_VERSION"),"launcherPath":launcher_path,"installMethod":"standalone","globalSettingsState":"available","globalCliVersion":"1.2.3","configCliVersion":"1.2.3","configSource":"global","projectCliVersion":"2.0.0","projectState":"pinned","overrideCliVersion":null,"selectedCliVersion":"2.0.0","selectionReason":"project-pin","engineKind":"node","offline":true})
     );
     let serialized = context.to_string();
     for forbidden in [
@@ -744,9 +850,11 @@ if(args.includes('--debug-info')) {
         String::from_utf8_lossy(&debug.stderr)
     );
     let context: Value = serde_json::from_slice(&debug.stdout).unwrap();
-    assert_eq!(context["globalSettingsState"], "unavailable");
+    assert_eq!(context["globalSettingsState"], "available");
     assert!(context["cliSource"].is_null());
-    assert!(context["globalCliVersion"].is_null());
+    assert_eq!(context["globalCliVersion"], "latest");
+    assert_eq!(context["configSource"], "local");
+    assert_eq!(context["configCliVersion"], "8.0.0");
     assert_eq!(context["projectState"], "unavailable");
     assert!(context["projectCliVersion"].is_null());
     assert!(!String::from_utf8_lossy(&debug.stdout).contains("secret-malformed"));

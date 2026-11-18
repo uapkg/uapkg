@@ -96,6 +96,26 @@ describe('debug-info routing', () => {
 });
 
 describe('copyable diagnostic report', () => {
+  it('reports a layered config default separately from the global default', async () => {
+    const f = fixture();
+    const report = await DebugInfo.renderDebugInfo({
+      ...f,
+      collect,
+      environment: {
+        UAPKG_LAUNCHER_CONTEXT: JSON.stringify({
+          ...context(),
+          selectionReason: 'global-default',
+          configCliVersion: '3.0.0',
+          configSource: 'local',
+        }),
+      },
+    });
+    expect(report).toContain('Global CLI version: 2.0.0');
+    expect(report).toContain('Config CLI version: 3.0.0');
+    expect(report).toContain('Config source: local');
+    expect(report).toContain('Selection reason: config-default');
+  });
+
   it('reports authoritative launcher selection and only allowlisted environment fields', async () => {
     const f = fixture();
     const report = await DebugInfo.renderDebugInfo({

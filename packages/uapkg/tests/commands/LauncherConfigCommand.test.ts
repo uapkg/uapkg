@@ -106,29 +106,68 @@ describe('launcher settings through the normal config command', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ term: { verbose: true } });
   });
 
-  it.each(['autoLauncherUpdate', 'autoCLIUpdate'])('modifies launcher.%s globally from a project', async (key) => {
+  it.each(['autoLauncherUpdate', 'autoCLIUpdate'])(
+    'layers launcher.%s with local writes and explicit global scope',
+    async (key) => {
+      const { file, project, invoke } = fixture();
+      const pathToProperty = `launcher.${key}`;
+      const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('true');
+
+      expect(await invoke({ action: 'set', pathToProperty, rawValue: 'false' })).toBe(0);
+      const localFile = path.join(project, '.uapkg', 'config.json');
+      expect(JSON.parse(fs.readFileSync(localFile, 'utf8'))).toEqual({
+        launcher: { [key]: false },
+      });
+      expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ term: { verbose: true } });
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('false');
+
+      expect(await invoke({ action: 'set', pathToProperty, rawValue: 'true', scope: 'global' })).toBe(0);
+      expect(JSON.parse(fs.readFileSync(file, 'utf8')).launcher).toEqual({ [key]: true });
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('false');
+      expect(await invoke({ pathToProperty, scope: 'global' })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('true');
+
+      expect(await invoke({ action: 'set', pathToProperty, rawValue: 'true', scope: 'local' })).toBe(0);
+      expect(await invoke({ action: 'delete', pathToProperty, scope: 'local' })).toBe(0);
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('true');
+      expect(await invoke({ action: 'set', pathToProperty, rawValue: 'false', scope: 'global' })).toBe(0);
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('false');
+      expect(await invoke({ action: 'delete', pathToProperty, scope: 'global' })).toBe(0);
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('true');
+    },
+  );
+
+  it('reports the retained origin and ignored local override through CLI tracing', async () => {
     const { file, project, invoke } = fixture();
-    const pathToProperty = `launcher.${key}`;
+    fs.writeFileSync(file, JSON.stringify({ launcher: { defaultCliVersion: '1.2.3' } }));
+    fs.mkdirSync(path.join(project, '.uapkg'));
+    fs.writeFileSync(
+      path.join(project, '.uapkg', 'config.json'),
+      JSON.stringify({
+        launcher: { defaultCliVersion: '^1.2.3', autoCLIUpdate: false },
+      }),
+    );
     const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
+    const pathToProperty = 'launcher.defaultCliVersion';
     expect(await invoke({ pathToProperty })).toBe(0);
-    expect(log).toHaveBeenLastCalledWith('true');
-
-    expect(await invoke({ action: 'set', pathToProperty, rawValue: 'false' })).toBe(0);
-    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
-      term: { verbose: true },
-      launcher: { [key]: false },
-    });
-    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"1.2.3"');
+    expect(await invoke({ pathToProperty, showOrigin: true })).toBe(0);
+    expect(JSON.parse(log.mock.lastCall?.[0] ?? '')).toMatchObject({ value: '1.2.3', source: 'global' });
+    expect(await invoke({ pathToProperty, trace: true })).toBe(0);
+    expect(JSON.parse(log.mock.lastCall?.[0] ?? '')).toMatchObject([
+      { source: 'default', value: 'latest', status: 'accepted' },
+      { source: 'global', value: '1.2.3', status: 'accepted' },
+      { source: 'local', value: '^1.2.3', status: 'ignored', reason: expect.stringContaining('expected') },
+    ]);
+    expect(await invoke({ pathToProperty: 'launcher.autoCLIUpdate' })).toBe(0);
     expect(log).toHaveBeenLastCalledWith('false');
-
-    expect(await invoke({ action: 'set', pathToProperty, rawValue: 'true', scope: 'local' })).toBe(1);
-    expect(await invoke({ action: 'delete', pathToProperty, scope: 'local' })).toBe(1);
-    expect(fs.existsSync(path.join(project, '.uapkg'))).toBe(false);
-    expect(JSON.parse(fs.readFileSync(file, 'utf8')).launcher).toEqual({ [key]: false });
-
-    expect(await invoke({ action: 'delete', pathToProperty })).toBe(0);
-    expect(await invoke({ pathToProperty })).toBe(0);
-    expect(log).toHaveBeenLastCalledWith('true');
   });
 
   it.each([

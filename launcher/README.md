@@ -63,13 +63,22 @@ Locks, bounded extraction, ordinary-file-only archives, and atomic activation
 protect installation. Content-Length is optional; SHA-256 is authoritative.
 
 The shared config owns `launcher.defaultCliVersion`, `launcher.autoLauncherUpdate`,
-and `launcher.autoCLIUpdate`. Rust reads them from the global config and the CLI
-persists configuration changes. Automatic updates default to on. An eligible
+and `launcher.autoCLIUpdate`. The private `uapkg-slim-config` crate reads them using
+the same default, global, intermediary, and local layers as `@uapkg/config`. Its
+embedded JSON Schema and defaults are generated from that package, with no native
+schema copy. Invalid overrides warn and retain earlier valid values. The CLI
+persists configuration changes; the crate never writes. `version default`
+continues to manage the global setting. Automatic updates default to on. An eligible
 command checks each product at most once in 24 hours. The installed CLI version
 for `latest` is recorded separately from configuration. Project
 `uapkgVersion` and overrides use the same dedicated selector contract. Source
 selection and cached npm engines are unsupported. Installation ownership remains
 independent and restricts launcher replacement to standalone installations.
+
+Run `vp run launcher:schema` to regenerate the embedded schema and
+`vp run launcher:schema:check` to check it without writing. Repository build
+wrappers regenerate before native compilation, and CI rejects stale generated
+artifacts. Direct Cargo builds use the checked-in artifact without invoking Node.
 
 The launcher preserves Unix process replacement and direct Windows terminal
 inheritance. Startup notices use stderr; the narrow versioned

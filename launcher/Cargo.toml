@@ -7,6 +7,11 @@ publish = false
 license = "MIT"
 description = "Native UAPKG launcher and verified CLI version manager"
 
+[workspace]
+members = ["crates/slim-config"]
+default-members = [".", "crates/slim-config"]
+resolver = "3"
+
 [[bin]]
 name = "uapkg"
 path = "src/main.rs"
@@ -27,6 +32,7 @@ serde_json = "1.0.154"
 sha2 = "0.11.1"
 tar = "0.4.46"
 tempfile = "3.27.0"
+uapkg-slim-config = { path = "crates/slim-config" }
 
 [target.'cfg(windows)'.dependencies]
 ctrlc = "3.5.2"

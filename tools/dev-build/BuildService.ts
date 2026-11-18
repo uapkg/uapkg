@@ -23,6 +23,7 @@ export class BuildService {
   }
 
   buildLauncher(mode: UAPKGBuildMode) {
+    this.runner.run('vp', ['run', 'launcher:schema'], this.workspaceRoot);
     const args = ['build', '--locked', '--target-dir', `target/${mode}`];
     if (mode === 'development') args.push('--features', 'development');
     else args.push('--release');

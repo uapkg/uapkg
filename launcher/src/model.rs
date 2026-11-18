@@ -92,16 +92,9 @@ pub struct Settings {
     pub default_cli_version: Option<String>,
     pub auto_launcher_update: bool,
     pub auto_cli_update: bool,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            default_cli_version: None,
-            auto_launcher_update: true,
-            auto_cli_update: true,
-        }
-    }
+    pub global_cli_version: Option<String>,
+    pub config_source: uapkg_slim_config::Source,
+    pub config_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

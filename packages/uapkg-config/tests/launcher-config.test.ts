@@ -76,7 +76,7 @@ describe('shared launcher configuration', () => {
     ]);
   });
 
-  it('takes update policy only from defaults and the global profile', () => {
+  it('layers update policy through global, intermediary, and local config', () => {
     const { profile, project } = fixture();
     const nested = path.join(project, 'nested');
     fs.mkdirSync(nested);
@@ -87,12 +87,12 @@ describe('shared launcher configuration', () => {
     });
     const config = createConfig({ cwd: nested });
     expect(config.get('launcher')).toEqual({
-      autoLauncherUpdate: false,
-      autoCLIUpdate: true,
+      autoLauncherUpdate: true,
+      autoCLIUpdate: false,
       defaultCliVersion: '3.0.0',
     });
-    expect(config.getWithOrigin('launcher.autoLauncherUpdate')).toMatchObject({ source: 'global', value: false });
-    expect(config.getWithOrigin('launcher.autoCLIUpdate')).toMatchObject({ source: 'default', value: true });
+    expect(config.getWithOrigin('launcher.autoLauncherUpdate')).toMatchObject({ source: 'intermediary', value: true });
+    expect(config.getWithOrigin('launcher.autoCLIUpdate')).toMatchObject({ source: 'local', value: false });
   });
 
   it.each(['autoLauncherUpdate', 'autoCLIUpdate'])('supports only boolean values for launcher.%s', (key) => {

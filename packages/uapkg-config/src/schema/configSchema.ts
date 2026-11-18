@@ -10,15 +10,12 @@ const PRODUCTION_REGISTRY_URL = 'https://github.com/uapkg/registry';
 const postInstallPolicySchema = z.enum(['allow', 'deny']);
 const registryUrlConfigSchema = RegistryURLSchema.transform((value): string => value);
 
-// The native launcher reads only this subtree in the active global profile.
-// Update policy applies to the profile, even inside a project.
-export const launcherUpdateKeys = ['autoLauncherUpdate', 'autoCLIUpdate'] as const;
-
-const launcherConfigSchema = z
+// Shared with the native reader through the generated slim schema.
+export const launcherConfigSchema = z
   .object({
-    defaultCliVersion: CliVersionSelectorSchema.optional(),
-    autoLauncherUpdate: z.boolean().optional(),
-    autoCLIUpdate: z.boolean().optional(),
+    defaultCliVersion: CliVersionSelectorSchema.describe('a CLI version selector such as latest or 1.2.3').optional(),
+    autoLauncherUpdate: z.boolean().describe('a boolean (true or false)').optional(),
+    autoCLIUpdate: z.boolean().describe('a boolean (true or false)').optional(),
   })
   .strict();
 

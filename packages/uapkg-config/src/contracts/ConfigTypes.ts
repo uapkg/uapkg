@@ -15,6 +15,8 @@ export interface ConfigLayer {
   source: ConfigLayerSource;
   file?: string;
   values: Record<string, unknown>;
+  /** Whole-file read failures are retained for tracing ignored overrides. */
+  ignoredReason?: string;
 }
 
 export interface ConfigValueWithOrigin {
@@ -27,6 +29,8 @@ export interface ConfigTraceEntry {
   source: ConfigLayerSource;
   value: ConfigValue;
   file?: string;
+  status?: 'accepted' | 'ignored';
+  reason?: string;
 }
 
 export type ConfigScope = 'global' | 'local';

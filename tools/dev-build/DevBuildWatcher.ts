@@ -26,12 +26,27 @@ const rootInputs = new Set([
   '.node-version',
 ]);
 
-export function classifyBuildChange(relativePath: string): keyof RebuildChanges | null {
+export type BuildChangeKind = keyof RebuildChanges | 'schema';
+
+export function classifyBuildChange(relativePath: string): BuildChangeKind | null {
   const parts = relativePath.replaceAll('\\', '/').split('/');
   if (parts.some((part) => ignoredDirectories.has(part)) || relativePath.endsWith('.tsbuildinfo')) return null;
   if (parts[0] === 'packages' && parts[1] === 'uapkg' && parts[2] === 'package') return null;
-  if (parts[0] === 'launcher') return /\.(rs|toml|lock)$/.test(relativePath) ? 'rust' : null;
-  if (parts[0] === 'packages' || rootInputs.has(parts[0] ?? '')) return 'typescript';
+  if (parts[0] === 'launcher')
+    return /\.(rs|toml|lock)$/.test(relativePath) ||
+      parts.join('/') === 'launcher/crates/slim-config/generated/slim-config.schema.json'
+      ? 'rust'
+      : null;
+  if (
+    (parts[0] === 'packages' &&
+      ['uapkg-config', 'uapkg-common-schema'].includes(parts[1] ?? '') &&
+      parts[2] !== 'tests') ||
+    parts.join('/') === 'packages/uapkg-common/src/runtime/UapkgRuntimeProfile.ts' ||
+    (parts[0] === 'tools' && parts[1] === 'launcher') ||
+    rootInputs.has(parts[0] ?? '')
+  )
+    return 'schema';
+  if (parts[0] === 'packages') return 'typescript';
   return null;
 }
 
@@ -55,9 +70,12 @@ export class SerializedRebuildQueue {
     this.debounceMs = debounceMs;
   }
 
-  schedule(kind: keyof RebuildChanges): void {
+  schedule(kind: BuildChangeKind): void {
     if (this.stopped) return;
-    this.pending[kind] = true;
+    if (kind === 'schema') {
+      this.pending.typescript = true;
+      this.pending.rust = true;
+    } else this.pending[kind] = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       void this.flush();
@@ -109,6 +127,7 @@ export async function watchDevelopmentSources(
     register(workspaceRoot, false, '');
     register(path.join(workspaceRoot, 'packages'), true, 'packages');
     register(path.join(workspaceRoot, 'launcher'), true, 'launcher');
+    register(path.join(workspaceRoot, 'tools', 'launcher'), true, 'tools/launcher');
     console.log('[dev-build] Watching TypeScript packages and Rust launcher sources. Press Ctrl+C to stop.');
     await new Promise<void>((resolve, reject) => {
       const stop = () => {

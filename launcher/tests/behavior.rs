@@ -535,7 +535,10 @@ fn offline_partial_installations_never_run() {
 fn global_launcher_settings_are_read_without_changing_unrelated_configuration() {
     let dir = tempfile::tempdir().unwrap();
     let context = context(dir.path());
-    assert!(context.settings().unwrap().default_cli_version.is_none());
+    assert_eq!(
+        context.settings().unwrap().default_cli_version.as_deref(),
+        Some("latest")
+    );
     let path = context.home.join("config.json");
     write(
         &path,
@@ -553,7 +556,7 @@ fn global_launcher_settings_are_read_without_changing_unrelated_configuration() 
 }
 
 #[test]
-fn malformed_relevant_global_settings_fail_with_their_location() {
+fn malformed_relevant_global_settings_retain_generated_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let context = context(dir.path());
     let path = context.home.join("config.json");
@@ -565,11 +568,16 @@ fn malformed_relevant_global_settings_fail_with_their_location() {
         json!({"launcher":{"defaultCliVersion":null}}),
     ] {
         write(&path, config);
-        let error = context.settings().unwrap_err();
-        assert!(format!("{error:#}").contains("config.json"), "{error:#}");
+        let settings = context.settings().unwrap();
+        assert_eq!(settings.default_cli_version.as_deref(), Some("latest"));
+        assert!(settings.auto_cli_update);
+        assert!(settings.auto_launcher_update);
     }
     write(&path, json!({"launcher":{},"unrelated":"ignored"}));
-    assert!(context.settings().unwrap().default_cli_version.is_none());
+    assert_eq!(
+        context.settings().unwrap().default_cli_version.as_deref(),
+        Some("latest")
+    );
 }
 
 #[test]
@@ -690,7 +698,7 @@ fn launcher_management_never_delegates_or_requires_an_engine() {
         ],
     );
     assert!(!cli_config.status.success());
-    assert!(String::from_utf8_lossy(&cli_config.stderr).contains("No default CLI version"));
+    assert!(String::from_utf8_lossy(&cli_config.stderr).contains("cached"));
     assert!(!home.join("config.json").exists());
     let missing = run_cli(
         binary,
@@ -765,14 +773,17 @@ fn startup_recovery_does_not_modify_package_manager_owned_installations() {
 }
 
 #[test]
-fn obsolete_source_settings_and_cached_npm_engines_are_rejected() {
+fn unconsumed_source_settings_are_ignored_and_cached_npm_engines_are_rejected() {
     let directory = tempfile::tempdir().unwrap();
     let context = context(directory.path());
     write(
         &context.home.join("config.json"),
         json!({"launcher":{"cliSource":"npm","defaultCliVersion":"1.2.3"},"registry":"preserved"}),
     );
-    assert!(format!("{:#}", context.settings().unwrap_err()).contains("no longer supported"));
+    assert_eq!(
+        context.settings().unwrap().default_cli_version.as_deref(),
+        Some("1.2.3")
+    );
     let target = platform().unwrap();
     let root = context.cache_dir("1.2.3", target).unwrap();
     write(

@@ -17,6 +17,11 @@
   "sideEffects": false,
   "types": "./dist/index.d.ts",
   "exports": {
+    "./slim-schema": {
+      "uapkg-source": "./src/slim-schema.ts",
+      "types": "./dist/slim-schema.d.ts",
+      "default": "./dist/slim-schema.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"

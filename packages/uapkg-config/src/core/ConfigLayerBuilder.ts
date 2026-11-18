@@ -2,8 +2,7 @@ import { DiagnosticBag } from '@uapkg/diagnostics';
 import type { ConfigLayer, ConfigLayerBuildResult } from '#config/contracts/ConfigTypes.ts';
 import { ConfigFileRepository } from '#config/files/ConfigFileRepository.ts';
 import { ConfigPathResolver } from '#config/files/ConfigPathResolver.ts';
-import { getDefaultConfig, launcherUpdateKeys } from '#config/schema/configSchema.ts';
-import { isRecordValue } from '#config/schema/runtime/ConfigSchemaIntrospection.ts';
+import { getDefaultConfig } from '#config/schema/configSchema.ts';
 
 export class ConfigLayerBuilder {
   constructor(
@@ -23,7 +22,7 @@ export class ConfigLayerBuilder {
       {
         source: 'global',
         file: paths.globalFile,
-        values: this.readValues(paths.globalFile, bag),
+        ...this.readLayer(paths.globalFile, bag),
       },
     ];
 
@@ -31,35 +30,29 @@ export class ConfigLayerBuilder {
       layers.push({
         source: 'intermediary',
         file: intermediaryFile,
-        values: this.readProjectValues(intermediaryFile, bag),
+        ...this.readLayer(intermediaryFile, bag),
       });
     }
 
     layers.push({
       source: 'local',
       file: paths.localFile,
-      values: this.readProjectValues(paths.localFile, bag),
+      ...this.readLayer(paths.localFile, bag),
     });
 
     return { layers, diagnostics: bag.all() };
   }
 
-  private readValues(filePath: string, bag: DiagnosticBag): Record<string, unknown> {
+  private readLayer(filePath: string, bag: DiagnosticBag): Pick<ConfigLayer, 'values' | 'ignoredReason'> {
     const result = this.repository.read(filePath);
     if (!result.ok) {
       bag.mergeArray(result.diagnostics);
-      return {};
+      return { values: {}, ignoredReason: result.diagnostics[0]?.message ?? 'The config file could not be read' };
     }
     bag.mergeArray(result.value.diagnostics);
-    return result.value.values;
-  }
-
-  private readProjectValues(filePath: string, bag: DiagnosticBag): Record<string, unknown> {
-    const values = this.readValues(filePath, bag);
-    if (!isRecordValue(values.launcher)) return values;
-
-    const launcher = { ...values.launcher };
-    for (const key of launcherUpdateKeys) delete launcher[key];
-    return { ...values, launcher };
+    return {
+      values: result.value.values,
+      ...(result.value.diagnostics.length ? { ignoredReason: result.value.diagnostics[0]?.message } : {}),
+    };
   }
 }

@@ -15,7 +15,7 @@ import type {
 } from '#config/contracts/ConfigTypes.ts';
 import { ConfigFileRepository } from '#config/files/ConfigFileRepository.ts';
 import { ConfigPathResolver } from '#config/files/ConfigPathResolver.ts';
-import { launcherUpdateKeys, partialConfigSchema } from '#config/schema/configSchema.ts';
+import { partialConfigSchema } from '#config/schema/configSchema.ts';
 import { deleteValueByPath, setValueByPath, validateConfigPath } from '#config/schema/pathSchema.ts';
 
 export class ConfigWriter {
@@ -69,9 +69,7 @@ export class ConfigWriter {
       return bag.toFailure();
     }
 
-    const target = this.resolveWriteTarget(cwd, pathToProperty, options.scope);
-    if (!target.ok) return target;
-    const targetFile = target.value;
+    const targetFile = this.getEditTarget(cwd, options.scope);
     const readResult = this.repository.read(targetFile);
     if (!readResult.ok) {
       bag.mergeArray(readResult.diagnostics);
@@ -105,9 +103,7 @@ export class ConfigWriter {
       return bag.toFailure();
     }
 
-    const target = this.resolveWriteTarget(cwd, pathToProperty, options.scope);
-    if (!target.ok) return target;
-    const targetFile = target.value;
+    const targetFile = this.getEditTarget(cwd, options.scope);
     const readResult = this.repository.read(targetFile);
     if (!readResult.ok) {
       bag.mergeArray(readResult.diagnostics);
@@ -139,15 +135,6 @@ export class ConfigWriter {
 
     const inferredScope: ConfigScope = this.pathResolver.isInProject(cwd) ? 'local' : 'global';
     return this.getEditTarget(cwd, inferredScope);
-  }
-
-  private resolveWriteTarget(cwd: string, pathToProperty: string, scope?: ConfigScope): Result<string> {
-    const globalOnly = launcherUpdateKeys.some((key) => pathToProperty === `launcher.${key}`);
-    if (globalOnly && scope === 'local') {
-      return fail([createParseErrorDiagnostic(`Use --global to edit ${pathToProperty}`)]);
-    }
-
-    return ok(this.getEditTarget(cwd, globalOnly ? 'global' : scope));
   }
 
   toDisplayPath(cwd: string, filePath: string) {

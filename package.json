@@ -25,6 +25,8 @@
     "deps:consumer-bundle": "vp run consumer:bundle",
     "typecheck": "vp check --no-fmt --no-lint",
     "launcher:build": "vp exec node tools/launcher/runCargo.ts build --release --locked",
+    "launcher:schema": "vp run --cache -w launcher:schema:generate",
+    "launcher:schema:check": "vp run --cache -w launcher:schema:verify",
     "launcher:test": "vp exec node tools/launcher/runCargo.ts test --locked",
     "launcher:smoke-development": "vp exec node tools/dev-build/runNativeSmoke.ts",
     "launcher:lint": "vp exec node tools/launcher/runCargo.ts clippy --all-targets --all-features --locked",

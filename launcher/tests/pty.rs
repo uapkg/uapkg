@@ -53,6 +53,11 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32)
             .to_string(),
     )
     .unwrap();
+    fs::write(
+        root.join(".uapkg/config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.2.3"}}).to_string(),
+    )
+    .unwrap();
 
     fs::write(
         engine.join(".installed.json"),

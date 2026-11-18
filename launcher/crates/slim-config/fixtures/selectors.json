@@ -1,0 +1,138 @@
+[
+  {
+    "value": "latest",
+    "valid": true
+  },
+  {
+    "value": "1.2.3",
+    "valid": true
+  },
+  {
+    "value": "0.0.0",
+    "valid": true
+  },
+  {
+    "value": "2.0.0-alpha",
+    "valid": true
+  },
+  {
+    "value": "2.0.0-beta",
+    "valid": true
+  },
+  {
+    "value": "2.0.0-alpha.0",
+    "valid": true
+  },
+  {
+    "value": "2.0.0-beta.10",
+    "valid": true
+  },
+  {
+    "value": "1.2.3+build.01",
+    "valid": true
+  },
+  {
+    "value": "1.2.3-alpha.1+build.2",
+    "valid": true
+  },
+  {
+    "value": "1.2.3-alpha.9007199254740992",
+    "valid": true
+  },
+  {
+    "value": "9007199254740991.0.0",
+    "valid": true
+  },
+  {
+    "value": "9007199254740992.0.0",
+    "valid": false
+  },
+  {
+    "value": "0.9007199254740991.0",
+    "valid": true
+  },
+  {
+    "value": "0.9007199254740992.0",
+    "valid": false
+  },
+  {
+    "value": "0.0.9007199254740991",
+    "valid": true
+  },
+  {
+    "value": "0.0.9007199254740992",
+    "valid": false
+  },
+  {
+    "value": "v1.2.3",
+    "valid": false
+  },
+  {
+    "value": "^1.2.3",
+    "valid": false
+  },
+  {
+    "value": "01.2.3",
+    "valid": false
+  },
+  {
+    "value": "1.02.3",
+    "valid": false
+  },
+  {
+    "value": "1.2.03",
+    "valid": false
+  },
+  {
+    "value": "1.2.3-alpha.01",
+    "valid": false
+  },
+  {
+    "value": "1.2.3-alpha+build",
+    "valid": false
+  },
+  {
+    "value": "1.2.3-beta+build",
+    "valid": false
+  },
+  {
+    "value": "1.2.3-rc.1",
+    "valid": false
+  },
+  {
+    "value": "1.2.3\n",
+    "valid": false
+  },
+  {
+    "value": "latest\n",
+    "valid": false
+  },
+  {
+    "value": " latest",
+    "valid": false
+  },
+  {
+    "value": "1.2.3+",
+    "valid": false
+  },
+  {
+    "value": "1.2.3+build..2",
+    "valid": false
+  },
+  {
+    "value": "1.2.3+build_2",
+    "valid": false
+  },
+  {
+    "value": "",
+    "valid": false
+  },
+  {
+    "value": "1.2.3+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "valid": true
+  },
+  {
+    "value": "1.2.3+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "valid": false
+  }
+]

@@ -161,7 +161,7 @@ pub struct VersionSelection {
 }
 
 impl VersionSelection {
-    pub(crate) fn uses_global_latest(&self) -> bool {
+    pub(crate) fn uses_default_latest(&self) -> bool {
         self.version == "latest" && matches!(self.reason, "global-default" | "global-command")
     }
 
@@ -175,7 +175,7 @@ impl VersionSelection {
                 "The project's UAPKG CLI selection ({}) resolves to {resolved}",
                 self.version
             ),
-            _ => format!("The global default selects UAPKG CLI {resolved}"),
+            _ => format!("The config default selects UAPKG CLI {resolved}"),
         };
         format!("{selection}, which is not currently installed.")
     }
@@ -289,7 +289,7 @@ mod tests {
             Ok(selection.install_reason(resolved_version))
         };
         let global =
-            "The global default selects UAPKG CLI 1.7.0, which is not currently installed.";
+            "The config default selects UAPKG CLI 1.7.0, which is not currently installed.";
 
         fs::write(&manifest, r#"{"kind":"project"}"#)?;
         assert_eq!(reason(&["install"], "1.7.0")?, global);

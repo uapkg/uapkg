@@ -204,7 +204,7 @@ fn cached_engines_are_reused_online_and_offline_without_a_downloader() -> Result
         default_cli_version: Some("1.2.3".into()),
         development: None,
     });
-    let settings = settings(&context, None)?;
+    let settings = settings(&context, Some("1.2.3"))?;
     let installed = engines::install_cached(&context, "1.2.3", false, |stage| {
         stage_engine(stage, "1.2.3")
     })?;

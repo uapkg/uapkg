@@ -45,6 +45,9 @@ export type ConfigInvalidValueDiagnostic = DiagnosticBase<
   {
     readonly path: string;
     readonly rule: string;
+    readonly source?: string;
+    readonly filePath?: string;
+    readonly ignored?: boolean;
   }
 >;
 
@@ -109,12 +112,18 @@ export function createConfigUnresolvedDefaultRegistryDiagnostic(
   };
 }
 
-export function createConfigInvalidValueDiagnostic(path: string, rule: string): ConfigInvalidValueDiagnostic {
+export function createConfigInvalidValueDiagnostic(
+  path: string,
+  rule: string,
+  context?: { source: string; filePath?: string; ignored: boolean },
+): ConfigInvalidValueDiagnostic {
   return {
     level: 'warning',
     code: 'CONFIG_INVALID_VALUE',
-    message: `Config value at "${path}" may be invalid: ${rule}.`,
+    message: context?.ignored
+      ? `Ignored "${path}" in ${context.source} config${context.filePath ? ` "${context.filePath}"` : ''}: ${rule}.`
+      : `Config value at "${path}" may be invalid: ${rule}.`,
     hint: 'Update this value to match the expected format for this key.',
-    data: { path, rule },
+    data: { path, rule, ...context },
   };
 }

@@ -50,19 +50,19 @@ Ranges, `v` prefixes, and unscoped `alpha`/`beta` are unsupported.
 `uapkg init` records the executing exact CLI version for new game projects.
 
 The launcher searches upward for the nearest game project, skipping plugin
-manifests. An unpinned project uses the global default. One CLI handles the
+manifests. An unpinned project uses the resolved configuration default. One CLI handles the
 complete dependency graph; dependency manifests do not select another CLI.
 
-| Command                                  | CLI selection                                      |
-| ---------------------------------------- | -------------------------------------------------- |
-| `login`, `logout`, `whoami`              | Global default                                     |
-| Other CLI commands                       | Nearest project selector, otherwise global default |
-| `--cli-version <selector>`               | Explicit override                                  |
-| `launcher`, `version`, `launcher-update` | Handled by the launcher                            |
+| Command                                  | CLI selection                                             |
+| ---------------------------------------- | --------------------------------------------------------- |
+| `login`, `logout`, `whoami`              | Resolved configuration default                            |
+| Other CLI commands                       | Nearest project selector, otherwise configuration default |
+| `--cli-version <selector>`               | Explicit override                                         |
+| `launcher`, `version`, `launcher-update` | Handled by the launcher                                   |
 
 The launcher resolves the selected CLI and installs it for the current platform
 when it is missing, unless `--offline` or `UAPKG_OFFLINE=1` prohibits downloads.
-This applies to global defaults, project pins, and explicit overrides. A failed
+This applies to configuration defaults, project pins, and explicit overrides. A failed
 installation does not substitute another installed version or change the default
 or project pin.
 
@@ -96,12 +96,29 @@ write to that CLI. The global configuration preserves the requested selector:
 }
 ```
 
-The launcher reads `~/.uapkg/config.json`; local CLI configuration does not change
-this default. The installation receipt may supply a default when configuration
-has none. `--global` on a CLI configuration command controls configuration scope,
-not version selection.
+The launcher resolves configuration in the same order as `@uapkg/config`: built-in
+defaults, `~/.uapkg/config.json`, intermediary `.uapkg/config.json` files from the
+nearest manifest directory toward the working directory, and the working
+directory's `.uapkg/config.json`. Later valid values override earlier ones. Without
+an ancestor manifest, only the working directory's local config is considered.
+All three `launcher` settings support these layers. The built-in CLI default is
+`latest`; installation receipts do not supply a release CLI fallback.
 
-`latest` remembers the exact version installed in the cache. The global default
+`version default` continues to read and write the global default. Use
+`uapkg config set launcher.defaultCliVersion <selector>` to set a local default
+inside a project, or add `--global` to edit global configuration. Project
+`uapkgVersion` pins and `--cli-version` overrides still take precedence.
+`--global` on a CLI configuration command controls configuration scope, not
+version selection.
+
+Invalid config values are ignored individually, preserving valid siblings and
+earlier valid values. Warnings identify the file, scope, property, expected and
+received types, and the retained value's source. Unreadable or malformed config
+files warn and contribute no values. Configuration is read-only in the launcher;
+all `uapkg config` commands continue to run in the TypeScript CLI. Manifest
+validation and project version pins retain their existing behavior.
+
+`latest` remembers the exact version installed in the cache. The configured default
 continues to read `latest` after updates. Exact global versions and project
 selectors retain their own version selection rules.
 
@@ -109,7 +126,8 @@ selectors retain their own version selection rules.
 
 `uapkg version list` shows locally installed CLI versions for the current
 platform. Selected versions appear first, in the order `global default`,
-`project pin`, then `cli override`. Each configured role appears once; roles
+`config default` when a local or intermediary config supplies one, `project pin`,
+then `cli override`. Each configured role appears once; roles
 that select the same version share one row. Unset roles are omitted.
 
 ```text
@@ -196,7 +214,8 @@ locks, and atomic activation; interrupted downloads leave existing versions inta
 A damaged cache error identifies the version directory to remove and reinstall.
 Do not delete the whole profile: it also contains configuration and credentials.
 
-The old `launcher.cliSource` setting is unsupported; remove that one property
+The old `launcher.cliSource` setting is unsupported and ignored by the launcher's
+slim config reader; remove that one property
 from global configuration. Old source-specific `engines/npm` and
 `engines/github-releases` directories are ignored and may be removed manually.
 Cached npm engines and bundled-engine receipts are not migrated or executed.
@@ -204,7 +223,7 @@ For the distribution cutover, install the new standalone launcher archive and
 select its default CLI; an older launcher cannot discover this distribution format.
 Keep unrelated configuration and authentication state.
 
-## Launcher and global CLI updates
+## Launcher and CLI updates
 
 ```sh
 uapkg launcher-update
@@ -214,19 +233,23 @@ uapkg version install latest
 ```
 
 The first eligible command checks for launcher updates, and subsequent commands
-check at most once every 24 hours per installation. The global CLI checks on the
-same cadence when the command selects a global default of `latest`. New stable
+check at most once every 24 hours per installation. The default CLI checks on the
+same cadence when the command selects a configuration default of `latest`. New stable
 versions are installed automatically. The original command continues with the
 updated launcher or CLI. If a check or automatic installation fails, the command
 can still use the installed version. Offline runs, diagnostics, launcher
 management commands, and development bindings skip periodic checks.
 
-Use either global setting to keep daily checks and install updates manually:
+Use either setting to keep daily checks and install updates manually:
 
 ```sh
 uapkg config set launcher.autoLauncherUpdate false
 uapkg config set launcher.autoCLIUpdate false
 ```
+
+These commands use normal configuration scope: local inside a project and global
+outside one. Add `--global` to edit the profile's policy from inside a project.
+Local and intermediary policies override the global values.
 
 Use `uapkg config get <key>` to see the effective value. Both settings default to
 `true`. They require CLI 1.7.1 or later. To edit these settings while using an
@@ -254,6 +277,13 @@ Use `vp run build` for a development build or `vp run build -- --production` for
 a production build. Cargo runs from `launcher/`, where Rustup reads the exact
 Rust toolchain pin. `vp run launcher:format`, `launcher:lint`, and `launcher:test`
 provide Rust's standard formatting, linting, and tests.
+
+The launcher embeds a generated, launcher-only JSON Schema and its defaults from
+`@uapkg/config`. Repository native build wrappers regenerate it before compiling.
+`vp run launcher:schema` updates the checked-in artifact;
+`vp run launcher:schema:check` checks freshness without writing. Direct Cargo
+builds use the checked-in schema and do not require Node. CI checks freshness
+before building native artifacts.
 
 To build only the launcher with normal release selection and downloads, run
 `vp run launcher:build` from the repository root. The executable is written to

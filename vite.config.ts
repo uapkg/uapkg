@@ -85,6 +85,7 @@ const sourceAliases = [
   { find: '@uapkg/cli', replacement: workspacePath('./packages/uapkg/src/index.ts') },
   { find: '@uapkg/common', replacement: workspacePath('./packages/uapkg-common/src/index.ts') },
   { find: '@uapkg/common-schema', replacement: workspacePath('./packages/uapkg-common-schema/src/index.ts') },
+  { find: '@uapkg/config/slim-schema', replacement: workspacePath('./packages/uapkg-config/src/slim-schema.ts') },
   { find: '@uapkg/config', replacement: workspacePath('./packages/uapkg-config/src/index.ts') },
   { find: '@uapkg/diagnostics', replacement: workspacePath('./packages/uapkg-diagnostics/src/index.ts') },
   {
@@ -223,6 +224,7 @@ export default defineConfig({
       testProject('consumer-bundle-tools', './tools/consumer-bundle'),
       testProject('dev-build-tools', './tools/dev-build'),
       testProject('import-policy-tools', './tools/import-policy'),
+      testProject('launcher-tools', './tools/launcher'),
       testProject('release-tools', './tools/release', { hookTimeout: 30_000, testTimeout: 30_000 }),
     ],
   },
@@ -233,6 +235,16 @@ export default defineConfig({
     },
     tasks: {
       ...libraryPackTasks,
+      'launcher:schema:generate': {
+        command: 'node tools/launcher/generateSlimConfigSchema.ts',
+        dependsOn: ['pack:config'],
+        cache: false,
+      },
+      'launcher:schema:verify': {
+        command: 'node tools/launcher/generateSlimConfigSchema.ts --check',
+        dependsOn: ['pack:config'],
+        cache: false,
+      },
       'pack:libraries': {
         command: 'node -e "void 0"',
         cache: false,

@@ -51,6 +51,8 @@ jobs:
           node-version-file: .node-version
           run-install: false
       - run: vp install --frozen-lockfile
+      - name: Check embedded launcher config schema
+        run: vp run launcher:schema:check
       - name: Install the musl linker
         if: matrix.platform == 'linux-x64-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools

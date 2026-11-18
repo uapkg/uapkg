@@ -1,0 +1,158 @@
+[
+  {
+    "name": "defaults without creating files",
+    "cwd": "empty/nested",
+    "manifests": [],
+    "files": {},
+    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": []
+  },
+  {
+    "name": "all properties walk multiple intermediate layers",
+    "cwd": "project/area/nested",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{\"launcher\":{\"defaultCliVersion\":\"1.2.3\",\"autoLauncherUpdate\":false,\"autoCLIUpdate\":false}}",
+      "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"2.0.0\",\"autoLauncherUpdate\":true}}",
+      "project/area/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"2.0.1\",\"autoCLIUpdate\":true}}",
+      "project/area/nested/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"3.0.0-beta.2\",\"autoCLIUpdate\":false}}"
+    },
+    "expected": {
+      "launcher": { "defaultCliVersion": "3.0.0-beta.2", "autoLauncherUpdate": true, "autoCLIUpdate": false }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "local",
+      "launcher.autoLauncherUpdate": "intermediary",
+      "launcher.autoCLIUpdate": "local"
+    },
+    "ignored": []
+  },
+  {
+    "name": "invalid local leaf keeps global value and valid sibling",
+    "cwd": "project",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{\"launcher\":{\"defaultCliVersion\":\"1.2.3\",\"autoLauncherUpdate\":false}}",
+      "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":{},\"autoCLIUpdate\":false}}"
+    },
+    "expected": { "launcher": { "defaultCliVersion": "1.2.3", "autoLauncherUpdate": false, "autoCLIUpdate": false } },
+    "origins": {
+      "launcher.defaultCliVersion": "global",
+      "launcher.autoLauncherUpdate": "global",
+      "launcher.autoCLIUpdate": "local"
+    },
+    "ignored": ["launcher.defaultCliVersion"]
+  },
+  {
+    "name": "invalid selector and boolean retain defaults",
+    "cwd": "project",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"^1.2.3\",\"autoCLIUpdate\":\"false\"}}"
+    },
+    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": ["launcher.defaultCliVersion", "launcher.autoCLIUpdate"]
+  },
+  {
+    "name": "bad launcher container leaves earlier values",
+    "cwd": "project",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{\"launcher\":{\"defaultCliVersion\":\"1.2.3\"}}",
+      "project/.uapkg/config.json": "{\"launcher\":null}"
+    },
+    "expected": { "launcher": { "defaultCliVersion": "1.2.3", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "origins": {
+      "launcher.defaultCliVersion": "global",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": ["launcher"]
+  },
+  {
+    "name": "malformed global file does not prevent local configuration",
+    "cwd": "project",
+    "manifests": ["project/uapkg.json"],
+    "files": {
+      "profile/config.json": "{ broken",
+      "project/.uapkg/config.json": "{\"launcher\":{\"autoLauncherUpdate\":false}}"
+    },
+    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": false, "autoCLIUpdate": true } },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "local",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": ["$"]
+  },
+  {
+    "name": "nonobject root is ignored",
+    "cwd": "project",
+    "manifests": ["project/uapkg.json"],
+    "files": { "project/.uapkg/config.json": "[]" },
+    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": ["$"]
+  },
+  {
+    "name": "empty files and BOM whitespace",
+    "cwd": "project",
+    "manifests": ["project/uapkg.json"],
+    "files": { "profile/config.json": "", "project/.uapkg/config.json": "\ufeff \r\n\t" },
+    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": true } },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": []
+  },
+  {
+    "name": "without a manifest only cwd local participates",
+    "cwd": "project/nested",
+    "manifests": [],
+    "files": {
+      "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"9.0.0\"}}",
+      "project/nested/.uapkg/config.json": "{\"launcher\":{\"autoCLIUpdate\":false}}"
+    },
+    "expected": { "launcher": { "defaultCliVersion": "latest", "autoLauncherUpdate": true, "autoCLIUpdate": false } },
+    "origins": {
+      "launcher.defaultCliVersion": "default",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "local"
+    },
+    "ignored": []
+  },
+  {
+    "name": "nearest manifest is the boundary regardless of kind",
+    "cwd": "project/plugin/nested",
+    "manifests": ["project/uapkg.json", "project/plugin/uapkg.json"],
+    "files": {
+      "project/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"9.0.0\"}}",
+      "project/plugin/.uapkg/config.json": "{\"launcher\":{\"defaultCliVersion\":\"2.0.0-alpha\"}}"
+    },
+    "expected": {
+      "launcher": { "defaultCliVersion": "2.0.0-alpha", "autoLauncherUpdate": true, "autoCLIUpdate": true }
+    },
+    "origins": {
+      "launcher.defaultCliVersion": "intermediary",
+      "launcher.autoLauncherUpdate": "default",
+      "launcher.autoCLIUpdate": "default"
+    },
+    "ignored": []
+  }
+]

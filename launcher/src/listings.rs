@@ -29,10 +29,20 @@ pub(crate) fn local(context: &ContextPaths, invocation: &Invocation, cwd: &Path)
         context.ownership() != "development" || invocation.override_version.is_none(),
         "--cli-version is unavailable for a development checkout binding."
     );
-    let settings = context.settings()?;
+    let settings = context.settings_at(cwd, uapkg_slim_config::Scope::Effective)?;
     let project = discover_project(cwd)?;
     let selections = [
-        ("global default", context.default_version(&settings)),
+        ("global default", settings.global_cli_version.as_deref()),
+        (
+            "config default",
+            (matches!(
+                settings.config_source,
+                uapkg_slim_config::Source::Intermediary | uapkg_slim_config::Source::Local
+            ) && settings.config_file.as_deref()
+                != Some(context.home.join("config.json").as_path()))
+            .then(|| context.default_version(&settings))
+            .flatten(),
+        ),
         (
             "project pin",
             project
@@ -538,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn local_uses_receipt_default_when_global_config_has_none() {
+    fn local_uses_generated_default_instead_of_receipt_fallback() {
         let root = tempfile::tempdir().unwrap();
         let mut context = context(root.path());
         context.receipt = Some(
@@ -549,7 +559,7 @@ mod tests {
         );
         assert_eq!(
             local(&context, &invocation(&["version", "list"]), root.path()).unwrap(),
-            format!("1.2.3 (global default, not installed)\n\n{LOCAL_FOOTER}\n")
+            format!("latest (global default, unresolved)\n\n{LOCAL_FOOTER}\n")
         );
     }
 }
