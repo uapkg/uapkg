@@ -197,6 +197,14 @@ All signatures include Minisign's trusted-comment signature; changing whitespace
 JSON formatting changes signed bytes. Clients authenticate a document before using
 its contents and authenticate checksums before trusting downloaded archives.
 
+Launcher readers accept additional JSON fields and retain unknown fields when
+updating existing local records. Required fields, known-field types and supported
+schema versions remain enforced. Signed catalog payloads are cached as their exact
+original bytes, including any fields the reader does not understand. Publisher and
+infrastructure validators continue to enforce their explicit production contracts.
+This reader policy applies to future launcher releases; versions through `0.3.4`
+keep their original unknown-field rejection behavior.
+
 Local launcher builds use these tracked trust anchors without environment-variable
 setup. Pull-request checks, push CI, and release preflight require
 `UAPKG_RELEASE_PUBLIC_KEY` and `UAPKG_CATALOG_PUBLIC_KEY` to match the tracked keys.

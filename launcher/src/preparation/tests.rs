@@ -68,6 +68,7 @@ fn stage_engine(stage: &Path, version: &str) -> Result<PathBuf> {
             kind: "sea".into(),
             executable: executable.into(),
             args: vec![],
+            extra_fields: Default::default(),
         },
     )?;
     Ok(root)
@@ -203,6 +204,7 @@ fn cached_engines_are_reused_online_and_offline_without_a_downloader() -> Result
         install_method: "standalone".into(),
         default_cli_version: Some("1.2.3".into()),
         development: None,
+        extra_fields: Default::default(),
     });
     let settings = settings(&context, Some("1.2.3"))?;
     let installed = engines::install_cached(&context, "1.2.3", false, |stage| {

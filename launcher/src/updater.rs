@@ -3,7 +3,7 @@ use crate::{
     catalog::{self, Index, Selector},
     github, maintenance,
     model::{exact_version, platform, read_json, relative_path},
-    storage::{ContextPaths, atomic_json, lock},
+    storage::{ContextPaths, ExtraFields, atomic_json, lock},
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -20,20 +20,24 @@ const JOURNAL: &str = "uapkg-update.json";
 const BACKUP_RECORD: &str = "uapkg-backup.json";
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct BackupRecord {
     schema_version: u32,
     version: String,
     backup: String,
     sha256: String,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct StagedRelease {
     schema_version: u32,
     version: String,
     platform: String,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 fn stage_lock(directory: &Path, version: &str) -> Result<fs::File> {
@@ -154,7 +158,7 @@ pub fn recover_installation(context: &ContextPaths) -> Result<Option<PathBuf>> {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Transaction {
     pub schema_version: u32,
     pub executable: String,
@@ -162,6 +166,8 @@ pub struct Transaction {
     pub previous_sha256: String,
     pub next_sha256: String,
     pub next_version: String,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 fn paths(directory: &Path, transaction: &Transaction) -> Result<(PathBuf, PathBuf)> {
@@ -350,18 +356,11 @@ enum Replacement {
 }
 
 fn tracked_selector(context: &ContextPaths) -> Result<String> {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Tracking {
-        selector: String,
-        version: String,
-    }
-
     let path = context.home.join("catalog/launcher/tracking.json");
     if !path.exists() {
         return Ok("latest".into());
     }
-    let tracking: Tracking = read_json(&path)?;
+    let tracking: catalog::Tracking = read_json(&path)?;
     exact_version(&tracking.version)?;
     Ok(tracking.selector)
 }
@@ -530,6 +529,7 @@ fn install(
             schema_version: 1,
             version: version.into(),
             platform: target.into(),
+            extra_fields: ExtraFields::new(),
         },
     )?;
     let archive_path = temporary.path().join("launcher.tar.gz");
@@ -760,6 +760,7 @@ fn replace_staged_with_policy(
             version: crate::model::VERSION.into(),
             backup: backup_name.clone(),
             sha256: previous_sha256.clone(),
+            extra_fields: ExtraFields::new(),
         },
     )?;
     let transaction = Transaction {
@@ -769,6 +770,7 @@ fn replace_staged_with_policy(
         previous_sha256,
         next_sha256: archive::sha256(next)?,
         next_version: version.to_owned(),
+        extra_fields: ExtraFields::new(),
     };
     atomic_json(&directory.join(JOURNAL), &transaction)?;
     // self-replace supplies the Windows helper which retires the running binary
@@ -802,6 +804,131 @@ fn keep_installed(live: &str, candidate: &str, running: &str, mode: UpdateMode) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::de::DeserializeOwned;
+    use serde_json::{Value, json};
+
+    fn roundtrip_update_record<T: DeserializeOwned + Serialize>(
+        mut value: Value,
+        required: &[&str],
+    ) {
+        let extras = json!({"futureObject": {"nested": [null, {"enabled": true}]}, "futureArray": [1, "value", false], "futureNull": null});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extras.as_object().unwrap().clone());
+        let parsed: T = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+        for field in required {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(*field);
+            assert!(
+                serde_json::from_value::<T>(missing).is_err(),
+                "Missing {field} must fail"
+            );
+            let mut malformed = value.clone();
+            malformed[*field] = json!(false);
+            assert!(
+                serde_json::from_value::<T>(malformed).is_err(),
+                "Wrong type for {field} must fail"
+            );
+        }
+    }
+
+    #[test]
+    fn update_records_roundtrip_extensions_and_reject_missing_or_malformed_known_fields() {
+        roundtrip_update_record::<BackupRecord>(
+            json!({"schemaVersion": 1, "version": "0.3.3", "backup": "uapkg.backup", "sha256": "0".repeat(64)}),
+            &["schemaVersion", "version", "backup", "sha256"],
+        );
+        roundtrip_update_record::<StagedRelease>(
+            json!({"schemaVersion": 1, "version": "0.3.3", "platform": "win-x64"}),
+            &["schemaVersion", "version", "platform"],
+        );
+        roundtrip_update_record::<Transaction>(
+            json!({"schemaVersion": 1, "executable": "uapkg", "backup": "uapkg.backup", "previousSha256": "0".repeat(64), "nextSha256": "1".repeat(64), "nextVersion": "0.3.3"}),
+            &[
+                "schemaVersion",
+                "executable",
+                "backup",
+                "previousSha256",
+                "nextSha256",
+                "nextVersion",
+            ],
+        );
+    }
+
+    #[test]
+    fn transaction_extensions_do_not_relax_schema_version_or_path_validation() {
+        let value = json!({"schemaVersion": 1, "executable": "uapkg", "backup": "uapkg.backup", "previousSha256": "0".repeat(64), "nextSha256": "1".repeat(64), "nextVersion": "0.3.3", "futureMetadata": {"nested": [null]}});
+        let directory = tempfile::tempdir().unwrap();
+        let parsed: Transaction = serde_json::from_value(value.clone()).unwrap();
+        assert!(paths(directory.path(), &parsed).is_ok());
+        assert!(parsed.extra_fields.contains_key("futureMetadata"));
+        for (field, invalid) in [
+            ("schemaVersion", json!(2)),
+            ("executable", json!("../uapkg")),
+            ("backup", json!("../backup")),
+            ("nextVersion", json!("^0.3.3")),
+        ] {
+            let mut changed = value.clone();
+            changed[field] = invalid;
+            let transaction: Transaction = serde_json::from_value(changed).unwrap();
+            assert!(
+                paths(directory.path(), &transaction).is_err(),
+                "Invalid {field} must fail"
+            );
+        }
+    }
+
+    #[test]
+    fn new_update_records_serialize_only_their_own_known_fields() {
+        let backup = BackupRecord {
+            schema_version: 1,
+            version: "0.3.3".into(),
+            backup: "uapkg.backup".into(),
+            sha256: "0".repeat(64),
+            extra_fields: ExtraFields::new(),
+        };
+        assert_eq!(
+            serde_json::to_value(backup)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            4
+        );
+        let staged = StagedRelease {
+            schema_version: 1,
+            version: "0.3.3".into(),
+            platform: "win-x64".into(),
+            extra_fields: ExtraFields::new(),
+        };
+        assert_eq!(
+            serde_json::to_value(staged)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            3
+        );
+        let transaction = Transaction {
+            schema_version: 1,
+            executable: "uapkg".into(),
+            backup: "uapkg.backup".into(),
+            previous_sha256: "0".repeat(64),
+            next_sha256: "1".repeat(64),
+            next_version: "0.3.3".into(),
+            extra_fields: ExtraFields::new(),
+        };
+        assert_eq!(
+            serde_json::to_value(transaction)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            6
+        );
+    }
 
     #[test]
     fn marked_launcher_requires_healthy_latest_recovery_even_when_it_is_a_downgrade() {
@@ -866,6 +993,7 @@ mod tests {
                     schema_version: 1,
                     version: version.into(),
                     platform: platform().unwrap().into(),
+                    extra_fields: ExtraFields::new(),
                 },
             )
             .unwrap();
@@ -905,6 +1033,7 @@ mod tests {
                 version: "0.3.3".into(),
                 backup: name.into(),
                 sha256: "0".repeat(64),
+                extra_fields: ExtraFields::new(),
             },
         )
         .unwrap();
@@ -917,6 +1046,7 @@ mod tests {
                 version: "0.3.3".into(),
                 backup: name.into(),
                 sha256: archive::sha256(&backup).unwrap(),
+                extra_fields: ExtraFields::new(),
             },
         )
         .unwrap();
@@ -956,6 +1086,7 @@ mod tests {
                 install_method: owner.into(),
                 default_cli_version: None,
                 development: None,
+                extra_fields: ExtraFields::new(),
             });
             let error = enforce_policy_with(&context, "0.3.3", false, &index, |_, _| {
                 panic!("Package owner must perform the update")
@@ -988,7 +1119,7 @@ mod tests {
         assert_eq!(tracked_selector(&context).unwrap(), "latest");
         atomic_json(
             &context.home.join("catalog/launcher/tracking.json"),
-            &serde_json::json!({"selector":"0.1.2", "version":"0.1.2"}),
+            &serde_json::json!({"selector":"0.1.2", "version":"0.1.2", "futureMetadata":{"nested":[null,1]}}),
         )
         .unwrap();
         let action = maintain(&context, true, false);

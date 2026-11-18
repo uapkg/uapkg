@@ -214,8 +214,10 @@ mod tests {
                     files: vec!["win-x64".into()],
                     yanked: None,
                     quarantined: None,
+                    extra_fields: Default::default(),
                 })
                 .collect(),
+            extra_fields: Default::default(),
         };
         index.validate("cli").unwrap();
         index
@@ -371,6 +373,7 @@ mod tests {
                     ("2.0.0-alpha.1".into(), "2.0.0".into()),
                     ("2.0.0-alpha.2".into(), "2.0.0".into()),
                 ]),
+                extra_fields: Default::default(),
             };
             replacements.validate("cli").unwrap();
             let output = available_output(&index, Some(&replacements), "win-x64").unwrap();

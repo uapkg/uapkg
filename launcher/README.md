@@ -67,6 +67,15 @@ unavailability can fall back to verified state; signature failures fail closed.
 Locks, bounded extraction, ordinary-file-only archives, and atomic activation
 protect installation. Content-Length is optional; SHA-256 is authoritative.
 
+Launcher JSON readers require the fields they understand and accept additional
+fields without warnings. Unknown fields, including nested JSON values, survive
+updates to existing records. Resolution, tracking, daily-check and signed-cache
+envelope updates preserve extensions; new installations and update transactions
+start fresh records. Signed metadata payloads retain their exact original bytes.
+Known field types, supported values, schema versions, signatures, hashes and path
+checks remain enforced. Additional fields do not enable features in older readers.
+Published launcher versions through `0.3.4` retain their original strict readers.
+
 The shared config owns `launcher.defaultCliVersion`, `launcher.autoLauncherUpdate`,
 and `launcher.autoCLIUpdate`. The private `uapkg-slim-config` crate reads them using
 the same default, global, intermediary, and local layers as `@uapkg/config`. Its

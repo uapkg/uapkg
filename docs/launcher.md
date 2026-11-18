@@ -212,6 +212,13 @@ separate artifact key. Content-Length is optional and is not integrity evidence.
 Downloads and extraction have size bounds. Installation uses staging, per-version
 locks, and atomic activation; interrupted downloads leave existing versions intact.
 
+Launcher JSON readers accept additional fields while requiring valid known fields.
+Unknown fields are preserved when existing local records are updated, including
+selector tracking and cached metadata envelopes. Signed metadata payloads are
+stored unchanged. Unsupported schema versions, unsupported known values, invalid
+paths and failed integrity checks still cause errors. This additive compatibility
+does not change already-published launchers through `0.3.4`.
+
 A damaged cache error identifies the version directory to remove and reinstall.
 Do not delete the whole profile: it also contains configuration and credentials.
 

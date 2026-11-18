@@ -350,6 +350,7 @@ fn a_running_backup_can_restore_the_launcher_and_clean_itself_up() {
         previous_sha256: previous_sha256.clone(),
         next_sha256: "0".repeat(64),
         next_version: "0.2.0".to_owned(),
+        extra_fields: Default::default(),
     };
     atomic_json(&directory.path().join("uapkg-update.json"), &transaction).unwrap();
     let output = Command::new(&backup)

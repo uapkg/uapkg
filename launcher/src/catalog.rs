@@ -1,7 +1,7 @@
 use crate::{
     github,
     model::{exact_version, read_json},
-    storage::{ContextPaths, atomic_json, lock},
+    storage::{ContextPaths, ExtraFields, atomic_json, lock, preserve_json_fields},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -72,10 +72,12 @@ fn base(version: &semver::Version) -> String {
     format!("{}.{}.{}", version.major, version.minor, version.patch)
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ReleaseStatus {
     pub at: String,
     pub reason: String,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 impl ReleaseStatus {
@@ -134,7 +136,7 @@ impl ReleaseStatus {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Release {
     pub version: String,
     pub date: String,
@@ -143,6 +145,8 @@ pub struct Release {
     pub yanked: Option<ReleaseStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quarantined: Option<ReleaseStatus>,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 impl Release {
     pub fn unavailable(&self) -> Option<(&'static str, &ReleaseStatus)> {
@@ -153,12 +157,14 @@ impl Release {
     }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Index {
     pub schema_version: u32,
     pub product: String,
     pub aliases: BTreeMap<String, String>,
     pub releases: Vec<Release>,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 impl Index {
     pub fn validate(&self, product: &str) -> Result<()> {
@@ -319,11 +325,13 @@ impl Index {
     }
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Replacements {
     pub schema_version: u32,
     pub product: String,
     pub replacements: BTreeMap<String, String>,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 impl Replacements {
     pub fn validate(&self, product: &str) -> Result<()> {
@@ -392,10 +400,20 @@ pub fn refresh_index(context: &ContextPaths, product: &str) -> Result<Index> {
 }
 
 #[derive(Default, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct Resolutions {
     #[serde(default)]
     active: BTreeMap<String, String>,
+    #[serde(flatten, default)]
+    extra_fields: ExtraFields,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(crate) struct Tracking {
+    pub(crate) selector: String,
+    pub(crate) version: String,
+    #[serde(flatten, default)]
+    pub(crate) extra_fields: ExtraFields,
 }
 #[derive(Debug)]
 pub struct Resolution {
@@ -532,10 +550,15 @@ pub fn activate(context: &ContextPaths, product: &str, resolution: &Resolution) 
         index.ensure_runnable(&resolution.version)?;
     }
     if product == "launcher" {
-        atomic_json(
-            &context.home.join("catalog/launcher/tracking.json"),
-            &serde_json::json!({"selector":resolution.requested,"version":resolution.version}),
-        )?;
+        let directory = context.home.join("catalog/launcher");
+        let _lock = lock(&directory.join("tracking.lock"))?;
+        let path = directory.join("tracking.json");
+        let tracking = Tracking {
+            selector: resolution.requested.clone(),
+            version: resolution.version.clone(),
+            extra_fields: ExtraFields::new(),
+        };
+        atomic_json(&path, &preserve_json_fields(&path, &tracking)?)?;
     }
     if selector(&resolution.requested)? == Selector::Exact {
         return Ok(());
@@ -716,6 +739,7 @@ mod tests {
             date: "2026-11-17".into(),
             yanked: None,
             quarantined: None,
+            extra_fields: ExtraFields::new(),
             files: PLATFORMS
                 .iter()
                 .map(|platform| (*platform).into())
@@ -980,6 +1004,7 @@ mod tests {
             schema_version: 1,
             product: "cli".into(),
             replacements: BTreeMap::from([("2.0.0-alpha.1".into(), "2.1.0".into())]),
+            extra_fields: ExtraFields::new(),
         };
         assert!(replacements.validate("cli").is_err());
         replacements.replacements =
@@ -1083,9 +1108,233 @@ mod tests {
         let status = ReleaseStatus {
             at: "2026-11-18T00:00:00Z".into(),
             reason: format!("bad\n\u{1b}[31m{}", "x".repeat(3000)),
+            extra_fields: ExtraFields::new(),
         };
         let reason = status.display_reason();
         assert_eq!(reason.chars().count(), 500);
         assert!(!reason.chars().any(char::is_control));
+    }
+
+    #[test]
+    fn additive_catalog_fields_round_trip_without_changing_moderation_or_replacements() {
+        let document = serde_json::json!({
+            "schemaVersion":1,"product":"cli","aliases":{"latest":"1.7.0"},
+            "futureIndex":{"nested":[null,true,7,{"keep":"value"}]},
+            "releases":[
+                {"version":"1.7.2","date":"2026-11-18","files":[],"futureRelease":["preserved"],
+                 "quarantined":{"at":"2026-11-18T12:00:00Z","reason":"broken","futureStatus":{"incident":123}}},
+                {"version":"1.7.1","date":"2026-11-18","files":["win-x64"],
+                 "yanked":{"at":"2026-11-18T12:00:00Z","reason":"broken","futureStatus":false}},
+                {"version":"1.7.0","date":"2026-11-18","files":["win-x64"],"futureRelease":null}
+            ]
+        });
+        let index: Index = serde_json::from_value(document.clone()).unwrap();
+        index.validate("cli").unwrap();
+        assert_eq!(
+            index.resolve_release("1.7.2", "win-x64").unwrap().0,
+            "1.7.0"
+        );
+        assert_eq!(serde_json::to_value(&index).unwrap(), document);
+
+        let document = serde_json::json!({
+            "schemaVersion":1,"product":"cli","replacements":{"2.0.0-alpha.1":"2.0.0"},
+            "futureReplacementPolicy":{"retained":[1,2,3]}
+        });
+        let replacements: Replacements = serde_json::from_value(document.clone()).unwrap();
+        replacements.validate("cli").unwrap();
+        assert_eq!(replacements.replacements["2.0.0-alpha.1"], "2.0.0");
+        assert_eq!(serde_json::to_value(replacements).unwrap(), document);
+    }
+
+    #[test]
+    fn additive_fields_do_not_relax_required_catalog_fields_or_known_validation() {
+        let valid = serde_json::json!({
+            "schemaVersion":1,"product":"cli","aliases":{},"future":true,
+            "releases":[{"version":"1.7.2","date":"2026-11-18","files":[],
+                "quarantined":{"at":"2026-11-18T12:00:00Z","reason":"broken","future":[]}}]
+        });
+        let invalid = |value: serde_json::Value| {
+            assert!(
+                serde_json::from_value::<Index>(value.clone())
+                    .map_err(anyhow::Error::from)
+                    .and_then(|index| index.validate("cli"))
+                    .is_err(),
+                "{value}"
+            );
+        };
+        for key in ["schemaVersion", "product", "aliases", "releases"] {
+            let mut value = valid.clone();
+            value.as_object_mut().unwrap().remove(key);
+            invalid(value);
+            let mut value = valid.clone();
+            value[key] = serde_json::json!(false);
+            invalid(value);
+        }
+        for key in ["version", "date", "files"] {
+            let mut value = valid.clone();
+            value["releases"][0].as_object_mut().unwrap().remove(key);
+            invalid(value);
+            let mut value = valid.clone();
+            value["releases"][0][key] = serde_json::json!(false);
+            invalid(value);
+        }
+        for key in ["at", "reason"] {
+            let mut value = valid.clone();
+            value["releases"][0]["quarantined"]
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            invalid(value);
+            let mut value = valid.clone();
+            value["releases"][0]["quarantined"][key] = serde_json::json!(false);
+            invalid(value);
+        }
+        for (key, replacement) in [
+            ("schemaVersion", serde_json::json!(2)),
+            ("product", serde_json::json!("launcher")),
+        ] {
+            let mut value = valid.clone();
+            value[key] = replacement;
+            invalid(value);
+        }
+        let mut value = valid.clone();
+        value["releases"][0]["quarantined"]["reason"] = serde_json::json!(" ");
+        invalid(value);
+        let mut value = valid.clone();
+        value["releases"][0]["files"] = serde_json::json!(["win-x64"]);
+        invalid(value);
+        let mut value = valid;
+        value["aliases"]["latest"] = serde_json::json!("1.7.2");
+        invalid(value);
+
+        let valid =
+            serde_json::json!({"schemaVersion":1,"product":"cli","replacements":{},"future":true});
+        for key in ["schemaVersion", "product", "replacements"] {
+            let mut value = valid.clone();
+            value.as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<Replacements>(value).is_err());
+            let mut value = valid.clone();
+            value[key] = serde_json::json!(false);
+            assert!(serde_json::from_value::<Replacements>(value).is_err());
+        }
+    }
+
+    #[test]
+    fn resolution_writeback_preserves_unknown_fields_and_other_selectors() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        let path = context.home.join("catalog/cli/resolutions.json");
+        let future = serde_json::json!({"nested":[null, {"preserve":true}]});
+        atomic_json(
+            &path,
+            &serde_json::json!({
+                "active":{"latest":"1.0.0","2.1.0-beta":"2.1.0-beta.2"}, "future":future
+            }),
+        )
+        .unwrap();
+        activate(
+            &context,
+            "cli",
+            &Resolution {
+                requested: "latest".into(),
+                version: "2.0.0".into(),
+                messages: vec![],
+            },
+        )
+        .unwrap();
+        let state: serde_json::Value = read_json(&path).unwrap();
+        assert_eq!(state["future"], future);
+        assert_eq!(
+            state["active"],
+            serde_json::json!({"latest":"2.0.0","2.1.0-beta":"2.1.0-beta.2"})
+        );
+
+        atomic_json(
+            &path,
+            &serde_json::json!({"active":{"latest":false},"future":future}),
+        )
+        .unwrap();
+        let before = fs::read(&path).unwrap();
+        assert!(
+            activate(
+                &context,
+                "cli",
+                &Resolution {
+                    requested: "latest".into(),
+                    version: "2.0.0".into(),
+                    messages: vec![]
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn tracking_writeback_preserves_extras_and_replaces_known_fields_even_after_corruption() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        let path = context.home.join("catalog/launcher/tracking.json");
+        let future = serde_json::json!({"nested":[false,null,"keep"]});
+        atomic_json(
+            &path,
+            &serde_json::json!({"selector":"1.0.0","version":"1.0.0","future":future}),
+        )
+        .unwrap();
+        for requested in ["latest", "2.0.0"] {
+            activate(
+                &context,
+                "launcher",
+                &Resolution {
+                    requested: requested.into(),
+                    version: "2.0.0".into(),
+                    messages: vec![],
+                },
+            )
+            .unwrap();
+            let tracking: Tracking = read_json(&path).unwrap();
+            assert_eq!(tracking.selector, requested);
+            assert_eq!(tracking.version, "2.0.0");
+            assert_eq!(tracking.extra_fields["future"], future);
+        }
+        atomic_json(
+            &path,
+            &serde_json::json!({"selector":false,"version":[],"future":future}),
+        )
+        .unwrap();
+        assert!(read_json::<Tracking>(&path).is_err());
+        activate(
+            &context,
+            "launcher",
+            &Resolution {
+                requested: "2.0.0".into(),
+                version: "2.0.0".into(),
+                messages: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read_json::<Tracking>(&path).unwrap().extra_fields["future"],
+            future
+        );
+        fs::write(&path, b"malformed JSON").unwrap();
+        activate(
+            &context,
+            "launcher",
+            &Resolution {
+                requested: "2.0.0".into(),
+                version: "2.0.0".into(),
+                messages: vec![],
+            },
+        )
+        .unwrap();
+        assert_eq!(read_json::<Tracking>(&path).unwrap().version, "2.0.0");
+
+        for value in [
+            serde_json::json!({"selector":"latest","future":true}),
+            serde_json::json!({"version":"2.0.0","future":true}),
+        ] {
+            assert!(serde_json::from_value::<Tracking>(value).is_err());
+        }
     }
 }

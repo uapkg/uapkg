@@ -1,7 +1,7 @@
 use crate::{
     archive,
     model::{exact_version, relative_path},
-    storage::{ContextPaths, atomic_json},
+    storage::{ContextPaths, atomic_json, lock, preserve_json_fields},
 };
 use anyhow::{Context, Result, ensure};
 use minisign_verify::{PublicKey, Signature};
@@ -127,10 +127,12 @@ fn metadata_with_timeout(client: &Client, url: Url, timeout: Duration) -> Result
     Ok(bytes)
 }
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct SignedDocument {
     bytes: String,
     signature: String,
+    #[serde(flatten)]
+    extra_fields: crate::storage::ExtraFields,
 }
 fn parse<T: DeserializeOwned>(document: &SignedDocument, key: &str) -> Result<T> {
     ensure!(
@@ -166,6 +168,7 @@ fn fetch_document(
             url(product_name, None, &format!("{name}.minisig"))?,
             timeout,
         )?)?,
+        extra_fields: Default::default(),
     })
 }
 
@@ -177,7 +180,8 @@ fn accept_document<T: DeserializeOwned>(
 ) -> Result<T> {
     let value = parse(document, key)?;
     validate(&value)?;
-    atomic_json(cache, document)?;
+    let _guard = lock(&cache.with_extension("lock"))?;
+    atomic_json(cache, &preserve_json_fields(cache, document)?)?;
     Ok(value)
 }
 
@@ -349,15 +353,188 @@ fn save_download(
 mod tests {
     use super::*;
 
+    fn signed_cli_document() -> SignedDocument {
+        SignedDocument {
+            bytes: include_str!("../../tools/release/fixtures/moderated-cli.json").into(),
+            signature: include_str!("../../tools/release/fixtures/moderated-cli.json.minisig")
+                .into(),
+            extra_fields: Default::default(),
+        }
+    }
+
+    #[test]
+    fn signed_document_extensions_round_trip_without_changing_authenticated_payload() {
+        let document = signed_cli_document();
+        let envelope = serde_json::json!({
+            "bytes": document.bytes,
+            "signature": document.signature,
+            "futureMetadata": {"source": ["catalog", 2, null], "enabled": true},
+            "futureNull": null,
+        });
+        let parsed: SignedDocument = serde_json::from_value(envelope.clone()).unwrap();
+        assert_eq!(
+            parsed.extra_fields["futureMetadata"],
+            envelope["futureMetadata"]
+        );
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), envelope);
+        let index: crate::catalog::Index = parse(&parsed, catalog_key()).unwrap();
+        index.validate("cli").unwrap();
+    }
+
+    #[test]
+    fn signed_document_extensions_do_not_relax_required_field_types() {
+        let mut envelope = serde_json::to_value(signed_cli_document()).unwrap();
+        envelope["futureMetadata"] = serde_json::json!({"enabled": true});
+        for key in ["bytes", "signature"] {
+            let mut missing = envelope.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<SignedDocument>(missing).is_err());
+            for invalid in [serde_json::Value::Null, serde_json::json!(17)] {
+                let mut malformed = envelope.clone();
+                malformed[key] = invalid;
+                assert!(serde_json::from_value::<SignedDocument>(malformed).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn verified_cache_refresh_preserves_envelope_extensions_and_exact_signed_strings() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("index.json.verified.json");
+        let previous = serde_json::json!({
+            "bytes": "Old payload is not authenticated or reused during refresh.",
+            "signature": "invalid old signature",
+            "futureCache": {"attempts": [1, 2], "optional": null},
+            "sharedExtension": {"old": true},
+        });
+        atomic_json(&cache, &previous).unwrap();
+        let mut document = signed_cli_document();
+        document.extra_fields.insert(
+            "futureDocument".into(),
+            serde_json::json!([false, {"new": 3}]),
+        );
+        document
+            .extra_fields
+            .insert("sharedExtension".into(), serde_json::json!({"new": true}));
+        accept_document::<crate::catalog::Index>(&cache, &document, catalog_key(), |index| {
+            index.validate("cli")
+        })
+        .unwrap();
+        let stored: serde_json::Value = crate::model::read_json(&cache).unwrap();
+        assert_eq!(stored["futureCache"], previous["futureCache"]);
+        assert_eq!(
+            stored["futureDocument"],
+            document.extra_fields["futureDocument"]
+        );
+        assert_eq!(
+            stored["sharedExtension"],
+            document.extra_fields["sharedExtension"]
+        );
+        assert_eq!(
+            stored["bytes"].as_str().unwrap().as_bytes(),
+            document.bytes.as_bytes()
+        );
+        assert_eq!(
+            stored["signature"].as_str().unwrap().as_bytes(),
+            document.signature.as_bytes()
+        );
+        let cached: SignedDocument = crate::model::read_json(&cache).unwrap();
+        let index: crate::catalog::Index = parse(&cached, catalog_key()).unwrap();
+        index.validate("cli").unwrap();
+    }
+
+    #[test]
+    fn valid_authenticated_metadata_repairs_corrupt_cache_envelopes() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("index.json.verified.json");
+        let document = signed_cli_document();
+        for damaged in [
+            "{truncated",
+            "null",
+            "[]",
+            r#"{"bytes":12,"signature":false,"futureCache":{"retained":true}}"#,
+        ] {
+            fs::write(&cache, damaged).unwrap();
+            accept_document::<crate::catalog::Index>(&cache, &document, catalog_key(), |index| {
+                index.validate("cli")
+            })
+            .unwrap();
+            let cached: SignedDocument = crate::model::read_json(&cache).unwrap();
+            assert_eq!(cached.bytes, document.bytes);
+            assert_eq!(cached.signature, document.signature);
+            let index: crate::catalog::Index = parse(&cached, catalog_key()).unwrap();
+            index.validate("cli").unwrap();
+        }
+    }
+
+    #[test]
+    fn unauthenticated_metadata_does_not_create_cache_or_write_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("catalog/index.json.verified.json");
+        let mut document = signed_cli_document();
+        document.bytes.push(' ');
+        assert!(
+            accept_document::<crate::catalog::Index>(&cache, &document, catalog_key(), |index| {
+                index.validate("cli")
+            })
+            .is_err()
+        );
+        assert!(!cache.exists());
+        assert!(!cache.with_extension("lock").exists());
+    }
+
+    #[test]
+    fn cache_refresh_preserves_extensions_written_by_a_contending_writer() {
+        use std::sync::mpsc;
+
+        let directory = tempfile::tempdir().unwrap();
+        let cache = directory.path().join("index.json.verified.json");
+        let document = signed_cli_document();
+        atomic_json(&cache, &document).unwrap();
+        let guard = lock(&cache.with_extension("lock")).unwrap();
+        let (validated, validation) = mpsc::channel();
+        let (completed, completion) = mpsc::channel();
+        std::thread::scope(|scope| {
+            let cache = &cache;
+            let document = &document;
+            let writer = scope.spawn(move || {
+                accept_document::<crate::catalog::Index>(cache, document, catalog_key(), |index| {
+                    index.validate("cli")?;
+                    validated.send(()).unwrap();
+                    Ok(())
+                })
+                .unwrap();
+                completed.send(()).unwrap();
+            });
+            validation.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(
+                completion.recv_timeout(Duration::from_millis(50)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            );
+            let mut latest: serde_json::Value = crate::model::read_json(cache).unwrap();
+            latest["futureConcurrentWriter"] = serde_json::json!({"revision": 3});
+            atomic_json(cache, &latest).unwrap();
+            drop(guard);
+            completion.recv_timeout(Duration::from_secs(5)).unwrap();
+            writer.join().unwrap();
+        });
+        let stored: serde_json::Value = crate::model::read_json(&cache).unwrap();
+        assert_eq!(
+            stored["futureConcurrentWriter"],
+            serde_json::json!({"revision": 3})
+        );
+        assert_eq!(stored["bytes"], document.bytes);
+    }
+
     #[test]
     fn invalid_signed_schema_cannot_replace_previously_verified_cached_policy() {
         let directory = tempfile::tempdir().unwrap();
         let cache = directory.path().join("index.json.verified.json");
-        let document = SignedDocument {
-            bytes: include_str!("../../tools/release/fixtures/moderated-cli.json").into(),
-            signature: include_str!("../../tools/release/fixtures/moderated-cli.json.minisig")
-                .into(),
-        };
+        let mut document = signed_cli_document();
+        document.extra_fields.insert(
+            "futureCache".into(),
+            serde_json::json!({"retained": [1, null]}),
+        );
         accept_document::<crate::catalog::Index>(&cache, &document, catalog_key(), |index| {
             index.validate("cli")
         })
@@ -373,6 +550,7 @@ mod tests {
         let invalid = SignedDocument {
             bytes: "{}".into(),
             signature: document.signature,
+            extra_fields: Default::default(),
         };
         assert!(
             accept_document::<crate::catalog::Index>(&cache, &invalid, catalog_key(), |index| {

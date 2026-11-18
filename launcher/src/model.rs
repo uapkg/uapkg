@@ -1,3 +1,4 @@
+use crate::storage::ExtraFields;
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -98,7 +99,7 @@ pub struct Settings {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Receipt {
     pub schema_version: u32,
     pub install_method: String,
@@ -106,18 +107,22 @@ pub struct Receipt {
     pub default_cli_version: Option<String>,
     #[serde(default)]
     pub development: Option<Development>,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Development {
     pub engine_path: PathBuf,
     pub node_path: PathBuf,
     pub checkout_path: PathBuf,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Engine {
     pub schema_version: u32,
     pub version: String,
@@ -126,6 +131,8 @@ pub struct Engine {
     pub executable: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(flatten, default)]
+    pub extra_fields: ExtraFields,
 }
 
 impl Engine {
@@ -170,6 +177,159 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::de::DeserializeOwned;
+    use serde_json::{Value, json};
+
+    fn roundtrip_record<T: DeserializeOwned + Serialize>(mut value: Value, required: &[&str]) {
+        let extras = json!({
+            "futureObject": {"nested": [1, {"enabled": true}, null]},
+            "futureArray": ["value", false, {"other": 2}],
+            "futureNull": null
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extras.as_object().unwrap().clone());
+        let parsed: T = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+        for field in required {
+            let mut missing = value.clone();
+            missing.as_object_mut().unwrap().remove(*field);
+            assert!(
+                serde_json::from_value::<T>(missing).is_err(),
+                "Missing {field} must fail"
+            );
+            let mut malformed = value.clone();
+            malformed[*field] = json!(false);
+            assert!(
+                serde_json::from_value::<T>(malformed).is_err(),
+                "Wrong type for {field} must fail"
+            );
+        }
+    }
+
+    #[test]
+    fn installation_records_roundtrip_unknown_fields_and_reject_invalid_known_shapes() {
+        roundtrip_record::<Receipt>(
+            json!({
+                "schemaVersion": 1, "installMethod": "standalone", "defaultCliVersion": null, "development": null
+            }),
+            &["schemaVersion", "installMethod"],
+        );
+        roundtrip_record::<Development>(
+            json!({
+                "enginePath": "engine", "nodePath": "node", "checkoutPath": "checkout"
+            }),
+            &["enginePath", "nodePath", "checkoutPath"],
+        );
+        roundtrip_record::<Engine>(
+            json!({
+                "schemaVersion": 1, "version": "1.2.3", "platform": "win-x64", "kind": "sea", "executable": "engine", "args": []
+            }),
+            &["schemaVersion", "version", "platform", "kind", "executable"],
+        );
+        let receipt: Receipt =
+            serde_json::from_value(json!({"schemaVersion": 1, "installMethod": "standalone"}))
+                .unwrap();
+        assert!(
+            receipt.default_cli_version.is_none()
+                && receipt.development.is_none()
+                && receipt.extra_fields.is_empty()
+        );
+        let engine: Engine = serde_json::from_value(json!({"schemaVersion": 1, "version": "1.2.3", "platform": "win-x64", "kind": "sea", "executable": "engine"})).unwrap();
+        assert!(engine.args.is_empty() && engine.extra_fields.is_empty());
+        for invalid in [
+            json!({"schemaVersion": 1, "installMethod": "standalone", "defaultCliVersion": []}),
+            json!({"schemaVersion": 1, "installMethod": "standalone", "development": false}),
+            json!({"schemaVersion": 1, "version": "1.2.3", "platform": "win-x64", "kind": "sea", "executable": "engine", "args": [false]}),
+        ] {
+            if invalid.get("installMethod").is_some() {
+                assert!(serde_json::from_value::<Receipt>(invalid).is_err());
+            } else {
+                assert!(serde_json::from_value::<Engine>(invalid).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn nested_development_metadata_remains_attached_to_its_own_record() {
+        let value = json!({"schemaVersion": 1, "installMethod": "development", "defaultCliVersion": null,
+        "outerMetadata": [null, 1], "development": {
+            "enginePath": "engine", "nodePath": "node", "checkoutPath": "checkout", "innerMetadata": {"enabled": true}
+        }});
+        let receipt: Receipt = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(receipt.extra_fields.len(), 1);
+        assert_eq!(receipt.development.as_ref().unwrap().extra_fields.len(), 1);
+        assert_eq!(serde_json::to_value(receipt).unwrap(), value);
+    }
+
+    #[test]
+    fn unknown_metadata_does_not_relax_engine_identity_kind_or_path_validation() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(directory.path().join("engine"), b"engine").unwrap();
+        fs::write(directory.path().join("entry.js"), b"entry").unwrap();
+        let value = json!({"schemaVersion": 1, "version": "1.2.3", "platform": "win-x64", "kind": "node", "executable": "engine", "args": ["entry.js"], "futureMetadata": {"nested": [null]}});
+        let write = |value: &Value| {
+            fs::write(
+                directory.path().join("engine.json"),
+                serde_json::to_vec(value).unwrap(),
+            )
+            .unwrap()
+        };
+        write(&value);
+        assert!(
+            Engine::read(directory.path(), "1.2.3", "win-x64")
+                .unwrap()
+                .extra_fields
+                .contains_key("futureMetadata")
+        );
+        for (field, invalid) in [
+            ("schemaVersion", json!(2)),
+            ("version", json!("2.0.0")),
+            ("platform", json!("linux-x64")),
+            ("kind", json!("unrecognized")),
+            ("executable", json!("../engine")),
+            ("args", json!([])),
+        ] {
+            let mut changed = value.clone();
+            changed[field] = invalid;
+            write(&changed);
+            assert!(
+                Engine::read(directory.path(), "1.2.3", "win-x64").is_err(),
+                "Invalid {field} must fail"
+            );
+        }
+    }
+
+    #[test]
+    fn receipt_extensions_do_not_relax_installation_validation() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("uapkg");
+        let base = json!({"schemaVersion": 1, "installMethod": "standalone", "defaultCliVersion": "latest", "futureMetadata": [null, {"nested": true}]});
+        let receipt = directory.path().join("uapkg-install.json");
+        fs::write(&receipt, serde_json::to_vec(&base).unwrap()).unwrap();
+        assert!(
+            crate::storage::ContextPaths::for_executable(executable.clone())
+                .unwrap()
+                .receipt
+                .unwrap()
+                .extra_fields
+                .contains_key("futureMetadata")
+        );
+        for (field, invalid) in [
+            ("schemaVersion", json!(2)),
+            ("installMethod", json!("unrecognized")),
+            ("defaultCliVersion", json!("^1.2.3")),
+        ] {
+            let mut changed = base.clone();
+            changed[field] = invalid;
+            fs::write(&receipt, serde_json::to_vec(&changed).unwrap()).unwrap();
+            assert!(
+                crate::storage::ContextPaths::for_executable(executable.clone()).is_err(),
+                "Invalid {field} must fail"
+            );
+        }
+    }
 
     #[test]
     fn distribution_ids_distinguish_linux_libc_and_name_only_64_bit_windows_targets() {

@@ -2,7 +2,7 @@ use crate::{
     catalog::{self, Index, Resolution},
     engines::{self, InstalledEngine},
     model::{exact_version, platform, read_json},
-    storage::{ContextPaths, atomic_json, lock, open_lock},
+    storage::{ContextPaths, ExtraFields, atomic_json, lock, open_lock, preserve_json_fields},
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -86,6 +86,8 @@ fn refresh_product_with(
 #[serde(rename_all = "camelCase")]
 struct Check {
     last_attempt: u64,
+    #[serde(flatten, default)]
+    extra_fields: ExtraFields,
 }
 
 pub fn launcher_directory(context: &ContextPaths) -> PathBuf {
@@ -137,7 +139,11 @@ fn claim_at(directory: &Path, force: bool, now: u64) -> Result<Option<File>> {
     {
         return Ok(None);
     }
-    atomic_json(&path, &Check { last_attempt: now })?;
+    let check = Check {
+        last_attempt: now,
+        extra_fields: ExtraFields::new(),
+    };
+    atomic_json(&path, &preserve_json_fields(&path, &check)?)?;
     Ok(Some(guard))
 }
 
@@ -304,6 +310,42 @@ mod tests {
     }
 
     #[test]
+    fn check_writeback_preserves_unknown_fields_during_due_forced_and_repair_writes() -> Result<()>
+    {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("check.json");
+        let future = serde_json::json!({"nested":[null, false, {"keep":"value"}]});
+        atomic_json(
+            &path,
+            &serde_json::json!({"lastAttempt":10,"future":future}),
+        )?;
+        let before = std::fs::read(&path)?;
+        assert!(claim_at(directory.path(), false, 11)?.is_none());
+        assert_eq!(std::fs::read(&path)?, before);
+        drop(claim_at(directory.path(), false, 10 + DAY)?.unwrap());
+        let check: Check = read_json(&path)?;
+        assert_eq!(check.last_attempt, 10 + DAY);
+        assert_eq!(check.extra_fields["future"], future);
+        drop(claim_at(directory.path(), true, 12)?.unwrap());
+        assert_eq!(read_json::<Check>(&path)?.extra_fields["future"], future);
+
+        atomic_json(
+            &path,
+            &serde_json::json!({"lastAttempt":"invalid","future":future}),
+        )?;
+        assert!(read_json::<Check>(&path).is_err());
+        drop(claim_at(directory.path(), false, 13)?.unwrap());
+        let check: Check = read_json(&path)?;
+        assert_eq!(check.last_attempt, 13);
+        assert_eq!(check.extra_fields["future"], future);
+        std::fs::write(&path, b"malformed JSON")?;
+        drop(claim_at(directory.path(), true, 14)?.unwrap());
+        assert_eq!(read_json::<Check>(&path)?.last_attempt, 14);
+        assert!(serde_json::from_value::<Check>(serde_json::json!({"future":true})).is_err());
+        Ok(())
+    }
+
+    #[test]
     fn disabled_and_failed_cli_updates_keep_the_active_version() -> Result<()> {
         for auto_update in [false, true] {
             let directory = tempfile::tempdir()?;
@@ -374,6 +416,7 @@ mod tests {
                         kind: "sea".into(),
                         executable: "uapkg".into(),
                         args: vec![],
+                        extra_fields: ExtraFields::new(),
                     },
                 })
             },

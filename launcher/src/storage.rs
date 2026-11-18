@@ -9,6 +9,8 @@ use std::{
 };
 use uapkg_slim_config::{Resolver, Scope, Source, TraceStatus};
 
+pub type ExtraFields = serde_json::Map<String, serde_json::Value>;
+
 static CONFIG_RESOLVER: LazyLock<std::result::Result<Resolver, String>> =
     LazyLock::new(Resolver::new);
 
@@ -191,6 +193,29 @@ pub(crate) fn try_lock(path: &Path) -> Result<Option<File>> {
     }
 }
 
+/// Preserve extensions when updating an existing logical record. The replacement
+/// must include every known root field, so its authoritative values take priority.
+/// Callers retain their record lock through the subsequent atomic write. Fresh
+/// records and lifecycles should use `atomic_json` directly instead.
+pub(crate) fn preserve_json_fields<T: Serialize>(
+    path: &Path,
+    value: &T,
+) -> Result<serde_json::Value> {
+    let replacement = serde_json::to_value(value)?;
+    let replacement = replacement
+        .as_object()
+        .context("An updated JSON record must be an object.")?;
+    // These writers already replace missing or malformed previous records. Only
+    // well-formed object fields can be retained, without changing that recovery.
+    let mut fields = fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    fields.extend(replacement.clone());
+    Ok(serde_json::Value::Object(fields))
+}
+
 pub fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let directory = path.parent().context("Metadata path has no parent.")?;
     fs::create_dir_all(directory)?;
@@ -203,4 +228,58 @@ pub fn atomic_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
         .map_err(|error| error.error)
         .with_context(|| format!("Could not save {}.", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn record_updates_preserve_extensions_without_merging_replaced_known_objects() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("record.json");
+        let extensions = json!({"nested":[true, null, {"future":"retained"}]});
+        atomic_json(
+            &path,
+            &json!({
+                "active":{"latest":"1.0.0", "removed":"0.9.0"},
+                "future":extensions, "optionalFuture":null
+            }),
+        )
+        .unwrap();
+
+        let replacement = json!({"active":{"latest":"1.1.0"}});
+        let merged = preserve_json_fields(&path, &replacement).unwrap();
+        atomic_json(&path, &merged).unwrap();
+
+        assert_eq!(
+            read_json::<serde_json::Value>(&path).unwrap(),
+            json!({
+                "active":{"latest":"1.1.0"}, "future":extensions, "optionalFuture":null
+            })
+        );
+    }
+
+    #[test]
+    fn fresh_writes_do_not_inherit_extensions_and_malformed_updates_still_recover() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("record.json");
+        let replacement = json!({"version":"1.0.0"});
+        assert_eq!(
+            preserve_json_fields(&path, &replacement).unwrap(),
+            replacement
+        );
+        for content in ["invalid", "[]", "null"] {
+            fs::write(&path, content).unwrap();
+            assert_eq!(
+                preserve_json_fields(&path, &replacement).unwrap(),
+                replacement
+            );
+        }
+        atomic_json(&path, &json!({"version":"0.9.0", "oldLifecycle":true})).unwrap();
+        atomic_json(&path, &replacement).unwrap();
+        assert_eq!(read_json::<serde_json::Value>(&path).unwrap(), replacement);
+        assert!(preserve_json_fields(&path, &json!([])).is_err());
+    }
 }

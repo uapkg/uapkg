@@ -15,11 +15,13 @@ use std::{
 };
 
 #[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct Installation {
     schema_version: u32,
     version: String,
     platform: String,
+    #[serde(flatten)]
+    extra_fields: crate::storage::ExtraFields,
 }
 
 pub struct InstalledEngine {
@@ -336,6 +338,7 @@ pub(crate) fn install_cached(
             schema_version: 1,
             version: version.into(),
             platform: target.into(),
+            extra_fields: Default::default(),
         },
     )?;
     let root = install(temporary.path())?;
@@ -352,6 +355,7 @@ pub(crate) fn install_cached(
             schema_version: 1,
             version: version.to_owned(),
             platform: target.to_owned(),
+            extra_fields: Default::default(),
         },
     )?;
     fs::create_dir_all(
@@ -494,9 +498,81 @@ mod tests {
                 kind: "sea".to_owned(),
                 executable: executable.to_owned(),
                 args: Vec::new(),
+                extra_fields: Default::default(),
             },
         )?;
         Ok(root)
+    }
+
+    #[test]
+    fn extended_cache_receipts_and_engine_descriptors_remain_usable_and_unchanged() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        let installed = install_cached(&context, "1.2.3", false, |stage| {
+            stage_engine(stage, "1.2.3")
+        })
+        .unwrap();
+        let receipt_path = installed.root.join(".installed.json");
+        let descriptor_path = installed.root.join("engine.json");
+        let mut receipt: serde_json::Value = read_json(&receipt_path).unwrap();
+        receipt["futureInstallation"] = serde_json::json!({"attempt": 2, "flags": [true, null]});
+        let mut descriptor: serde_json::Value = read_json(&descriptor_path).unwrap();
+        descriptor["futureEngine"] = serde_json::json!({"capabilities": ["new"], "enabled": false});
+        atomic_json(&receipt_path, &receipt).unwrap();
+        atomic_json(&descriptor_path, &descriptor).unwrap();
+        let receipt_bytes = fs::read(&receipt_path).unwrap();
+        let descriptor_bytes = fs::read(&descriptor_path).unwrap();
+
+        let parsed: Installation = read_json(&receipt_path).unwrap();
+        assert_eq!(
+            parsed.extra_fields["futureInstallation"],
+            receipt["futureInstallation"]
+        );
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), receipt);
+        let selected = install_cached(&context, "1.2.3", true, |_| {
+            panic!("Extended cache metadata must not trigger a replacement download")
+        })
+        .unwrap();
+        assert_eq!(selected.root, installed.root);
+        assert_eq!(
+            selected.engine.extra_fields["futureEngine"],
+            descriptor["futureEngine"]
+        );
+        assert_eq!(list(&context).unwrap(), ["1.2.3"]);
+        assert_eq!(fs::read(&receipt_path).unwrap(), receipt_bytes);
+        assert_eq!(fs::read(&descriptor_path).unwrap(), descriptor_bytes);
+
+        receipt["schemaVersion"] = serde_json::json!(2);
+        atomic_json(&receipt_path, &receipt).unwrap();
+        assert!(cached(&installed.root, "1.2.3", platform().unwrap()).is_err());
+        receipt["schemaVersion"] = serde_json::json!(1);
+        receipt["version"] = serde_json::json!("9.9.9");
+        atomic_json(&receipt_path, &receipt).unwrap();
+        assert!(cached(&installed.root, "1.2.3", platform().unwrap()).is_err());
+    }
+
+    #[test]
+    fn installation_extensions_do_not_relax_required_field_types() {
+        let receipt = serde_json::json!({
+            "schemaVersion": 1,
+            "version": "1.2.3",
+            "platform": platform().unwrap(),
+            "futureInstallation": {"enabled": true},
+        });
+        for (key, wrong_type) in [
+            ("schemaVersion", serde_json::json!("1")),
+            ("version", serde_json::json!(17)),
+            ("platform", serde_json::json!(17)),
+        ] {
+            let mut missing = receipt.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(serde_json::from_value::<Installation>(missing).is_err());
+            for invalid in [serde_json::Value::Null, wrong_type] {
+                let mut malformed = receipt.clone();
+                malformed[key] = invalid;
+                assert!(serde_json::from_value::<Installation>(malformed).is_err());
+            }
+        }
     }
 
     #[test]
@@ -521,6 +597,7 @@ mod tests {
                     schema_version: 1,
                     version: version.into(),
                     platform: platform().unwrap().into(),
+                    extra_fields: Default::default(),
                 },
             )
             .unwrap();
@@ -610,6 +687,7 @@ mod tests {
                     schema_version: 1,
                     version: "1.2.3".into(),
                     platform: previous_target.into(),
+                    extra_fields: Default::default(),
                 },
             )
             .unwrap();

@@ -605,6 +605,7 @@ fn updater_ownership_and_recovery_preserve_the_previous_binary() {
         previous_sha256: archive::sha256(&backup).unwrap(),
         next_sha256: "0".repeat(64),
         next_version: "0.2.0".into(),
+        extra_fields: Default::default(),
     };
     atomic_json(&dir.path().join("uapkg-update.json"), &transaction).unwrap();
     assert!(updater::recover(&target).is_err());
@@ -788,6 +789,7 @@ fn startup_recovery_does_not_modify_package_manager_owned_installations() {
         previous_sha256: before.clone(),
         next_sha256: "0".repeat(64),
         next_version: "0.2.0".to_owned(),
+        extra_fields: Default::default(),
     };
     atomic_json(&dir.path().join("uapkg-update.json"), &transaction).unwrap();
     write(
