@@ -1,3 +1,5 @@
+mod support;
+
 use std::{
     fs,
     io::Write,
@@ -49,11 +51,12 @@ fn replaces_a_running_executable_and_removes_transaction_state() {
         .join(if cfg!(windows) { "uapkg.exe" } else { "uapkg" });
     fs::copy(std::env::current_exe().unwrap(), &target).unwrap();
     let staged = PathBuf::from(env!("CARGO_BIN_EXE_uapkg"));
-    let output = Command::new(&target)
-        .args(["--exact", "replacement_child", "--nocapture"])
-        .env("UAPKG_TEST_STAGED_LAUNCHER", &staged)
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&target)
+            .args(["--exact", "replacement_child", "--nocapture"])
+            .env("UAPKG_TEST_STAGED_LAUNCHER", &staged),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "stdout={} stderr={}",
@@ -64,10 +67,7 @@ fn replaces_a_running_executable_and_removes_transaction_state() {
         archive::sha256(&target).unwrap(),
         archive::sha256(&staged).unwrap()
     );
-    let version = Command::new(&target)
-        .args(["launcher", "--version"])
-        .output()
-        .unwrap();
+    let version = support::output(Command::new(&target).args(["launcher", "--version"])).unwrap();
     assert!(version.status.success());
     assert_eq!(String::from_utf8_lossy(&version.stdout).trim(), VERSION);
     assert!(!directory.path().join("uapkg-update.json").exists());
@@ -154,20 +154,21 @@ fn resumes_the_original_command_after_replacement() {
     let cwd = directory.path().join("project with spaces");
     fs::create_dir(&cwd).unwrap();
 
-    let mut child = Command::new(&target)
-        .args(["--exact", "replacement_child", "--nocapture"])
-        .current_dir(&cwd)
-        .env(
-            if cfg!(windows) { "USERPROFILE" } else { "HOME" },
-            directory.path(),
-        )
-        .env("UAPKG_TEST_STAGED_LAUNCHER", env!("CARGO_BIN_EXE_uapkg"))
-        .env("UAPKG_TEST_RESUME_UPDATE", "1")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut child = support::spawn(
+        Command::new(&target)
+            .args(["--exact", "replacement_child", "--nocapture"])
+            .current_dir(&cwd)
+            .env(
+                if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                directory.path(),
+            )
+            .env("UAPKG_TEST_STAGED_LAUNCHER", env!("CARGO_BIN_EXE_uapkg"))
+            .env("UAPKG_TEST_RESUME_UPDATE", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )
+    .unwrap();
     child
         .stdin
         .take()
@@ -241,16 +242,17 @@ fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_e
         fs::set_permissions(&staged, fs::metadata(&target).unwrap().permissions()).unwrap();
     }
     let staged_sha256 = archive::sha256(&staged).unwrap();
-    let output = Command::new(&target)
-        .args(["--exact", "rejected_replacement_child", "--nocapture"])
-        .env("UAPKG_TEST_REJECTED_STAGE", &staged)
-        .env("UAPKG_TEST_REJECTED_STAGE_VERSION", version)
-        .env(
-            "UAPKG_TEST_REJECTED_STAGE_ERROR",
-            expected_errors.join("\n"),
-        )
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&target)
+            .args(["--exact", "rejected_replacement_child", "--nocapture"])
+            .env("UAPKG_TEST_REJECTED_STAGE", &staged)
+            .env("UAPKG_TEST_REJECTED_STAGE_VERSION", version)
+            .env(
+                "UAPKG_TEST_REJECTED_STAGE_ERROR",
+                expected_errors.join("\n"),
+            ),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "stdout={} stderr={}",
@@ -272,13 +274,14 @@ fn assert_rejected_staged_check(source: Option<&Path>, version: &str, expected_e
     );
     // The original executable must remain runnable after the rejecting process exits.
     assert!(
-        Command::new(&target)
-            .args(["--exact", "rejected_replacement_child"])
-            .env_remove("UAPKG_TEST_REJECTED_STAGE")
-            .output()
-            .unwrap()
-            .status
-            .success()
+        support::output(
+            Command::new(&target)
+                .args(["--exact", "rejected_replacement_child"])
+                .env_remove("UAPKG_TEST_REJECTED_STAGE"),
+        )
+        .unwrap()
+        .status
+        .success()
     );
 }
 
@@ -353,11 +356,12 @@ fn a_running_backup_can_restore_the_launcher_and_clean_itself_up() {
         extra_fields: Default::default(),
     };
     atomic_json(&directory.path().join("uapkg-update.json"), &transaction).unwrap();
-    let output = Command::new(&backup)
-        .args(["--exact", "recovery_child", "--nocapture"])
-        .env("UAPKG_TEST_RECOVERY_CHILD", "1")
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&backup)
+            .args(["--exact", "recovery_child", "--nocapture"])
+            .env("UAPKG_TEST_RECOVERY_CHILD", "1"),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "stdout={} stderr={}",

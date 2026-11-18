@@ -10,13 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod support;
+
 fn node_path() -> PathBuf {
     if let Some(node) = std::env::var_os("UAPKG_TEST_NODE") {
         return node.into();
     }
-    let output = Command::new("node")
-        .args(["-p", "process.execPath"])
-        .output()
+    let output = support::output(Command::new("node").args(["-p", "process.execPath"]))
         .expect("Run launcher tests through vp run launcher:test, or put Node on PATH");
     assert!(output.status.success());
     String::from_utf8(output.stdout).unwrap().trim().into()
@@ -88,7 +88,22 @@ fn exercise_terminal(script: &str, input: &[u8], expected: &str, exit_code: u32,
         command.env("NO_COLOR", "1");
         command.env("FORCE_COLOR", "0");
     }
-    let mut child = pair.slave.spawn_command(command).unwrap();
+    let mut child = support::retry_spawn(
+        || pair.slave.spawn_command(command.clone()),
+        |error: &anyhow::Error| {
+            error.chain().any(|cause| {
+                cause
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::ExecutableFileBusy)
+            })
+        },
+    )
+    .unwrap_or_else(|error| {
+        panic!(
+            "Could not start PTY command {:?}: {error:#}",
+            command.get_argv()
+        )
+    });
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().unwrap();
     let mut writer = pair.master.take_writer().unwrap();

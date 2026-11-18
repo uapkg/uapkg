@@ -1,3 +1,5 @@
+mod support;
+
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -97,20 +99,21 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
     if !args.contains(&"--offline") {
         seed_daily_checks(home, Path::new(env!("CARGO_BIN_EXE_uapkg")));
     }
-    Command::new(env!("CARGO_BIN_EXE_uapkg"))
-        .args(args)
-        .current_dir(cwd)
-        .env("HOME", home.parent().unwrap())
-        .env("USERPROFILE", home.parent().unwrap())
-        .env("UAPKG_TEST_SENTINEL", "unchanged")
-        .env(
-            "UAPKG_LAUNCHER_CONTEXT",
-            "stale-parent-context-must-not-survive",
-        )
-        .env_remove("UAPKG_OFFLINE")
-        .env("PATH", "")
-        .output()
-        .unwrap()
+    support::output(
+        Command::new(env!("CARGO_BIN_EXE_uapkg"))
+            .args(args)
+            .current_dir(cwd)
+            .env("HOME", home.parent().unwrap())
+            .env("USERPROFILE", home.parent().unwrap())
+            .env("UAPKG_TEST_SENTINEL", "unchanged")
+            .env(
+                "UAPKG_LAUNCHER_CONTEXT",
+                "stale-parent-context-must-not-survive",
+            )
+            .env_remove("UAPKG_OFFLINE")
+            .env("PATH", ""),
+    )
+    .unwrap()
 }
 
 fn selected(output: Output, expected: &str) -> Value {
@@ -520,14 +523,15 @@ fn two_project_pins_global_commands_unknown_commands_and_override_delegate_corre
     );
     assert!(current.status.success());
     assert_eq!(String::from_utf8_lossy(&current.stdout).trim(), "2.0.0");
-    let failure = Command::new(env!("CARGO_BIN_EXE_uapkg"))
-        .args(["--offline", "install"])
-        .current_dir(&b)
-        .env("HOME", dir.path())
-        .env("USERPROFILE", dir.path())
-        .env("UAPKG_TEST_EXIT", "37")
-        .output()
-        .unwrap();
+    let failure = support::output(
+        Command::new(env!("CARGO_BIN_EXE_uapkg"))
+            .args(["--offline", "install"])
+            .current_dir(&b)
+            .env("HOME", dir.path())
+            .env("USERPROFILE", dir.path())
+            .env("UAPKG_TEST_EXIT", "37"),
+    )
+    .unwrap();
     assert_eq!(failure.status.code(), Some(37));
 }
 
@@ -688,15 +692,16 @@ fn diagnostics_honor_environment_offline_for_cached_and_missing_overrides() {
     let home = dir.path().join(".uapkg");
     fixture_engine(&home, "github-releases", "1.2.3");
     let run_offline = |version: &str| {
-        Command::new(env!("CARGO_BIN_EXE_uapkg"))
-            .args(["--debug-info", "--cli-version", version])
-            .current_dir(dir.path())
-            .env("HOME", dir.path())
-            .env("USERPROFILE", dir.path())
-            .env("UAPKG_OFFLINE", "1")
-            .env("PATH", "")
-            .output()
-            .unwrap()
+        support::output(
+            Command::new(env!("CARGO_BIN_EXE_uapkg"))
+                .args(["--debug-info", "--cli-version", version])
+                .current_dir(dir.path())
+                .env("HOME", dir.path())
+                .env("USERPROFILE", dir.path())
+                .env("UAPKG_OFFLINE", "1")
+                .env("PATH", ""),
+        )
+        .unwrap()
     };
 
     let cached = selected(run_offline("1.2.3"), "1.2.3");
@@ -738,13 +743,14 @@ fn diagnostics_leave_pending_update_recovery_files_unchanged() {
     );
     let before = fs::read(&journal).unwrap();
     seed_daily_checks(&home, &executable);
-    let output = Command::new(&executable)
-        .arg("--debug-info")
-        .current_dir(dir.path())
-        .env("HOME", dir.path())
-        .env("USERPROFILE", dir.path())
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&executable)
+            .arg("--debug-info")
+            .current_dir(dir.path())
+            .env("HOME", dir.path())
+            .env("USERPROFILE", dir.path()),
+    )
+    .unwrap();
     selected(output, "1.2.3");
     assert_eq!(fs::read(journal).unwrap(), before);
     assert!(backup.exists());
@@ -780,25 +786,27 @@ if(args.includes('--debug-info')) {
         &root.join("uapkg.json"),
         json!({"kind":"project","uapkgVersion":"99.0.0"}),
     );
-    let output = Command::new(&binary)
-        .args(["--offline", "install"])
-        .current_dir(root)
-        .env("HOME", root)
-        .env("USERPROFILE", root)
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&binary)
+            .args(["--offline", "install"])
+            .current_dir(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root),
+    )
+    .unwrap();
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8_lossy(&output.stdout).trim(),
         "local checkout"
     );
-    let output = Command::new(&binary)
-        .args(["version", "current"])
-        .current_dir(root)
-        .env("HOME", root)
-        .env("USERPROFILE", root)
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&binary)
+            .args(["version", "current"])
+            .current_dir(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root),
+    )
+    .unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "1.2.3");
     let development_profile = root.join(".uapkg-development");
@@ -813,13 +821,14 @@ if(args.includes('--debug-info')) {
         json!({"launcher":{"defaultCliVersion":"8.0.0"},"registry":"production"}),
     );
     let production_before = fs::read(&production_config).unwrap();
-    let output = Command::new(&binary)
-        .args(["--offline", "version", "default", "2.0.0"])
-        .current_dir(root)
-        .env("HOME", root)
-        .env("USERPROFILE", root)
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(&binary)
+            .args(["--offline", "version", "default", "2.0.0"])
+            .current_dir(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -835,14 +844,15 @@ if(args.includes('--debug-info')) {
     assert_eq!(config["launcher"]["defaultCliVersion"], "2.0.0");
     assert_eq!(config["registry"], "development");
     assert_eq!(fs::read(production_config).unwrap(), production_before);
-    let debug = Command::new(&binary)
-        .arg("--debug-info")
-        .current_dir(root)
-        .env("HOME", root)
-        .env("USERPROFILE", root)
-        .env("UAPKG_LAUNCHER_CONTEXT", "stale-parent-context")
-        .output()
-        .unwrap();
+    let debug = support::output(
+        Command::new(&binary)
+            .arg("--debug-info")
+            .current_dir(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root)
+            .env("UAPKG_LAUNCHER_CONTEXT", "stale-parent-context"),
+    )
+    .unwrap();
     assert!(
         debug.status.success(),
         "{}",
@@ -862,13 +872,14 @@ if(args.includes('--debug-info')) {
     assert_eq!(context["globalCliVersion"], "2.0.0");
     assert_eq!(context["projectCliVersion"], "99.0.0");
     for command in ["current", "list"] {
-        let output = Command::new(&binary)
-            .args(["version", command, "--cli-version=2.0.0", "--offline"])
-            .current_dir(root)
-            .env("HOME", root)
-            .env("USERPROFILE", root)
-            .output()
-            .unwrap();
+        let output = support::output(
+            Command::new(&binary)
+                .args(["version", command, "--cli-version=2.0.0", "--offline"])
+                .current_dir(root)
+                .env("HOME", root)
+                .env("USERPROFILE", root),
+        )
+        .unwrap();
         assert!(!output.status.success(), "{command}: {output:?}");
         assert!(
             String::from_utf8_lossy(&output.stderr)
@@ -882,13 +893,14 @@ if(args.includes('--debug-info')) {
     )
     .unwrap();
     fs::write(root.join("uapkg.json"), "secret-malformed-project").unwrap();
-    let debug = Command::new(&binary)
-        .arg("--debug-info")
-        .current_dir(root)
-        .env("HOME", root)
-        .env("USERPROFILE", root)
-        .output()
-        .unwrap();
+    let debug = support::output(
+        Command::new(&binary)
+            .arg("--debug-info")
+            .current_dir(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root),
+    )
+    .unwrap();
     assert!(
         debug.status.success(),
         "{}",
@@ -939,15 +951,16 @@ fn changing_the_default_delegates_configuration_writes_to_the_selected_engine() 
         global
     );
 
-    let output = Command::new(env!("CARGO_BIN_EXE_uapkg"))
-        .args(["--offline", "version", "default", "2.0.0"])
-        .current_dir(dir.path())
-        .env("HOME", dir.path())
-        .env("USERPROFILE", dir.path())
-        .env("UAPKG_TEST_CONFIG_WRITER", "1")
-        .env("PATH", "")
-        .output()
-        .unwrap();
+    let output = support::output(
+        Command::new(env!("CARGO_BIN_EXE_uapkg"))
+            .args(["--offline", "version", "default", "2.0.0"])
+            .current_dir(dir.path())
+            .env("HOME", dir.path())
+            .env("USERPROFILE", dir.path())
+            .env("UAPKG_TEST_CONFIG_WRITER", "1")
+            .env("PATH", ""),
+    )
+    .unwrap();
     selected(output, "2.0.0");
     let updated: Value =
         serde_json::from_slice(&fs::read(home.join("config.json")).unwrap()).unwrap();

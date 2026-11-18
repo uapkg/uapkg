@@ -1,3 +1,5 @@
+mod support;
+
 use serde_json::json;
 use std::{
     ffi::OsString,
@@ -617,14 +619,15 @@ fn updater_ownership_and_recovery_preserve_the_previous_binary() {
 }
 
 fn run_cli(binary: &Path, home: &Path, cwd: &Path, args: &[&str]) -> Output {
-    Command::new(binary)
-        .args(args)
-        .env("HOME", home.parent().unwrap())
-        .env("USERPROFILE", home.parent().unwrap())
-        .env("UAPKG_OFFLINE", "1")
-        .current_dir(cwd)
-        .output()
-        .unwrap()
+    support::output(
+        Command::new(binary)
+            .args(args)
+            .env("HOME", home.parent().unwrap())
+            .env("USERPROFILE", home.parent().unwrap())
+            .env("UAPKG_OFFLINE", "1")
+            .current_dir(cwd),
+    )
+    .unwrap()
 }
 
 #[test]
