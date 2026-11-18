@@ -1,5 +1,11 @@
 # uapkg-launcher
 
+## 0.3.6
+
+### Patch Changes
+
+- [`00f7ccc`](https://github.com/uapkg/uapkg/commit/00f7cccb2090c6addc43a78e4a8234333c902eef) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Delay automatic launcher and CLI upgrades by a configurable minimum release age, defaulting to three days. Preserve explicit version selection and initial installation, support full publication timestamps with historical UTC dates, and share the compact duration format through configuration schemas.
+
 ## 0.3.5
 
 ### Patch Changes
