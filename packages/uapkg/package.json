@@ -1,6 +1,6 @@
 {
   "name": "@uapkg/cli",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "engines": {
     "node": ">=26.0.0",
     "npm": ">=11.12.1"

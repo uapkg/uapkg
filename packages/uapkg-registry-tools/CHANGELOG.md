@@ -1,5 +1,16 @@
 # @uapkg/registry-tools
 
+## 1.7.3
+
+### Patch Changes
+
+- Updated dependencies [[`eecaa09`](https://github.com/uapkg/uapkg/commit/eecaa09596826befc9be26196306bda7eca49663)]:
+  - @uapkg/common-schema@1.7.3
+  - @uapkg/common@1.7.3
+  - @uapkg/diagnostics@1.7.3
+  - @uapkg/package-manifest-schema@1.7.3
+  - @uapkg/registry-schema@1.7.3
+
 ## 1.7.2
 
 ### Patch Changes

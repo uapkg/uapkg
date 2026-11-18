@@ -1,5 +1,14 @@
 # @uapkg/common-schema
 
+## 1.7.3
+
+### Patch Changes
+
+- [`eecaa09`](https://github.com/uapkg/uapkg/commit/eecaa09596826befc9be26196306bda7eca49663) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Add shared compact duration-string validation and launcher.autoUpdate.minimumReleaseAge configuration with a default of three days, including nested overrides and trace diagnostics.
+
+- Updated dependencies []:
+  - @uapkg/diagnostics@1.7.3
+
 ## 1.7.2
 
 ### Patch Changes
