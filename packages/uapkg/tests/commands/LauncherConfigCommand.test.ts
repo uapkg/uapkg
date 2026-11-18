@@ -51,6 +51,7 @@ describe('launcher settings through the normal config command', () => {
       defaultCliVersion: 'latest',
       autoLauncherUpdate: true,
       autoCLIUpdate: true,
+      autoUpdate: { minimumReleaseAge: '3d' },
     });
 
     expect(await invoke({ pathToProperty, trace: true })).toBe(0);
@@ -104,6 +105,24 @@ describe('launcher settings through the normal config command', () => {
       launcher: { defaultCliVersion: 'latest' },
     });
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ term: { verbose: true } });
+  });
+
+  it('reads and writes the minimum release age as a string, including zero shorthand', async () => {
+    const { file, project, invoke } = fixture();
+    const pathToProperty = 'launcher.autoUpdate.minimumReleaseAge';
+    const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"3d"');
+    expect(await invoke({ action: 'set', pathToProperty, rawValue: '12h', scope: 'global' })).toBe(0);
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).launcher.autoUpdate.minimumReleaseAge).toBe('12h');
+    expect(await invoke({ action: 'set', pathToProperty, rawValue: '0' })).toBe(0);
+    const localFile = path.join(project, '.uapkg', 'config.json');
+    expect(JSON.parse(fs.readFileSync(localFile, 'utf8')).launcher.autoUpdate.minimumReleaseAge).toBe('0');
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"0"');
+    expect(await invoke({ action: 'delete', pathToProperty, scope: 'local' })).toBe(0);
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"12h"');
   });
 
   it.each(['autoLauncherUpdate', 'autoCLIUpdate'])(
