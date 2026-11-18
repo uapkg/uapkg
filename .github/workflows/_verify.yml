@@ -23,6 +23,12 @@ jobs:
 
       - name: Install dependencies
         run: vp install --frozen-lockfile
+      - name: Verify configured public keys
+        if: github.repository == 'uapkg/uapkg' && github.event_name == 'push'
+        env:
+          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+          UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
+        run: vp exec node tools/release/checkPublicKeys.ts
       - name: Check formatting, lint, and types
         run: vp check
       - name: Run tests

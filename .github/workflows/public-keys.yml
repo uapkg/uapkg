@@ -1,0 +1,41 @@
+name: Public verification keys
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  public-keys:
+    if: github.repository == 'uapkg/uapkg'
+    runs-on: ubuntu-latest
+    steps:
+      # Execute only the trusted base checker. Proposed key files are read as data.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
+        with:
+          node-version-file: .node-version
+          run-install: false
+      - name: Read proposed public keys
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_REVISION: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/proposed-public-keys/docs"
+          for key in release-signing.pub release-catalog-signing.pub; do
+            gh api --header 'Accept: application/vnd.github.raw+json' \
+              "repos/$PR_REPOSITORY/contents/docs/$key?ref=$PR_REVISION" \
+              > "$RUNNER_TEMP/proposed-public-keys/docs/$key"
+          done
+      - name: Verify proposed keys against repository configuration
+        env:
+          UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
+          UAPKG_CATALOG_PUBLIC_KEY: ${{ vars.UAPKG_CATALOG_PUBLIC_KEY }}
+        run: vp exec node tools/release/checkPublicKeys.ts "$RUNNER_TEMP/proposed-public-keys"

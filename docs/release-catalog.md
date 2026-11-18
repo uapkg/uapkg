@@ -151,8 +151,11 @@ JSON formatting changes signed bytes. Clients authenticate a document before usi
 its contents and authenticate checksums before trusting downloaded archives.
 
 Local launcher builds use these tracked trust anchors without environment-variable
-setup. Release CI requires `UAPKG_RELEASE_PUBLIC_KEY` and
-`UAPKG_CATALOG_PUBLIC_KEY` to match the tracked keys before publication.
+setup. Pull-request checks, push CI, and release preflight require
+`UAPKG_RELEASE_PUBLIC_KEY` and `UAPKG_CATALOG_PUBLIC_KEY` to match the tracked keys.
+The pull-request check uses trusted base-branch code to compare only the proposed
+public-key files, including for contributions from forks. It does not execute
+pull-request code or use signing secrets.
 
 Never rotate either production key by changing an unsigned endpoint. With the current
 single-key trust anchors, coordinate a launcher bootstrap carrying the replacement
