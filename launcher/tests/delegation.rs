@@ -494,7 +494,7 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
     let missing = run(
         &home,
         dir.path(),
-        &["--debug-info", "--cli-version=999.0.0"],
+        &["--debug-info", "--cli-version=999.0.0", "--offline"],
     );
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
@@ -507,7 +507,7 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
     ] {
         let body = selected(run(&home, &project, &args), "1.2.3");
         assert_eq!(body["args"], json!(args));
-        assert_eq!(body["debugContext"]["selectionReason"], "global-default");
+        assert_eq!(body["debugContext"]["selectionReason"], "global-command");
         assert_eq!(body["debugContext"]["projectState"], "unavailable");
     }
     assert_eq!(
@@ -520,10 +520,48 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
         &home.join("config.json"),
         json!({"launcher":{"defaultCliVersion":"999.0.0"}}),
     );
-    let missing = run(&home, dir.path(), &["launcher-update", "--debug-info"]);
+    let missing = run(
+        &home,
+        dir.path(),
+        &["launcher-update", "--debug-info", "--offline"],
+    );
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
     assert!(!home.join("staging").exists());
+}
+
+#[test]
+fn diagnostics_honor_environment_offline_for_cached_and_missing_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    fixture_engine(&home, "github-releases", "1.2.3");
+    let run_offline = |version: &str| {
+        Command::new(env!("CARGO_BIN_EXE_uapkg"))
+            .args(["--debug-info", "--cli-version", version])
+            .current_dir(dir.path())
+            .env("HOME", dir.path())
+            .env("USERPROFILE", dir.path())
+            .env("UAPKG_OFFLINE", "1")
+            .env("PATH", "")
+            .output()
+            .unwrap()
+    };
+
+    let cached = selected(run_offline("1.2.3"), "1.2.3");
+    assert_eq!(cached["debugContext"]["offline"], true);
+    assert_eq!(cached["debugContext"]["selectionReason"], "override");
+    assert_eq!(cached["args"], json!(["--debug-info"]));
+
+    let missing = run_offline("999.0.0");
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
+    assert!(!home.join("staging").exists());
+    assert!(
+        !home
+            .join("engines/999.0.0")
+            .join(platform().unwrap())
+            .exists()
+    );
 }
 
 #[test]

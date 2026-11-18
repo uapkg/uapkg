@@ -6,6 +6,7 @@ pub mod github;
 mod listings;
 mod maintenance;
 pub mod model;
+mod preparation;
 pub mod routing;
 pub mod storage;
 pub mod updater;
@@ -46,8 +47,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
     };
     let mut launcher_notices = vec![];
     if let Some(settings) = &settings
-        && !invocation.offline
-        && !debug_info
+        && preparation::allows_optional_maintenance(&invocation)
     {
         let update = updater::maintain(&context, settings.auto_launcher_update);
         if update.restart
@@ -78,52 +78,11 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
         return delegate_development(&context, &invocation.args, diagnostic.as_ref());
     };
     let cwd = std::env::current_dir()?;
-    let mut selection = routing::select(&invocation, &cwd, context.default_version(&settings))?;
-    let offline = invocation.offline || debug_info;
-    let global_latest = selection.uses_global_latest();
-    let active = if global_latest {
-        catalog::active_version(&context, "cli", "latest")?
-    } else {
-        None
-    };
-    let known_active = active.is_some();
-    // A required first-time installation is itself an online check. Pace the
-    // next optional refresh from that attempt without making bootstrap depend on it.
-    let bootstrap = if global_latest && !offline && !known_active {
-        maintenance::claim(&maintenance::cli_directory(&context), false)
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-    let mut resolution = if let Some(version) = active {
-        catalog::Resolution {
-            requested: "latest".into(),
-            version,
-            messages: vec![],
-        }
-    } else {
-        catalog::resolve(&context, "cli", &selection.version, offline, false)?
-    };
-    let updated = if known_active && !offline {
-        maintenance::maintain_cli(&context, &mut resolution, settings.auto_cli_update)
-    } else {
-        None
-    };
-    let installed = match updated {
-        Some(installed) => installed,
-        None => engines::ensure_installed_with_reason(
-            &context,
-            &resolution.version,
-            offline,
-            Some(&selection.install_reason(&resolution.version)),
-        )?,
-    };
-    selection.version.clone_from(&resolution.version);
-    if !debug_info && !known_active {
-        catalog::activate(&context, "cli", &resolution)?;
-    }
-    drop(bootstrap);
+    let preparation::PreparedCli {
+        selection,
+        mut resolution,
+        installed,
+    } = preparation::prepare(&context, &invocation, &settings, &cwd)?;
     resolution.messages.extend(launcher_notices);
     let diagnostic = diagnostics::for_release(
         &context,
@@ -223,15 +182,13 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
                     .clone()
                     .context("Development binding is missing its CLI version.")?
             } else {
-                let mut selection = Invocation::parse(Vec::new())?;
-                selection
-                    .override_version
-                    .clone_from(&invocation.override_version);
-                routing::select_version(
-                    &selection,
+                routing::select(
+                    invocation,
+                    Scope::Project,
                     &std::env::current_dir()?,
                     context.default_version(&settings),
                 )?
+                .version
             };
             let resolution = catalog::resolve(context, "cli", &version, invocation.offline, false)?;
             catalog::emit(&resolution.messages);

@@ -8,7 +8,7 @@ use std::{
 use uapkg_launcher::{
     archive, diagnostics, engines, github,
     model::{exact_version, platform, relative_path},
-    routing::{Invocation, Scope, discover_project, select_version},
+    routing::{Invocation, Scope, discover_project, select},
     storage::{ContextPaths, atomic_json, lock},
     updater::{self, Transaction},
 };
@@ -264,30 +264,43 @@ fn nearest_game_project_owns_the_pin_and_plugin_versions_do_not() {
         Some("1.2.3")
     );
     assert_eq!(
-        select_version(&invocation(&["future"]), &cwd, Some("2.0.0")).unwrap(),
-        "1.2.3"
-    );
-    assert_eq!(
-        select_version(&invocation(&["whoami"]), &cwd, Some("2.0.0")).unwrap(),
-        "2.0.0"
-    );
-    assert_eq!(
-        select_version(
-            &invocation(&["--cli-version", "3.0.0", "whoami"]),
+        select(
+            &invocation(&["future"]),
+            Scope::Project,
             &cwd,
             Some("2.0.0")
         )
-        .unwrap(),
+        .unwrap()
+        .version,
+        "1.2.3"
+    );
+    assert_eq!(
+        select(&invocation(&["whoami"]), Scope::Global, &cwd, Some("2.0.0"))
+            .unwrap()
+            .version,
+        "2.0.0"
+    );
+    assert_eq!(
+        select(
+            &invocation(&["--cli-version", "3.0.0", "whoami"]),
+            Scope::Global,
+            &cwd,
+            Some("2.0.0")
+        )
+        .unwrap()
+        .version,
         "3.0.0"
     );
     write(&plugin.join("Nested/uapkg.json"), json!({"kind":"project"}));
     assert_eq!(
-        select_version(
+        select(
             &invocation(&["install"]),
+            Scope::Project,
             &plugin.join("Nested"),
             Some("2.0.0")
         )
-        .unwrap(),
+        .unwrap()
+        .version,
         "2.0.0"
     );
 }
@@ -299,26 +312,87 @@ fn malformed_pins_fail_without_breaking_global_or_override_recovery() {
         &dir.path().join("uapkg.json"),
         json!({"kind":"project","uapkgVersion":"^1.2.3"}),
     );
-    assert!(select_version(&invocation(&["install"]), dir.path(), Some("2.0.0")).is_err());
+    assert!(
+        select(
+            &invocation(&["install"]),
+            Scope::Project,
+            dir.path(),
+            Some("2.0.0")
+        )
+        .is_err()
+    );
     assert_eq!(
-        select_version(&invocation(&["login"]), dir.path(), Some("2.0.0")).unwrap(),
+        select(
+            &invocation(&["login"]),
+            Scope::Global,
+            dir.path(),
+            Some("2.0.0")
+        )
+        .unwrap()
+        .version,
         "2.0.0"
     );
     assert_eq!(
-        select_version(
+        select(
             &invocation(&["--cli-version", "3.0.0", "install"]),
+            Scope::Project,
             dir.path(),
             None
         )
-        .unwrap(),
+        .unwrap()
+        .version,
         "3.0.0"
     );
     fs::remove_file(dir.path().join("uapkg.json")).unwrap();
     assert_eq!(
-        select_version(&invocation(&["init"]), dir.path(), Some("2.0.0")).unwrap(),
+        select(
+            &invocation(&["init"]),
+            Scope::Project,
+            dir.path(),
+            Some("2.0.0")
+        )
+        .unwrap()
+        .version,
         "2.0.0"
     );
-    assert!(select_version(&invocation(&["install"]), dir.path(), None).is_err());
+    assert!(select(&invocation(&["install"]), Scope::Project, dir.path(), None).is_err());
+}
+
+#[test]
+fn explicit_cli_scope_controls_launcher_diagnostics_and_current_version_queries() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("uapkg.json"),
+        json!({"kind":"project","uapkgVersion":"1.2.3"}),
+    );
+    let current = invocation(&["version", "current"]);
+    assert_eq!(current.scope(), Scope::Launcher);
+    let project = select(&current, Scope::Project, dir.path(), Some("2.0.0")).unwrap();
+    assert_eq!(project.version, "1.2.3");
+    assert_eq!(project.reason, "project-pin");
+    assert_eq!(
+        project.project.unwrap().diagnostic(),
+        ("pinned", Some("1.2.3".into()))
+    );
+
+    let diagnostic = invocation(&["launcher-update", "--debug-info"]);
+    let global = select(&diagnostic, Scope::Global, dir.path(), Some("2.0.0")).unwrap();
+    assert_eq!(global.version, "2.0.0");
+    assert_eq!(global.reason, "global-command");
+    assert!(global.project.is_none());
+
+    let overridden = invocation(&["version", "current", "--cli-version=3.0.0"]);
+    for scope in [Scope::Global, Scope::Project] {
+        let selection = select(&overridden, scope, dir.path(), None).unwrap();
+        assert_eq!(selection.version, "3.0.0");
+        assert_eq!(selection.reason, "override");
+    }
+    for invocation in [&current, &overridden] {
+        let error = select(invocation, Scope::Launcher, dir.path(), Some("2.0.0"))
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("does not select a CLI"));
+    }
 }
 
 #[test]

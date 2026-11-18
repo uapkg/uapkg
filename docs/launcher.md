@@ -60,6 +60,12 @@ complete dependency graph; dependency manifests do not select another CLI.
 | `--cli-version <selector>`               | Explicit override                                  |
 | `launcher`, `version`, `launcher-update` | Handled by the launcher                            |
 
+The launcher resolves the selected CLI and installs it for the current platform
+when it is missing, unless `--offline` or `UAPKG_OFFLINE=1` prohibits downloads.
+This applies to global defaults, project pins, and explicit overrides. A failed
+installation does not substitute another installed version or change the default
+or project pin.
+
 ```sh
 uapkg version install 1.6.0
 uapkg version install latest
@@ -76,6 +82,8 @@ also works. A standalone `--` ends launcher option parsing and preserves all
 following arguments. `uapkg --version` reports the CLI version;
 `uapkg launcher --version` reports the launcher version.
 `uapkg launcher --platform` reports its compiled distribution identifier.
+`uapkg version current` reports the project-scoped selection, including an
+explicit override, without installing it.
 
 `version default` installs the selected CLI and delegates the configuration
 write to that CLI. The global configuration preserves the requested selector:
@@ -292,9 +300,11 @@ uapkg --debug-info --cli-version 1.5.0
 
 The flag prints the report and exits; it does not run the requested CLI command.
 It follows the launcher's version selection rules, including project pins and
-explicit overrides. Diagnostics do not download missing CLI versions. If the
-selected CLI is unavailable, use `--cli-version` with an installed version to
-collect a report. Development bindings report that local checkout execution
+explicit overrides. Diagnostics for launcher commands use the global default.
+Missing selected CLIs are installed while online, and successful alias
+resolutions are remembered for later invocations. Use `--offline` to require an
+already installed CLI. Diagnostics skip periodic update checks and launcher
+update recovery. Development bindings report that local checkout execution
 overrides project selection.
 
 The report uses a fixed list of fields. It does not print credentials, environment

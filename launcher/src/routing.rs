@@ -221,19 +221,16 @@ pub fn discover_project(cwd: &Path) -> Result<Option<Project>> {
     Ok(None)
 }
 
-pub fn select_version(
-    invocation: &Invocation,
-    cwd: &Path,
-    default: Option<&str>,
-) -> Result<String> {
-    Ok(select(invocation, cwd, default)?.version)
-}
-
 pub fn select(
     invocation: &Invocation,
+    scope: Scope,
     cwd: &Path,
     default: Option<&str>,
 ) -> Result<VersionSelection> {
+    ensure!(
+        scope != Scope::Launcher,
+        "Launcher management does not select a CLI."
+    );
     if let Some(version) = &invocation.override_version {
         return Ok(VersionSelection {
             version: version.clone(),
@@ -241,7 +238,7 @@ pub fn select(
             project: None,
         });
     }
-    let project = if invocation.scope() == Scope::Project {
+    let project = if scope == Scope::Project {
         match discover_project(cwd)? {
             Some(Project {
                 version: Some(version),
@@ -264,7 +261,7 @@ pub fn select(
     selector(version)?;
     Ok(VersionSelection {
         version: version.to_owned(),
-        reason: if invocation.scope() == Scope::Global {
+        reason: if scope == Scope::Global {
             "global-command"
         } else {
             "global-default"
@@ -283,7 +280,12 @@ mod tests {
         let manifest = project.path().join("uapkg.json");
         let reason = |args: &[&str], resolved_version: &str| -> Result<String> {
             let invocation = Invocation::parse(args.iter().copied().map(OsString::from).collect())?;
-            let selection = select(&invocation, project.path(), Some("latest"))?;
+            let selection = select(
+                &invocation,
+                invocation.scope(),
+                project.path(),
+                Some("latest"),
+            )?;
             Ok(selection.install_reason(resolved_version))
         };
         let global =

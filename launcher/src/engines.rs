@@ -102,7 +102,7 @@ fn install_release(
 /// The provider must authenticate its download before returning a staged engine.
 /// Cache locking, validation, and activation are shared by all installations;
 /// tests substitute only the downloader, never the lock or activation behavior.
-fn install_cached(
+pub(crate) fn install_cached(
     context: &ContextPaths,
     version: &str,
     offline: bool,
@@ -116,7 +116,7 @@ fn install_cached(
     }
     ensure!(
         !offline,
-        "CLI {version} is not cached for {target}. Run `uapkg version install {version}` while online; no other version will be substituted."
+        "CLI {version} is not cached for {target}. Offline mode prevents downloading it. Disable offline mode and retry to install this version; no other version will be substituted."
     );
     let _lock = lock(
         &context
