@@ -1,2 +1,5 @@
 # Signature fixtures must retain their exact bytes on every checkout.
 tools/release/fixtures/** -text
+
+# Generated schemas are compared byte-for-byte with their LF-only generator output.
+launcher/crates/slim-config/generated/slim-config.schema.json text eol=lf
