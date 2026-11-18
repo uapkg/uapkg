@@ -1,5 +1,11 @@
 # uapkg-launcher
 
+## 0.3.5
+
+### Patch Changes
+
+- [`3d12fe7`](https://github.com/uapkg/uapkg/commit/3d12fe7ae0e7149d46698f0644983250cd64c706) - Accept additional fields in launcher JSON records and preserve them when updating existing state, while retaining required-field validation and signature, hash, and path checks.
+
 ## 0.3.4
 
 ### Patch Changes
