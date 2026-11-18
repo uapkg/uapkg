@@ -38,6 +38,36 @@ afterEach(() => {
 });
 
 describe('launcher settings through the normal config command', () => {
+  it('reports the default CLI selector without writing configuration', async () => {
+    const { file, project, invoke } = fixture();
+    const before = fs.readFileSync(file);
+    const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
+    const pathToProperty = 'launcher.defaultCliVersion';
+
+    expect(await invoke({ pathToProperty })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"latest"');
+    expect(await invoke({ pathToProperty: 'launcher' })).toBe(0);
+    expect(JSON.parse(log.mock.lastCall?.[0] ?? '')).toEqual({
+      defaultCliVersion: 'latest',
+      autoLauncherUpdate: true,
+      autoCLIUpdate: true,
+    });
+
+    expect(await invoke({ pathToProperty, trace: true })).toBe(0);
+    expect(JSON.parse(log.mock.lastCall?.[0] ?? '')).toMatchObject([
+      { source: 'default', value: 'latest' },
+      { source: 'global', value: null },
+      { source: 'local', value: null },
+    ]);
+    for (const scope of ['global', 'local'] as const) {
+      expect(await invoke({ pathToProperty, scope })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('null');
+    }
+
+    expect(fs.readFileSync(file)).toEqual(before);
+    expect(fs.existsSync(path.join(project, '.uapkg'))).toBe(false);
+  });
+
   it('writes and reads global launcher settings through the shared config file', async () => {
     const { file, profile, invoke } = fixture();
     expect(
@@ -55,12 +85,16 @@ describe('launcher settings through the normal config command', () => {
     const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
     expect(await invoke({ pathToProperty: 'launcher.defaultCliVersion', scope: 'global' })).toBe(0);
     expect(log).toHaveBeenLastCalledWith('"2.0.0-beta.1+build.2"');
+    expect(await invoke({ pathToProperty: 'launcher.defaultCliVersion' })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"2.0.0-beta.1+build.2"');
     expect(fs.existsSync(path.join(profile, 'launcher.json'))).toBe(false);
     expect(await invoke({ action: 'delete', pathToProperty: 'launcher.defaultCliVersion', scope: 'global' })).toBe(0);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({
       term: { verbose: true },
       launcher: {},
     });
+    expect(await invoke({ pathToProperty: 'launcher.defaultCliVersion' })).toBe(0);
+    expect(log).toHaveBeenLastCalledWith('"latest"');
   });
 
   it('retains normal local write scope unless --global is selected', async () => {

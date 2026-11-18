@@ -195,7 +195,11 @@ export function getDefaultConfig(): ResolvedConfig {
     resolveUapkgBuildMode() === 'development' ? DEVELOPMENT_REGISTRY_URL : PRODUCTION_REGISTRY_URL;
   const defaults: ResolvedConfig = {
     registry: 'default',
-    launcher: { autoLauncherUpdate: true, autoCLIUpdate: true },
+    launcher: {
+      defaultCliVersion: CliVersionSelectorSchema.parse('latest'),
+      autoLauncherUpdate: true,
+      autoCLIUpdate: true,
+    },
     registries: {
       default: {
         url: registryUrlConfigSchema.parse(defaultRegistryUrl),

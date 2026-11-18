@@ -30,11 +30,16 @@ afterEach(() => {
 });
 
 describe('shared launcher configuration', () => {
-  it('does not invent a CLI version or create a profile', () => {
+  it('defaults to the latest CLI version without creating a profile', () => {
     const { profile, project } = fixture();
     const config = createConfig({ cwd: project });
-    expect(config.get('launcher')).toEqual({ autoLauncherUpdate: true, autoCLIUpdate: true });
-    expect(config.get('launcher.defaultCliVersion')).toBeNull();
+    expect(config.get('launcher')).toEqual({
+      defaultCliVersion: 'latest',
+      autoLauncherUpdate: true,
+      autoCLIUpdate: true,
+    });
+    expect(config.get('launcher.defaultCliVersion')).toBe('latest');
+    expect(config.getWithOrigin('launcher.defaultCliVersion')).toMatchObject({ source: 'default', value: 'latest' });
     expect(config.getDiagnostics()).toEqual([]);
     expect(fs.existsSync(profile)).toBe(false);
   });
@@ -64,10 +69,10 @@ describe('shared launcher configuration', () => {
       autoCLIUpdate: true,
     });
     expect(config.get('launcher', { scope: 'global' })).toEqual({ defaultCliVersion: '1.2.3' });
-    expect(config.trace('launcher.defaultCliVersion').map(({ source }) => source)).toEqual([
-      'default',
-      'global',
-      'local',
+    expect(config.trace('launcher.defaultCliVersion').map(({ source, value }) => ({ source, value }))).toEqual([
+      { source: 'default', value: 'latest' },
+      { source: 'global', value: '1.2.3' },
+      { source: 'local', value: '3.0.0' },
     ]);
   });
 
@@ -99,7 +104,7 @@ describe('shared launcher configuration', () => {
   });
 
   it.each(['1.2.3', '2.0.0-beta.1', '1.2.3+build.2', 'latest', '2.0.0-alpha', '2.0.0-beta'])(
-    'supports setting an initially absent optional version through CLI schema introspection: %s',
+    'supports setting a CLI version selector through schema introspection: %s',
     (version) => {
       expect(isLeafConfigPath('launcher.defaultCliVersion')).toBe(true);
       expect(parseConfigCliValue('launcher.defaultCliVersion', version)).toEqual({
