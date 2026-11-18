@@ -51,6 +51,8 @@ jobs:
           node-version-file: .node-version
           run-install: false
       - run: vp install --frozen-lockfile
+      - name: Check launcher version synchronization
+        run: vp run launcher:version:check
       - name: Check embedded launcher config schema
         run: vp run launcher:schema:check
       - name: Install the musl linker

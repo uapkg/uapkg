@@ -23,6 +23,8 @@ jobs:
 
       - name: Install dependencies
         run: vp install --frozen-lockfile
+      - name: Check launcher version synchronization
+        run: vp run launcher:version:check
       - name: Verify configured public keys
         if: github.repository == 'uapkg/uapkg' && github.event_name == 'push'
         env:

@@ -22,6 +22,7 @@ import {
 } from './ReleaseArtifacts.ts';
 import { buildSea } from './SeaBuild.ts';
 import { verifyOfficialNodeRuntime } from './OfficialNode.ts';
+import { readLauncherCargoVersion } from '../launcher/LauncherVersion.ts';
 
 export function npmCliPath(): string {
   const executableDirectory = path.dirname(process.execPath);
@@ -157,8 +158,5 @@ export async function buildLauncherArtifact(output: string, launcher: string, ta
 }
 
 export function launcherVersionFromCargo(workspaceRoot: string): string {
-  const manifest = readFileSync(path.join(workspaceRoot, 'launcher/Cargo.toml'), 'utf8');
-  const version = /^version\s*=\s*"([^"]+)"/m.exec(manifest)?.[1];
-  if (!version) throw new Error('Launcher Cargo.toml has no package version.');
-  return version;
+  return readLauncherCargoVersion(workspaceRoot);
 }

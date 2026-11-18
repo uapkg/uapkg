@@ -43,6 +43,9 @@ importers:
       semver:
         specifier: 7.7.1
         version: 7.7.1
+      smol-toml:
+        specifier: 1.9.1
+        version: 1.9.1
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -55,6 +58,8 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@26.2.0)(@vitest/browser-preview@4.1.10(@voidzero-dev/vite-plus-core@0.2.9(@types/node@26.2.0)(esbuild@0.28.0)(tsx@4.21.0)(typescript@7.0.2)(yaml@2.8.3))(vitest@4.1.10))(@vitest/coverage-v8@4.1.10)(@voidzero-dev/vite-plus-core@0.2.9(@types/node@26.2.0)(esbuild@0.28.0)(tsx@4.21.0)(typescript@7.0.2)(yaml@2.8.3))
+
+  launcher: {}
 
   packages/uapkg:
     dependencies:
@@ -2538,6 +2543,10 @@ packages:
     resolution: {integrity: sha512-stxByr12oeeOyY2BlviTNQlYV5xOj47GirPr4yA1hE9JCtxfQN0+tVbkxwCtYDQWhEKWFHsEK48ORg5jrouCAg==}
     engines: {node: '>=20'}
 
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
+    engines: {node: '>= 18'}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -4501,6 +4510,8 @@ snapshots:
     dependencies:
       ansi-styles: 6.2.3
       is-fullwidth-code-point: 5.1.0
+
+  smol-toml@1.9.1: {}
 
   source-map-js@1.2.1: {}
 

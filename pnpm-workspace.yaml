@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - launcher
 
 allowBuilds:
   esbuild: true

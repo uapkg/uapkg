@@ -37,6 +37,8 @@ jobs:
           node-version-file: .node-version
           run-install: false
       - run: vp install --frozen-lockfile
+      - name: Check launcher version synchronization
+        run: vp run launcher:version:check
       - run: vp check
       - run: vp test run --project release-tools
       - name: Check whether verified publication can resume without rebuilding

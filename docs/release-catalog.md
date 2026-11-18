@@ -165,8 +165,21 @@ overlapping-key rotation would require its own explicit protocol and implementat
 
 ## Publishing and cutover
 
-1. Version the intended product on `main`. CLI/library versions continue to use
-   Changesets. Launcher versioning is owned by `launcher/Cargo.toml`.
+Use `vp run change` to record a `minor` or `patch` change. The `@uapkg/*` packages
+form the fixed CLI/library family. The private `uapkg-launcher` Changesets target
+represents the whole launcher Cargo workspace, including `uapkg-slim-config`, and
+versions independently of the CLI. Its version comes from `launcher/package.json`;
+all launcher crates inherit the synchronized Cargo workspace version. Individual
+crates do not need `package.json` files, and the launcher target is not published
+to npm.
+
+`vp run version:packages` applies pending changesets and synchronizes the launcher
+Cargo workspace and lockfile. For synchronization without consuming changesets,
+use `vp run launcher:version:sync`. `vp run launcher:version:check` verifies the
+committed versions without changing files and runs in CI and release preflight.
+
+1. Run `vp run version:packages`, then commit the generated version, changelog, and
+   lockfile changes and push them to `main`.
 2. Run the `Release` workflow manually with the exact product/version. It never
    creates a version PR. npm packages publish independently when the product is
    `cli`; native publication has no npm-existence or npm-success gate.
