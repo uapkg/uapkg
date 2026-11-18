@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod diagnostics;
 pub mod engines;
 pub mod github;
+mod listings;
 mod maintenance;
 pub mod model;
 pub mod routing;
@@ -147,7 +148,7 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
     match (invocation.command.as_deref(), args.as_slice()) {
         (Some("launcher"), ["--help"] | ["-h"] | []) => {
             println!(
-                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  version install <version-selector>\n  version list\n  version default [version-selector]\n  version current\n  launcher-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
+                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  version install <version-selector>\n  version list [available]\n  version default [version-selector]\n  version current\n  launcher-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg version list --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
             );
         }
         (Some("version"), ["install", version]) => {
@@ -165,9 +166,13 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
             catalog::emit(&resolution.messages);
         }
         (Some("version"), ["list"]) => {
-            for (version, platform) in engines::list(context)? {
-                println!("{version}\tgithub-releases\t{platform}");
-            }
+            print!(
+                "{}",
+                listings::local(context, invocation, &std::env::current_dir()?)?
+            );
+        }
+        (Some("version"), ["list", "available"]) => {
+            print!("{}", listings::available(context, invocation.offline)?);
         }
         (Some("version"), ["default"]) => {
             let settings = context.settings()?;
@@ -234,12 +239,12 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
             catalog::emit(&resolution.messages);
         }
         (Some("version"), ["--help"] | ["-h"] | []) => println!(
-            "Usage: uapkg version install <version-selector> | list | default [version-selector] | current"
+            "Usage: uapkg version install <version-selector> | list [available] | default [version-selector] | current"
         ),
-        (Some("launcher-update" | "self-update"), ["--help"] | ["-h"]) => println!(
+        (Some("launcher-update"), ["--help"] | ["-h"]) => println!(
             "Usage: uapkg launcher-update [launcher-version]\nUpdates a standalone launcher."
         ),
-        (Some("launcher-update" | "self-update"), [] | [_]) => {
+        (Some("launcher-update"), [] | [_]) => {
             ensure!(
                 !invocation.offline,
                 "Launcher updates require an online connection."

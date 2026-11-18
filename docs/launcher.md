@@ -66,6 +66,7 @@ uapkg version install latest
 uapkg version default latest
 uapkg version current
 uapkg version list
+uapkg version list available
 uapkg install --cli-version 2.0.0-alpha
 uapkg install --offline
 ```
@@ -95,6 +96,65 @@ not version selection.
 `latest` remembers the exact version installed in the cache. The global default
 continues to read `latest` after updates. Exact global versions and project
 selectors retain their own version selection rules.
+
+## List CLI versions
+
+`uapkg version list` shows locally installed CLI versions for the current
+platform. Selected versions appear first, in the order `global default`,
+`project pin`, then `cli override`. Each configured role appears once; roles
+that select the same version share one row. Unset roles are omitted.
+
+```text
+1.7.0 (global default, installed)
+1.7.2 (project pin, not installed) (used as alias `latest`)
+1.6.0 (cli override, installed)
+
+1.7.1
+1.6.1
+
+To see the list of available versions, run `uapkg version list available`.
+```
+
+Only selected versions show `installed` or `not installed`. The remaining rows
+are installed versions, sorted by SemVer from newest to oldest. Source and
+platform columns are omitted. Use `--cli-version <selector>` with `version list`
+to include that override in the listing.
+
+This listing does not contact the release site or install anything. Alias notes
+identify selections made through an alias rather than an exact version. Aliases
+resolve from cached metadata and remembered resolutions; an alias that cannot
+be resolved locally remains visible as unresolved, for example
+`latest (global default, unresolved)`. When roles share one version, alias notes
+identify the role that uses each alias:
+
+```text
+1.7.2 (global default, project pin, installed) (project pin uses alias `latest`)
+```
+
+`uapkg version list available` shows up to 15 highest CLI versions available for
+the current platform from the verified release index, sorted by SemVer from
+newest to oldest. It includes prereleases, excludes versions with published
+replacement mappings, and shows aliases associated with each listed version.
+It does not show installation status or selection roles.
+
+```text
+2.0.0-alpha.2
+2.0.0-alpha.1
+1.9.0 (alias `latest`)
+1.8.9
+1.7.0
+```
+
+When more than 15 versions qualify, the listing ends with:
+
+```text
+This is a partial list. For the complete list, visit https://releases.uapkg.dev/cli
+```
+
+The available list refreshes signed release metadata when online. With
+`--offline`, it uses verified cached metadata and fails if the required metadata
+is unavailable. Neither listing downloads CLI binaries or changes version
+selections.
 
 ## Preview versions
 
@@ -168,7 +228,6 @@ older pinned CLI, select a newer version for the config command with
 `uapkg launcher-update` checks immediately and resets the launcher check interval.
 It follows the independent launcher catalog and its published selectors. An
 explicit exact launcher version stays selected until the next manual update.
-`uapkg self-update` is an alias for `uapkg launcher-update`.
 
 Standalone launchers can update themselves. Use the original package manager to
 update installations owned by npm, WinGet, Homebrew, or Scoop. The installation

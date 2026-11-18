@@ -158,8 +158,9 @@ fn install_cached(
     cached(&destination, version, target)
 }
 
-pub fn list(context: &ContextPaths) -> Result<Vec<(String, String)>> {
+pub fn list(context: &ContextPaths) -> Result<Vec<String>> {
     let mut results = Vec::new();
+    let target = platform()?;
     let base = context.home.join("engines");
     if !base.exists() {
         return Ok(results);
@@ -173,15 +174,11 @@ pub fn list(context: &ContextPaths) -> Result<Vec<(String, String)>> {
         if exact_version(&version).is_err() {
             continue;
         }
-        for target in fs::read_dir(entry.path())? {
-            let target = target?;
-            if !target.file_type()?.is_dir() {
-                continue;
-            }
-            let platform = target.file_name().to_string_lossy().into_owned();
-            if cached(&target.path(), &version, &platform).is_ok() {
-                results.push((version.clone(), platform));
-            }
+        let root = entry.path().join(target);
+        if fs::symlink_metadata(&root).is_ok_and(|metadata| metadata.is_dir())
+            && cached(&root, &version, target).is_ok()
+        {
+            results.push(version);
         }
     }
     results.sort();

@@ -97,6 +97,173 @@ fn selected(output: Output, expected: &str) -> Value {
 }
 
 #[test]
+fn removed_self_update_command_delegates_to_the_project_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    fixture_engine(&home, "github-releases", "1.2.3");
+    fixture_engine(&home, "github-releases", "2.0.0");
+    write(
+        &home.join("config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.2.3"}}),
+    );
+    write(
+        &dir.path().join("uapkg.json"),
+        json!({"kind":"project","uapkgVersion":"2.0.0"}),
+    );
+    for args in [
+        vec!["--offline", "self-update"],
+        vec!["self-update", "--help", "--offline"],
+    ] {
+        let body = selected(run(&home, dir.path(), &args), "2.0.0");
+        let expected: Vec<_> = args.into_iter().filter(|arg| *arg != "--offline").collect();
+        assert_eq!(body["args"], json!(expected));
+    }
+    let body = selected(
+        run(
+            &home,
+            dir.path(),
+            &["self-update", "--offline", "--cli-version=1.2.3"],
+        ),
+        "1.2.3",
+    );
+    assert_eq!(body["args"], json!(["self-update"]));
+}
+
+fn fixture_cache(home: &Path, version: &str, target: &str) {
+    let root = home.join("engines").join(version).join(target);
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("engine"), b"listing fixture").unwrap();
+    write(
+        &root.join("engine.json"),
+        json!({"schemaVersion":1,"version":version,"platform":target,"kind":"sea","executable":"engine","args":[]}),
+    );
+    write(
+        &root.join(".installed.json"),
+        json!({"schemaVersion":1,"version":version,"platform":target}),
+    );
+}
+
+fn listed(output: Output) -> String {
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn local_list_orders_all_selections_before_valid_current_platform_installations() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    let target = platform().unwrap();
+    for version in ["1.7.0", "1.6.0", "1.10.0", "1.7.1", "1.6.1"] {
+        fixture_cache(&home, version, target);
+    }
+    fixture_cache(&home, "9.0.0", target);
+    fs::remove_file(home.join("engines/9.0.0").join(target).join("engine")).unwrap();
+    let foreign = if target == "darwin-x64" {
+        "win-x64"
+    } else {
+        "darwin-x64"
+    };
+    fixture_cache(&home, "10.0.0", foreign);
+    write(
+        &home.join("config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.7.0"},"registry":"preserve"}),
+    );
+    write(
+        &dir.path().join("uapkg.json"),
+        json!({"kind":"project","uapkgVersion":"1.7.2"}),
+    );
+    let configuration = fs::read(home.join("config.json")).unwrap();
+    let manifest = fs::read(dir.path().join("uapkg.json")).unwrap();
+    let output = listed(run(
+        &home,
+        dir.path(),
+        &["version", "list", "--cli-version=1.6.0"],
+    ));
+    assert_eq!(
+        output,
+        concat!(
+            "1.7.0 (global default, installed)\n",
+            "1.7.2 (project pin, not installed)\n",
+            "1.6.0 (cli override, installed)\n",
+            "\n1.10.0\n1.7.1\n1.6.1\n",
+            "\nTo see the list of available versions, run `uapkg version list available`.\n"
+        )
+    );
+    assert_eq!(fs::read(home.join("config.json")).unwrap(), configuration);
+    assert_eq!(fs::read(dir.path().join("uapkg.json")).unwrap(), manifest);
+    for name in ["catalog", "staging", "locks", "maintenance"] {
+        assert!(!home.join(name).exists(), "Listing created {name}");
+    }
+    assert!(!home.join("engines/1.7.2").exists());
+}
+
+#[test]
+fn local_list_merges_roles_and_names_only_the_roles_using_an_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    fixture_cache(&home, "1.7.2", platform().unwrap());
+    write(
+        &home.join("config.json"),
+        json!({"launcher":{"defaultCliVersion":"1.7.2"}}),
+    );
+    write(
+        &dir.path().join("uapkg.json"),
+        json!({"kind":"project","uapkgVersion":"latest"}),
+    );
+    write(
+        &home.join("catalog/cli/resolutions.json"),
+        json!({"active":{"latest":"1.7.2"}}),
+    );
+    let resolutions = fs::read(home.join("catalog/cli/resolutions.json")).unwrap();
+    let output = listed(run(
+        &home,
+        dir.path(),
+        &["version", "list", "--cli-version=1.7.2"],
+    ));
+    assert_eq!(
+        output,
+        concat!(
+            "1.7.2 (global default, project pin, cli override, installed) (project pin uses alias `latest`)\n",
+            "\nTo see the list of available versions, run `uapkg version list available`.\n"
+        )
+    );
+    assert_eq!(
+        fs::read(home.join("catalog/cli/resolutions.json")).unwrap(),
+        resolutions
+    );
+    assert_eq!(fs::read_dir(home.join("catalog/cli")).unwrap().count(), 1);
+    assert!(!home.join("staging").exists());
+}
+
+#[test]
+fn local_list_omits_unset_selections_and_keeps_uncached_aliases_visible() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join(".uapkg");
+    let footer = "\nTo see the list of available versions, run `uapkg version list available`.\n";
+    assert_eq!(
+        listed(run(&home, dir.path(), &["version", "list"])),
+        format!("No CLI versions are installed for this platform.\n{footer}")
+    );
+    assert!(!home.exists());
+    fixture_cache(&home, "1.7.0", platform().unwrap());
+    assert_eq!(
+        listed(run(&home, dir.path(), &["version", "list"])),
+        format!("1.7.0\n{footer}")
+    );
+    write(&dir.path().join("uapkg.json"), json!({"kind":"project"}));
+    write(
+        &home.join("config.json"),
+        json!({"launcher":{"defaultCliVersion":"latest"}}),
+    );
+    assert_eq!(
+        listed(run(&home, dir.path(), &["version", "list"])),
+        format!("latest (global default, unresolved)\n\n1.7.0\n{footer}")
+    );
+    assert!(!home.join("catalog").exists());
+}
+
+#[test]
 fn two_project_pins_global_commands_unknown_commands_and_override_delegate_correctly() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".uapkg");
@@ -367,7 +534,7 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
     assert!(!home.join("staging").exists());
     let configuration_before = fs::read(home.join("config.json")).unwrap();
     for args in [
-        vec!["self-update", "--debug-info"],
+        vec!["launcher-update", "--debug-info"],
         vec!["version", "install", "999.0.0", "--debug-info"],
         vec!["launcher", "--debug-info"],
     ] {
@@ -386,7 +553,7 @@ fn diagnostics_report_launcher_location_without_raw_arguments_or_configuration()
         &home.join("config.json"),
         json!({"launcher":{"defaultCliVersion":"999.0.0"}}),
     );
-    let missing = run(&home, dir.path(), &["self-update", "--debug-info"]);
+    let missing = run(&home, dir.path(), &["launcher-update", "--debug-info"]);
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
     assert!(!home.join("staging").exists());
@@ -536,6 +703,21 @@ if(args.includes('--debug-info')) {
     );
     assert_eq!(context["globalCliVersion"], "2.0.0");
     assert_eq!(context["projectCliVersion"], "99.0.0");
+    for command in ["current", "list"] {
+        let output = Command::new(&binary)
+            .args(["version", command, "--cli-version=2.0.0", "--offline"])
+            .current_dir(root)
+            .env("HOME", root)
+            .env("USERPROFILE", root)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{command}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("--cli-version is unavailable for a development checkout binding"),
+            "{command}: {output:?}"
+        );
+    }
     fs::write(
         development_profile.join("config.json"),
         "secret-malformed-config",

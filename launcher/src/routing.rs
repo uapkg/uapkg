@@ -101,7 +101,7 @@ impl Invocation {
 
     pub fn scope(&self) -> Scope {
         match self.command.as_deref() {
-            Some("launcher" | "version" | "launcher-update" | "self-update") => Scope::Launcher,
+            Some("launcher" | "version" | "launcher-update") => Scope::Launcher,
             Some("login" | "logout" | "whoami") => Scope::Global,
             _ => Scope::Project,
         }
@@ -116,8 +116,9 @@ impl Invocation {
         ensure!(
             self.override_version.is_none()
                 || (self.command.as_deref() == Some("version")
-                    && self.args[index + 1..] == [OsString::from("current")]),
-            "--cli-version only applies to delegated CLI commands and version current."
+                    && (self.args[index + 1..] == [OsString::from("current")]
+                        || self.args[index + 1..] == [OsString::from("list")])),
+            "--cli-version only applies to delegated CLI commands, version current, and version list."
         );
         self.args[index + 1..]
             .iter()

@@ -232,6 +232,18 @@ pub fn index(context: &ContextPaths, product: &str, offline: bool) -> Result<Opt
     Ok(value)
 }
 
+pub fn replacements(
+    context: &ContextPaths,
+    product: &str,
+    offline: bool,
+) -> Result<Option<Replacements>> {
+    let value: Option<Replacements> = optional(context, product, "replacements.json", offline)?;
+    if let Some(replacements) = &value {
+        replacements.validate(product)?;
+    }
+    Ok(value)
+}
+
 pub fn refresh_index(context: &ContextPaths, product: &str) -> Result<Index> {
     github::refresh_document(context, product, "index.json", |index: &Index| {
         index.validate(product)
@@ -291,6 +303,24 @@ pub fn resolve(
     offline: bool,
     explicit: bool,
 ) -> Result<Resolution> {
+    optional_resolution(context, product, requested, offline, explicit)?.with_context(|| format!("No verified resolution is cached for {product} {requested}. Connect to releases.uapkg.dev and retry."))
+}
+
+pub(crate) fn cached_resolution(
+    context: &ContextPaths,
+    product: &str,
+    requested: &str,
+) -> Result<Option<Resolution>> {
+    optional_resolution(context, product, requested, true, false)
+}
+
+fn optional_resolution(
+    context: &ContextPaths,
+    product: &str,
+    requested: &str,
+    offline: bool,
+    explicit: bool,
+) -> Result<Option<Resolution>> {
     github::product(product)?;
     let kind = selector(requested)?;
     let mut messages = Vec::new();
@@ -298,20 +328,15 @@ pub fn resolve(
         Selector::Exact => {
             if exact_version(requested)?.pre.is_empty() {
                 requested.to_owned()
-            } else {
-                let replacements: Option<Replacements> =
-                    optional(context, product, "replacements.json", offline)?;
-                if let Some(replacements) = replacements {
-                    replacements.validate(product)?;
-                    if let Some(target) = replacements.replacements.get(requested) {
-                        messages.push(format!("The requested {product} preview has retired: {requested} -> {target}. Update the configured version selector."));
-                        target.clone()
-                    } else {
-                        requested.to_owned()
-                    }
+            } else if let Some(replacements) = replacements(context, product, offline)? {
+                if let Some(target) = replacements.replacements.get(requested) {
+                    messages.push(format!("The requested {product} preview has retired: {requested} -> {target}. Update the configured version selector."));
+                    target.clone()
                 } else {
                     requested.to_owned()
                 }
+            } else {
+                requested.to_owned()
             }
         }
         Selector::Latest | Selector::Preview { .. } => {
@@ -333,7 +358,10 @@ pub fn resolve(
                 }
                 active.clone()
             } else {
-                latest.or(active).with_context(|| format!("No verified resolution is cached for {product} {requested}. Connect to releases.uapkg.dev and retry."))?
+                let Some(version) = latest.or(active) else {
+                    return Ok(None);
+                };
+                version
             }
         }
     };
@@ -342,11 +370,11 @@ pub fn resolve(
     {
         messages.push(format!("The requested {product} preview is now stable: {requested} -> {version}. Update the configured version selector."));
     }
-    Ok(Resolution {
+    Ok(Some(Resolution {
         requested: requested.to_owned(),
         version,
         messages,
-    })
+    }))
 }
 pub fn activate(context: &ContextPaths, product: &str, resolution: &Resolution) -> Result<()> {
     if product == "launcher" {
@@ -510,6 +538,137 @@ mod tests {
         let duplicate = index.releases[0].files[0].clone();
         index.releases[0].files.push(duplicate);
         assert!(index.validate("cli").is_err());
+    }
+
+    #[test]
+    fn cached_resolutions_leave_unknown_aliases_unresolved_without_writing() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        for requested in ["latest", "2.1.0-beta"] {
+            assert!(
+                cached_resolution(&context, "cli", requested)
+                    .unwrap()
+                    .is_none()
+            );
+            assert_eq!(
+                resolve(&context, "cli", requested, true, false)
+                    .unwrap_err()
+                    .to_string(),
+                format!(
+                    "No verified resolution is cached for cli {requested}. Connect to releases.uapkg.dev and retry."
+                )
+            );
+        }
+        for requested in ["1.2.3", "2.1.0-beta.1"] {
+            let resolution = cached_resolution(&context, "cli", requested)
+                .unwrap()
+                .unwrap();
+            assert_eq!(resolution.requested, requested);
+            assert_eq!(resolution.version, requested);
+            assert!(resolution.messages.is_empty());
+        }
+        assert!(replacements(&context, "cli", true).unwrap().is_none());
+        assert!(cached_resolution(&context, "unknown", "latest").is_err());
+        assert!(cached_resolution(&context, "cli", "^1.2.3").is_err());
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn cached_resolutions_use_signed_mappings_without_advancing_tracking() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        published(&context);
+        atomic_json(
+            &context.home.join("catalog/cli/resolutions.json"),
+            &serde_json::json!({"active":{"latest":"1.9.0","2.1.0-beta":"2.1.0-beta.1"}}),
+        )
+        .unwrap();
+        let snapshot = || {
+            fs::read_dir(context.home.join("catalog/cli"))
+                .unwrap()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    (entry.file_name(), fs::read(entry.path()).unwrap())
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        let before = snapshot();
+        for (requested, expected) in [
+            ("latest", "1.9.0"),
+            ("2.1.0-beta", "2.1.0-beta.10"),
+            ("2.0.0-alpha.1", "2.0.0"),
+            ("2.0.0-beta", "2.0.0"),
+        ] {
+            assert_eq!(
+                cached_resolution(&context, "cli", requested)
+                    .unwrap()
+                    .unwrap()
+                    .version,
+                expected
+            );
+        }
+        assert_eq!(
+            replacements(&context, "cli", true)
+                .unwrap()
+                .unwrap()
+                .replacements["2.0.0-alpha.1"],
+            "2.0.0"
+        );
+        assert_eq!(snapshot(), before);
+
+        fs::remove_file(context.home.join("catalog/cli/index.json.verified.json")).unwrap();
+        let before = snapshot();
+        for (requested, expected) in [("latest", "1.9.0"), ("2.1.0-beta", "2.1.0-beta.1")] {
+            assert_eq!(
+                cached_resolution(&context, "cli", requested)
+                    .unwrap()
+                    .unwrap()
+                    .version,
+                expected
+            );
+        }
+        assert_eq!(snapshot(), before);
+    }
+
+    #[test]
+    fn cached_resolutions_reject_invalid_metadata_and_tracking() {
+        let directory = tempfile::tempdir().unwrap();
+        let context = context(directory.path());
+        published(&context);
+        cached(
+            &context,
+            "index.json",
+            "{}",
+            include_str!("../../tools/release/fixtures/index.json.minisig"),
+        );
+        assert!(cached_resolution(&context, "cli", "latest").is_err());
+        fs::write(
+            context.home.join("catalog/cli/index.json.verified.json"),
+            b"not JSON",
+        )
+        .unwrap();
+        assert!(cached_resolution(&context, "cli", "latest").is_err());
+
+        published(&context);
+        cached(
+            &context,
+            "replacements.json",
+            "{}",
+            include_str!("../../tools/release/fixtures/replacements.json.minisig"),
+        );
+        assert!(cached_resolution(&context, "cli", "2.0.0-alpha.1").is_err());
+        assert!(replacements(&context, "cli", true).is_err());
+
+        published(&context);
+        let tracking = context.home.join("catalog/cli/resolutions.json");
+        fs::write(&tracking, b"not JSON").unwrap();
+        assert!(cached_resolution(&context, "cli", "latest").is_err());
+        atomic_json(
+            &tracking,
+            &serde_json::json!({"active":{"latest":"invalid"}}),
+        )
+        .unwrap();
+        assert!(cached_resolution(&context, "cli", "latest").is_err());
     }
 
     #[test]

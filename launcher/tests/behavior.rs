@@ -58,10 +58,10 @@ fn command_scopes_are_independent_of_launcher_option_placement() {
     for command in ["login", "logout", "whoami"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Global);
     }
-    for command in ["install", "config", "init", "future-command"] {
+    for command in ["install", "config", "init", "future-command", "self-update"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Project);
     }
-    for command in ["launcher", "version", "launcher-update", "self-update"] {
+    for command in ["launcher", "version", "launcher-update"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Launcher);
     }
     assert_eq!(
@@ -216,7 +216,7 @@ fn invalid_or_duplicate_overrides_fail_even_after_the_command() {
 }
 
 #[test]
-fn launcher_management_accepts_trailing_offline_and_current_override() {
+fn launcher_management_accepts_trailing_offline_and_local_inspection_overrides() {
     let current = invocation(&["version", "current", "--cli-version=1.2.3", "--offline"]);
     assert_eq!(current.scope(), Scope::Launcher);
     assert!(current.offline);
@@ -225,7 +225,22 @@ fn launcher_management_accepts_trailing_offline_and_current_override() {
     let install = invocation(&["version", "install", "1.2.3", "--offline"]);
     assert!(install.offline);
     assert_eq!(install.command_args().unwrap(), ["install", "1.2.3"]);
-    let update = invocation(&["self-update", "--offline"]);
+    for args in [
+        vec!["--cli-version=1.2.3", "version", "list"],
+        vec!["version", "list", "--cli-version", "1.2.3", "--offline"],
+    ] {
+        let list = invocation(&args);
+        assert_eq!(list.scope(), Scope::Launcher);
+        assert_eq!(list.command_args().unwrap(), ["list"]);
+    }
+    for args in [
+        vec!["version", "list", "available", "--cli-version=1.2.3"],
+        vec!["version", "install", "1.2.3", "--cli-version=1.2.3"],
+        vec!["launcher-update", "--cli-version=1.2.3"],
+    ] {
+        assert!(invocation(&args).command_args().is_err(), "{args:?}");
+    }
+    let update = invocation(&["launcher-update", "--offline"]);
     assert!(update.offline);
     assert!(update.command_args().unwrap().is_empty());
 }
@@ -585,19 +600,32 @@ fn launcher_management_never_delegates_or_requires_an_engine() {
     );
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("not cached"));
-    for command in ["launcher-update", "self-update"] {
-        let update = run_cli(binary, &home, dir.path(), &[command, "--offline"]);
-        assert!(!update.status.success());
-        assert!(String::from_utf8_lossy(&update.stderr).contains("require an online connection"));
-        let help = run_cli(binary, &home, dir.path(), &[command, "--help"]);
-        assert!(help.status.success());
-        assert!(String::from_utf8_lossy(&help.stdout).contains("uapkg launcher-update"));
-    }
+    let update = run_cli(binary, &home, dir.path(), &["launcher-update", "--offline"]);
+    assert!(!update.status.success());
+    assert!(String::from_utf8_lossy(&update.stderr).contains("require an online connection"));
+    let help = run_cli(binary, &home, dir.path(), &["launcher-update", "--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("uapkg launcher-update"));
     assert!(
         run_cli(binary, &home, dir.path(), &["version", "list"])
             .status
             .success()
     );
+    for command in ["launcher", "version"] {
+        let help = run_cli(binary, &home, dir.path(), &[command, "--help"]);
+        assert!(help.status.success());
+        assert!(String::from_utf8_lossy(&help.stdout).contains("list [available]"));
+    }
+    let available = run_cli(
+        binary,
+        &home,
+        dir.path(),
+        &["version", "list", "available", "--offline"],
+    );
+    assert!(!available.status.success());
+    assert!(String::from_utf8_lossy(&available.stderr).contains("No verified CLI index"));
+    assert!(!home.join("engines").exists());
+    assert!(!home.join("catalog").exists());
 }
 
 #[test]
