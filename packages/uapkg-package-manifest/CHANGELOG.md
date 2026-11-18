@@ -1,5 +1,17 @@
 # @uapkg/package-manifest
 
+## 1.7.2
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @uapkg/common@1.7.2
+  - @uapkg/common-schema@1.7.2
+  - @uapkg/config@1.7.2
+  - @uapkg/diagnostics@1.7.2
+  - @uapkg/package-manifest-schema@1.7.2
+  - @uapkg/registry-core@1.7.2
+
 ## 1.7.1
 
 ### Patch Changes

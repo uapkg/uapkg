@@ -1,5 +1,31 @@
 # uapkg
 
+## 1.7.2
+
+### Patch Changes
+
+- [`19e0f72`](https://github.com/uapkg/uapkg/commit/19e0f729fc99a483539108bdc25a691fdafb13bf) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Label development banners by component: add a dark red launcher banner and retain
+  the CLI's blue banner with a CLI label.
+
+- [`b193d96`](https://github.com/uapkg/uapkg/commit/b193d960c1a12703699904e69c18cdf0acd6e6ad) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Resolve launcher settings through normal global, intermediary, and local config
+  layers using a read-only native resolver and a schema generated from
+  `@uapkg/config`. Ignore invalid launcher overrides with source-aware warnings,
+  preserve valid fallback values, and expose accepted and ignored config traces.
+- Updated dependencies []:
+  - @uapkg/common@1.7.2
+  - @uapkg/common-schema@1.7.2
+  - @uapkg/config@1.7.2
+  - @uapkg/diagnostics@1.7.2
+  - @uapkg/diagnostics-format@1.7.2
+  - @uapkg/installer@1.7.2
+  - @uapkg/log@1.7.2
+  - @uapkg/pack@1.7.2
+  - @uapkg/package-claims@1.7.2
+  - @uapkg/package-manifest@1.7.2
+  - @uapkg/package-manifest-schema@1.7.2
+  - @uapkg/registry-core@1.7.2
+  - @uapkg/registry-schema@1.7.2
+
 ## 1.7.1
 
 ### Patch Changes
