@@ -1,0 +1,7 @@
+73f08a779067dff8c4356b5df16b45dc399be046f438f71874b62bd585280f68  uapkg-launcher-0.3.6-darwin-arm64.tar.gz
+29fe75cc337dc07cf10b080506b62b4a1a63b13137b90e2b8136774dad265936  uapkg-launcher-0.3.6-darwin-x64.tar.gz
+862bde16fabbc12e83bd51d2267b54af802e0983f2973228670257c5d83803f6  uapkg-launcher-0.3.6-linux-arm64.tar.gz
+bad46ff122b02570b4e9e442519fb5f391ff44a2f51ecb63930f1d5a57c11383  uapkg-launcher-0.3.6-linux-x64-musl.tar.gz
+a622dc7869a772ad8fae0f22c7687c2c8e9acaa11e31136c8a240a03c34c570f  uapkg-launcher-0.3.6-linux-x64.tar.gz
+0f6d84efb69eb169a835d98e89aea2a2ed6531ef21a2022c837c0a58b6cfe402  uapkg-launcher-0.3.6-win-arm64.tar.gz
+c8caf704424f37150ce0a1d576db33f817dfe2178e648f2aa9e5562365611c83  uapkg-launcher-0.3.6-win-x64.tar.gz
