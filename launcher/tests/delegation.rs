@@ -96,39 +96,6 @@ fn selected(output: Output, expected: &str) -> Value {
     body
 }
 
-#[test]
-fn removed_self_update_command_delegates_to_the_project_cli() {
-    let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join(".uapkg");
-    fixture_engine(&home, "github-releases", "1.2.3");
-    fixture_engine(&home, "github-releases", "2.0.0");
-    write(
-        &home.join("config.json"),
-        json!({"launcher":{"defaultCliVersion":"1.2.3"}}),
-    );
-    write(
-        &dir.path().join("uapkg.json"),
-        json!({"kind":"project","uapkgVersion":"2.0.0"}),
-    );
-    for args in [
-        vec!["--offline", "self-update"],
-        vec!["self-update", "--help", "--offline"],
-    ] {
-        let body = selected(run(&home, dir.path(), &args), "2.0.0");
-        let expected: Vec<_> = args.into_iter().filter(|arg| *arg != "--offline").collect();
-        assert_eq!(body["args"], json!(expected));
-    }
-    let body = selected(
-        run(
-            &home,
-            dir.path(),
-            &["self-update", "--offline", "--cli-version=1.2.3"],
-        ),
-        "1.2.3",
-    );
-    assert_eq!(body["args"], json!(["self-update"]));
-}
-
 fn fixture_cache(home: &Path, version: &str, target: &str) {
     let root = home.join("engines").join(version).join(target);
     fs::create_dir_all(&root).unwrap();

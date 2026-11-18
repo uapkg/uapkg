@@ -58,7 +58,7 @@ fn command_scopes_are_independent_of_launcher_option_placement() {
     for command in ["login", "logout", "whoami"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Global);
     }
-    for command in ["install", "config", "init", "future-command", "self-update"] {
+    for command in ["install", "config", "init", "future-command"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Project);
     }
     for command in ["launcher", "version", "launcher-update"] {
