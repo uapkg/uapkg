@@ -162,8 +162,7 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
       `Launcher path: ${installation.executablePath}`,
       `CLI path: ${path.join(enginePackage, 'dist', 'cli.js')}`,
       'Installation owner: development',
-      'CLI source: npm',
-      `Global CLI version: ${sourceManifest.version}`,
+      'Global CLI version: latest',
       'Project CLI pin: 999.0.0',
       `Selected CLI version: ${sourceManifest.version}`,
       'Selection reason: development',
@@ -179,7 +178,7 @@ export function smokeNativeDevelopmentInstallation(launcherPath: string): void {
 
     // Simulate a subsequent engine build and relink using only the copied
     // checkout. Each invocation must observe the new build and receipt.
-    const rebuiltVersion = '0.0.0-dev-smoke+rebuilt.1';
+    const rebuiltVersion = '0.0.0+rebuilt.1';
     const rebuiltMetadata = createBuildMetadata('development', rebuiltVersion);
     fs.writeFileSync(
       path.join(enginePackage, 'package.json'),

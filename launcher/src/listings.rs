@@ -38,8 +38,10 @@ pub(crate) fn local(context: &ContextPaths, invocation: &Invocation, cwd: &Path)
             (matches!(
                 settings.config_source,
                 uapkg_slim_config::Source::Intermediary | uapkg_slim_config::Source::Local
-            ) && settings.config_file.as_deref()
-                != Some(context.home.join("config.json").as_path()))
+            ) && settings
+                .config_file
+                .as_deref()
+                .is_some_and(|file| !same_config_file(file, &context.home.join("config.json"))))
             .then(|| context.default_version(&settings))
             .flatten(),
         ),
@@ -75,6 +77,13 @@ pub(crate) fn local(context: &ContextPaths, invocation: &Invocation, cwd: &Path)
         }
     }
     local_output(selected, engines::list(context)?)
+}
+
+fn same_config_file(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 fn local_output(selected: Vec<SelectedVersion>, installed: Vec<String>) -> Result<String> {
@@ -560,6 +569,35 @@ mod tests {
         assert_eq!(
             local(&context, &invocation(&["version", "list"]), root.path()).unwrap(),
             format!("latest (global default, unresolved)\n\n{LOCAL_FOOTER}\n")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_does_not_duplicate_the_global_role_through_a_home_directory_alias() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("real-home");
+        let alias = root.path().join("aliased-home");
+        atomic_json(
+            &home.join(".uapkg/config.json"),
+            &serde_json::json!({"launcher":{"defaultCliVersion":"1.2.3"}}),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&home, &alias).unwrap();
+        let context = ContextPaths {
+            home: alias.join(".uapkg"),
+            executable: alias.join("uapkg"),
+            receipt: None,
+        };
+
+        assert_eq!(
+            local(
+                &context,
+                &invocation(&["version", "list"]),
+                &home.canonicalize().unwrap(),
+            )
+            .unwrap(),
+            format!("1.2.3 (global default, not installed)\n\n{LOCAL_FOOTER}\n")
         );
     }
 }
