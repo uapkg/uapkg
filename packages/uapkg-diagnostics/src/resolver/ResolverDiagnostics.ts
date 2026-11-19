@@ -54,20 +54,32 @@ export interface ReleaseAgeBlockedData {
 
 export type ReleaseAgeBlockedDiagnostic = DiagnosticBase<'RELEASE_AGE_BLOCKED', ReleaseAgeBlockedData>;
 
-export function createReleaseAgeBlockedDiagnostic(data: ReleaseAgeBlockedData): ReleaseAgeBlockedDiagnostic {
-  const versions = data.candidates.map(({ version, publishedAt }) => {
-    const date = new Date(publishedAt * 1000);
-    const published = Number.isNaN(date.getTime()) ? `Unix timestamp ${publishedAt}` : date.toISOString();
-    return `  ${version}  published ${published}`;
-  });
+function formatUnixTime(seconds: number | bigint): string {
+  const date = new Date(Number(seconds) * 1000);
+  return Number.isNaN(date.getTime()) ? `Unix timestamp ${seconds}` : date.toISOString();
+}
+
+export function createReleaseAgeBlockedDiagnostic(
+  data: ReleaseAgeBlockedData,
+  minimumAgeSeconds?: number,
+): ReleaseAgeBlockedDiagnostic {
+  const message = [
+    `Cannot resolve package "${data.packageName}" from registry "${data.registry}".`,
+    `These versions match ${data.ranges.join(' and ')} and are still within the ${data.minimumReleaseAge} cooldown.`,
+  ];
+  let first = data.candidates[0];
+  for (const candidate of data.candidates) {
+    message.push(`  ${candidate.version}  published ${formatUnixTime(candidate.publishedAt)}`);
+    if (candidate.publishedAt < first.publishedAt) first = candidate;
+  }
+  if (first && minimumAgeSeconds !== undefined) {
+    const eligibleAt = BigInt(first.publishedAt) + BigInt(minimumAgeSeconds);
+    message.push(`Version ${first.version} reaches the minimum release age first, at ${formatUnixTime(eligibleAt)}.`);
+  }
   return {
     level: 'error',
     code: 'RELEASE_AGE_BLOCKED',
-    message: [
-      `Cannot resolve package "${data.packageName}" from registry "${data.registry}".`,
-      `These versions match ${data.ranges.join(' and ')} and are still within the ${data.minimumReleaseAge} cooldown.`,
-      ...versions,
-    ].join('\n'),
+    message: message.join('\n'),
     hint: `To allow newer releases for this command, run ${data.overrideCommand}`,
     data,
   };

@@ -6,7 +6,6 @@ import { DependencyMutator } from '@uapkg/package-manifest';
 import { exactDeclaredVersion } from '@uapkg/registry-core';
 import type { Dependency } from '@uapkg/package-manifest-schema';
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
-import { DependencyAddResolver } from '#cli/commands/add/DependencyAddResolver.ts';
 import type { Command } from '#cli/commands/Command.ts';
 import { InstallCommand } from '#cli/commands/InstallCommand.ts';
 import { findDeclaredDependency, releaseAgeOverrideCommand } from '#cli/commands/PackageOperation.ts';
@@ -22,13 +21,7 @@ export interface AddCommandOptions {
   readonly ignoreReleaseAge?: boolean;
 }
 
-/**
- * `uapkg add <@Org/Name@range>` — parse the spec, mutate the manifest,
- * delegate to `InstallCommand` for the resolve/install/postinstall pipeline.
- *
- * This command is deliberately thin — it is a manifest-mutation shim around
- * `install`. All resolution/installation invariants live one level down.
- */
+/** Stage the requested dependency so its version can be resolved along with the rest of the project. */
 export class AddCommand implements Command {
   public constructor(
     private readonly root: CompositionRoot,
@@ -45,7 +38,7 @@ export class AddCommand implements Command {
     const lockResult = await this.root.packageManifest.readLockfileOptional();
     if (!lockResult.ok) return this.fail(lockResult.diagnostics);
     const original = manifestResult.value;
-    const name = spec.name as unknown as string;
+    const name = spec.name;
     const declared = findDeclaredDependency(original, name);
     const overrides = original.kind === 'project' ? original.overrides : undefined;
     const override = overrides && Object.hasOwn(overrides, name) ? overrides[name] : undefined;
@@ -57,7 +50,7 @@ export class AddCommand implements Command {
       declared?.dependency ??
       override ??
       (locked ? { version: VersionRangeSchema.parse(`^${locked.version}`), registry: locked.registry } : undefined);
-    const newRoot = declared === undefined && override === undefined && locked === undefined;
+    const newRoot = existing === undefined;
 
     const registryInput =
       this.options.registry ??
@@ -66,29 +59,16 @@ export class AddCommand implements Command {
         : ((this.root.config.get('registry') as string | null) ?? DEFAULT_REGISTRY_ALIAS));
     const registry = RegistryNameSchema.safeParse(registryInput);
     if (!registry.success) return this.fail([createRegistryNotFoundDiagnostic(registryInput)]);
-    const commandDiagnostics = [...manifestResult.diagnostics, ...lockResult.diagnostics];
-    let dependency: Dependency;
-    let requiredVersion = spec.range === undefined ? undefined : exactDeclaredVersion(spec.range);
-    if (newRoot && spec.range === undefined) {
-      const resolved = await new DependencyAddResolver(this.root).resolve(spec, registry.data);
-      if (!resolved.ok) return this.fail(resolved.diagnostics);
-      dependency = resolved.value.dependency;
-      requiredVersion = resolved.value.resolvedVersion;
-      commandDiagnostics.push(...resolved.diagnostics);
-    } else {
-      dependency = {
-        version: spec.range ?? existing!.version,
-        ...(registry.data !== DEFAULT_REGISTRY_ALIAS ? { registry: registry.data } : {}),
-        ...(existing?.path !== undefined ? { path: existing.path } : {}),
-      };
-    }
+    const dependency: Dependency = {
+      version: spec.range ?? existing?.version ?? VersionRangeSchema.parse('*'),
+      ...(registry.data !== DEFAULT_REGISTRY_ALIAS ? { registry: registry.data } : {}),
+      ...(existing?.path !== undefined ? { path: existing.path } : {}),
+    };
+    const requiredVersion = spec.range === undefined ? undefined : exactDeclaredVersion(spec.range);
+    const bucket = this.options.dev ? 'devDependencies' : (declared?.bucket ?? 'dependencies');
+    const pin = this.options.pin;
+    const stagedManifest = new DependencyMutator().addDependency(original, name, dependency, { bucket, pin });
 
-    const stagedManifest = new DependencyMutator().addDependency(original, name, dependency, {
-      bucket: this.options.dev ? 'devDependencies' : (declared?.bucket ?? 'dependencies'),
-      pin: this.options.pin,
-    });
-
-    // Delegate to Install for the resolve/execute/postinstall pipeline.
     const install = new InstallCommand(this.root, {
       force: this.options.force,
       frozen: false,
@@ -96,12 +76,13 @@ export class AddCommand implements Command {
       outputFormat: this.options.outputFormat,
       ignoreReleaseAge: this.options.ignoreReleaseAge,
       command: 'add',
-      diagnostics: commandDiagnostics,
+      diagnostics: [...manifestResult.diagnostics, ...lockResult.diagnostics],
       resolution: {
         originalManifest: original,
         ...(!isDeepStrictEqual(stagedManifest, original) ? { stagedManifest } : {}),
+        ...(newRoot && spec.range === undefined ? { bareAdd: { name, bucket, pin } } : {}),
         previousLockfile: lockResult.value,
-        updateTargets: newRoot ? undefined : [name],
+        updateTargets: [name],
         newRoots: newRoot ? [name] : [],
         requiredVersions: requiredVersion === undefined ? undefined : { [name]: requiredVersion },
         nowMs,

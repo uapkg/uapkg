@@ -13,12 +13,43 @@ import {
   createDiagnostic,
   createIoErrorDiagnostic,
   createParseErrorDiagnostic,
+  createReleaseAgeBlockedDiagnostic,
   createUnknownErrorDiagnostic,
   DiagnosticBag,
   fail,
   fromDiagnostics,
   ok,
 } from '../src/index.ts';
+
+describe('Package release age diagnostics', () => {
+  const blocked = {
+    packageName: 'example',
+    registry: 'default',
+    ranges: ['*'],
+    minimumReleaseAge: '3d',
+    candidates: [
+      { version: '2.0.0', publishedAt: Date.parse('2026-01-02T00:00:00Z') / 1000 },
+      { version: '1.5.0', publishedAt: Date.parse('2026-01-01T12:30:00Z') / 1000 },
+    ],
+    overrideCommand: 'uapkg add example --ignore-release-age',
+  };
+
+  it('shows which matching version reaches the cooldown first and gives the original retry command', () => {
+    const diagnostic = createReleaseAgeBlockedDiagnostic(blocked, 3 * 86400);
+    expect(diagnostic.message).toContain(
+      'Version 1.5.0 reaches the minimum release age first, at 2026-01-04T12:30:00.000Z',
+    );
+    expect(diagnostic.hint).toContain('uapkg add example --ignore-release-age');
+  });
+
+  it('displays the exact Unix time when eligibility is beyond the supported date range', () => {
+    const diagnostic = createReleaseAgeBlockedDiagnostic(
+      { ...blocked, candidates: [{ version: '1.5.0', publishedAt: Number.MAX_SAFE_INTEGER }] },
+      3 * 86400,
+    );
+    expect(diagnostic.message).toContain(`first, at Unix timestamp ${BigInt(Number.MAX_SAFE_INTEGER) + 259200n}.`);
+  });
+});
 
 describe('Control-plane diagnostics', () => {
   it('exposes reauthorization conflicts through the login and unified diagnostic unions', () => {

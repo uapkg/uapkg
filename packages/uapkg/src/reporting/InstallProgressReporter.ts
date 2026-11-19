@@ -72,11 +72,14 @@ export class InstallProgressReporter {
       if (options.showEmpty) this.sink.writeLine('0 held back.');
       return;
     }
-    this.sink.writeLine(`${releases.length} held back by minimum release age (${minimumReleaseAge}):`);
+    this.sink.writeLine(`${releases.length} held back by minimum release age (${minimumReleaseAge}).`);
     for (const release of releases) {
-      this.sink.writeLine(
-        `  ${release.name} [${release.registry}]: ${release.selectedVersion} selected; ${release.blockedVersion} eligible in ${formatRemainingAge(release.eligibleInSeconds)}${release.blockedDependency ? ` (waiting for ${release.blockedDependency.name}@${release.blockedDependency.version})` : ''}`,
-      );
+      const remaining = formatRemainingAge(release.eligibleInSeconds);
+      const dependency = release.blockedDependency;
+      const reason = dependency
+        ? `Version ${release.blockedVersion} is held back because ${dependency.name}@${dependency.version} will be eligible in ${remaining}.`
+        : `Version ${release.blockedVersion} will be eligible in ${remaining}.`;
+      this.sink.writeLine(`  Selected ${release.name}@${release.selectedVersion} from ${release.registry}. ${reason}`);
     }
     if (options.retryCommand) {
       this.sink.writeLine(`Use \`${options.retryCommand}\` to ignore the minimum release age for this command.`);

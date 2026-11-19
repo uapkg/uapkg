@@ -1,7 +1,7 @@
 import { fail, ok, type Diagnostic, type Result } from '@uapkg/diagnostics';
 import type { DownloadStatusSnapshot, InstallReport } from '@uapkg/installer';
-import type { HeldBackRelease, ManifestInstallReport, ResolverOptions } from '@uapkg/package-manifest';
-import { ManifestSchema, type Lockfile, type Manifest } from '@uapkg/package-manifest-schema';
+import type { HeldBackRelease, ManifestInstallOptions, ManifestInstallReport } from '@uapkg/package-manifest';
+import { ManifestSchema, type Lockfile } from '@uapkg/package-manifest-schema';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { CompositionRoot } from '../../src/app/CompositionRoot.ts';
 import { AddCommand, type AddCommandOptions } from '../../src/commands/AddCommand.ts';
@@ -9,7 +9,6 @@ import { InstallCommand } from '../../src/commands/InstallCommand.ts';
 import { RemoveCommand } from '../../src/commands/RemoveCommand.ts';
 import { UpdateCommand } from '../../src/commands/UpdateCommand.ts';
 
-type ResolutionRequest = ResolverOptions & { originalManifest?: Manifest; stagedManifest?: Manifest };
 const noActions: InstallReport = {
   plan: { actions: [], summary: { added: 0, updated: 0, removed: 0, unchanged: 0, totalBytes: 0 } },
   outcomes: [],
@@ -34,7 +33,7 @@ function fixture(input: Record<string, unknown> = {}, previousLockfile: Lockfile
     writeManifest: vi.fn(),
     addDependency: vi.fn(),
     removeDependency: vi.fn(),
-    installWithReport: vi.fn(async (options: ResolutionRequest): Promise<Result<ManifestInstallReport>> =>
+    installWithReport: vi.fn(async (options: ManifestInstallOptions): Promise<Result<ManifestInstallReport>> =>
       ok({
         manifest: options.stagedManifest ? ManifestSchema.parse(options.stagedManifest) : original,
         lockfile: previousLockfile ?? emptyLock,
@@ -44,8 +43,6 @@ function fixture(input: Record<string, unknown> = {}, previousLockfile: Lockfile
       }),
     ),
   };
-  const resolvePackage = vi.fn(async () => ok({ version: '1.4.0', entry: {} }));
-  const registry = { resolvePackage };
   const installer = {
     getStatusStream: vi.fn(() => statusStream()),
     execute: vi.fn(async () => ok(noActions)),
@@ -59,7 +56,6 @@ function fixture(input: Record<string, unknown> = {}, previousLockfile: Lockfile
     json,
     diagnostics,
     config: { get: vi.fn(() => 'official') },
-    registryCore: { getOrCreateRegistry: vi.fn(() => ok(registry)) },
     postinstall: { run: vi.fn() },
   } as unknown as CompositionRoot;
   const add = (options: Partial<AddCommandOptions> = {}) =>
@@ -72,7 +68,7 @@ function fixture(input: Record<string, unknown> = {}, previousLockfile: Lockfile
       outputFormat: 'json',
       ...options,
     }).execute();
-  return { root, original, packageManifest, resolvePackage, installer, json, diagnostics, heldBack, add };
+  return { root, original, packageManifest, installer, json, diagnostics, heldBack, add };
 }
 
 async function* statusStream(): AsyncGenerator<DownloadStatusSnapshot> {
@@ -82,19 +78,20 @@ async function* statusStream(): AsyncGenerator<DownloadStatusSnapshot> {
 afterEach(() => vi.restoreAllMocks());
 
 describe('package resolution command integration', () => {
-  it('binds a genuinely new bare add to its latest-stable preflight selection', async () => {
+  it('asks the shared resolver to choose a new bare add before saving its range', async () => {
     const f = fixture();
     vi.spyOn(Date, 'now').mockReturnValue(123456);
     expect(await f.add()).toBe(0);
     const request = f.packageManifest.installWithReport.mock.calls[0][0];
     expect(request).toMatchObject({
       newRoots: ['example'],
-      requiredVersions: { example: '1.4.0' },
+      updateTargets: ['example'],
+      requiredVersions: undefined,
+      bareAdd: { name: 'example', bucket: 'dependencies', pin: false },
       nowMs: 123456,
       previousLockfile: null,
     });
-    expect(ManifestSchema.parse(request.stagedManifest).dependencies?.example.version).toBe('^1.4.0');
-    expect(f.resolvePackage).toHaveBeenCalledWith('example', '*', 'official');
+    expect(request.stagedManifest?.dependencies?.example).toEqual({ version: '*', registry: 'official' });
     expect(f.packageManifest.addDependency).not.toHaveBeenCalled();
     expect(f.original.dependencies).toBeUndefined();
     expect(f.json.emit).toHaveBeenCalledWith(expect.objectContaining({ command: 'add', status: 'ok' }));
@@ -105,7 +102,8 @@ describe('package resolution command integration', () => {
     expect(await f.add({ spec: 'constructor' })).toBe(0);
     expect(f.packageManifest.installWithReport.mock.calls[0][0]).toMatchObject({
       newRoots: ['constructor'],
-      requiredVersions: { constructor: '1.4.0' },
+      requiredVersions: undefined,
+      bareAdd: { name: 'constructor' },
     });
   });
 
@@ -122,14 +120,16 @@ describe('package resolution command integration', () => {
     expect(f.packageManifest.installWithReport).not.toHaveBeenCalled();
   });
 
-  it('does not turn an explicit new range into an exact preflight floor', async () => {
+  it.each(['^1.0.0', '*'])('preserves the explicitly requested range %s for a new package', async (range) => {
     const f = fixture();
-    expect(await f.add({ spec: 'example@^1.0.0' })).toBe(0);
-    expect(f.packageManifest.installWithReport.mock.calls[0][0]).toMatchObject({
+    expect(await f.add({ spec: `example@${range}` })).toBe(0);
+    const request = f.packageManifest.installWithReport.mock.calls[0][0];
+    expect(request).toMatchObject({
       newRoots: ['example'],
       requiredVersions: undefined,
     });
-    expect(f.resolvePackage).not.toHaveBeenCalled();
+    expect(request.bareAdd).toBeUndefined();
+    expect(request.stagedManifest?.dependencies?.example.version).toBe(range);
   });
 
   it('preserves an existing omitted registry identity when the configured add registry differs', async () => {
@@ -138,7 +138,6 @@ describe('package resolution command integration', () => {
     const request = f.packageManifest.installWithReport.mock.calls[0][0];
     expect(request).not.toHaveProperty('stagedManifest');
     expect(request.originalManifest?.dependencies?.example.registry).toBeUndefined();
-    expect(f.resolvePackage).not.toHaveBeenCalled();
   });
 
   it('treats an existing project override as existing intent without a new-add bypass', async () => {
@@ -150,7 +149,6 @@ describe('package resolution command integration', () => {
       version: '^1.0.0',
       registry: 'private',
     });
-    expect(f.resolvePackage).not.toHaveBeenCalled();
   });
 
   it.each(['add', 'update'] as const)(
@@ -181,7 +179,6 @@ describe('package resolution command integration', () => {
     const request = f.packageManifest.installWithReport.mock.calls[0][0];
     expect(request).toMatchObject({ updateTargets: ['example'], newRoots: [], requiredVersions: undefined });
     expect(request).not.toHaveProperty('stagedManifest');
-    expect(f.resolvePackage).not.toHaveBeenCalled();
     expect(f.original.devDependencies?.example.path).toBe('Plugins/Custom');
   });
 
@@ -203,7 +200,6 @@ describe('package resolution command integration', () => {
       version: '^1.0.0',
       registry: 'private',
     });
-    expect(f.resolvePackage).not.toHaveBeenCalled();
   });
 
   it('validates every update spec before writing or installing any range changes', async () => {

@@ -69,28 +69,28 @@ function versions(result: Awaited<ReturnType<typeof resolve>>) {
 
 describe('shared graph release age provenance', () => {
   it.each([
-    ['fresh', 'protected'],
-    ['protected', 'fresh'],
-  ])('keeps a shared descendant protected with root declaration order %s then %s', async (first, second) => {
+    ['alpha', 'zeta'],
+    ['zeta', 'alpha'],
+  ])('keeps a shared descendant protected when adding %s to a project that has %s', async (newRoot, existingRoot) => {
     const fixture = registry({
-      fresh: { '1.0.0': entry({ shared: '^1.0.0' }, 60) },
-      protected: { '1.0.0': entry({ left: '1.0.0', right: '1.0.0' }) },
+      [newRoot]: { '1.0.0': entry({ shared: '^1.0.0' }, 60) },
+      [existingRoot]: { '1.0.0': entry({ left: '1.0.0', right: '1.0.0' }) },
       left: { '1.0.0': entry({ shared: '^1.0.0' }) },
       right: { '1.0.0': entry({ shared: '^1.0.0' }) },
       shared: { '1.0.0': entry(), '1.1.0': entry({}, 60) },
     });
     const result = await resolve(
       fixture,
-      { [first]: '*', [second]: '*' },
+      { [existingRoot]: '*', [newRoot]: '*' },
       {
-        newRoots: ['fresh'],
-        requiredVersions: { fresh: '1.0.0' },
-        previousLockfile: previous({ protected: '1.0.0' }),
+        newRoots: [newRoot],
+        applyReleaseAgeToNewPackages: false,
+        previousLockfile: previous({ [existingRoot]: '1.0.0' }),
       },
     );
     expect(versions(result)).toEqual({
-      fresh: '1.0.0',
-      protected: '1.0.0',
+      [newRoot]: '1.0.0',
+      [existingRoot]: '1.0.0',
       left: '1.0.0',
       right: '1.0.0',
       shared: '1.0.0',
@@ -128,6 +128,7 @@ describe('shared graph release age provenance', () => {
       { fresh: '*' },
       {
         newRoots: ['fresh'],
+        applyReleaseAgeToNewPackages: false,
         requiredVersions: { fresh: '1.0.0' },
         previousLockfile: previous({ existing: '1.0.0' }),
       },

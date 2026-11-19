@@ -67,9 +67,10 @@ export function packageIdentity(registry: string, name: string): string {
  * be installed together. The requirement for `mesh` 2.x applied only to `terrain` 1.2.0.
  *
  * After each choice, the search follows the dependencies of the selected releases
- * again to see which packages need each plugin. A dependency introduced solely
- * by a new `uapkg add` can use a recent release. If an existing package also
- * needs that plugin, updates to it follow the minimum release age policy.
+ * again to see which packages need each plugin. If the project turns off the
+ * cooldown for new packages, a dependency introduced solely by a new add can
+ * use a recent release. A dependency shared with an existing package still
+ * follows the minimum release age policy.
  */
 export class ResolutionSearch {
   private readonly policy = new SemverSelectionPolicy();
@@ -215,7 +216,12 @@ export class ResolutionSearch {
       )
     )
       return true;
-    if (!this.previous.has(demand.key) && demand.requirements.every((requirement) => requirement.newTree)) return true;
+    if (
+      this.options.applyReleaseAgeToNewPackages === false &&
+      !this.previous.has(demand.key) &&
+      demand.requirements.every((requirement) => requirement.newTree)
+    )
+      return true;
     return releaseAgeEligible(entry.meta.publishedAt, this.minimumAgeMs, this.nowMs);
   }
 

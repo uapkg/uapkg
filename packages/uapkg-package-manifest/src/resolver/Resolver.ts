@@ -115,14 +115,17 @@ export class Resolver {
       if (blocked.length === 0) return fail(strict.diagnostics);
       const diagnostics = await Promise.all(
         blocked.map(async ({ demand }) =>
-          createReleaseAgeBlockedDiagnostic({
-            packageName: demand.name,
-            registry: demand.registry,
-            ranges: [...new Set(demand.requirements.map((requirement) => requirement.range))],
-            minimumReleaseAge,
-            candidates: await search.blockedReleases(demand),
-            overrideCommand: options.overrideCommand ?? 'uapkg install --ignore-release-age',
-          }),
+          createReleaseAgeBlockedDiagnostic(
+            {
+              packageName: demand.name,
+              registry: demand.registry,
+              ranges: [...new Set(demand.requirements.map((requirement) => requirement.range))],
+              minimumReleaseAge,
+              candidates: await search.blockedReleases(demand),
+              overrideCommand: options.overrideCommand ?? 'uapkg install --ignore-release-age',
+            },
+            minimumAgeMs / 1000,
+          ),
         ),
       );
       return fail(diagnostics);

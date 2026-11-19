@@ -37,7 +37,13 @@ const packageReleaseAgeSchema = DurationStringSchema.refine(
 
 export const packagesConfigSchema = z
   .object({
-    resolution: z.object({ minimumReleaseAge: packageReleaseAgeSchema.optional() }).strict().optional(),
+    resolution: z
+      .object({
+        minimumReleaseAge: packageReleaseAgeSchema.optional(),
+        applyReleaseAgeToNewPackages: z.boolean().describe('a boolean (true or false)').optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -222,7 +228,12 @@ export function getDefaultConfig(): ResolvedConfig {
       autoCLIUpdate: true,
       autoUpdate: { minimumReleaseAge: DurationStringSchema.parse('3d') },
     },
-    packages: { resolution: { minimumReleaseAge: DurationStringSchema.parse(DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE) } },
+    packages: {
+      resolution: {
+        minimumReleaseAge: DurationStringSchema.parse(DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE),
+        applyReleaseAgeToNewPackages: true,
+      },
+    },
     registries: {
       default: {
         url: registryUrlConfigSchema.parse(defaultRegistryUrl),

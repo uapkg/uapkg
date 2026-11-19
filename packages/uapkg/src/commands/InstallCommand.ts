@@ -125,7 +125,8 @@ export class InstallCommand implements Command {
     progress.renderSummary(plan.summary);
     progress.renderHeldBack(heldBack, minimumReleaseAge, {
       showEmpty: this.commandName === 'update',
-      retryCommand: overrideCommand,
+      // A successful bare add saves a caret range. Repeating it may no longer allow the held-back major version.
+      retryCommand: this.options.resolution?.bareAdd ? undefined : overrideCommand,
     });
     return hasBranchFailures ? 1 : 0;
   }

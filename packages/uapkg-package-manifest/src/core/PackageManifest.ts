@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE } from '@uapkg/common';
-import type { PackageName } from '@uapkg/common-schema';
+import { type PackageName, VersionRangeSchema } from '@uapkg/common-schema';
 import type { ConfigInstance } from '@uapkg/config';
 import {
   createDependencyNotFoundDiagnostic,
@@ -124,12 +124,14 @@ export class PackageManifest {
 
   private resolutionOptions(manifest: Manifest, options: ResolverOptions) {
     const configuredAge = this.config?.get('packages.resolution.minimumReleaseAge');
+    const configuredAgeForNewPackages = this.config?.get('packages.resolution.applyReleaseAgeToNewPackages');
     return {
       ...options,
       overrides: manifest.kind === 'project' ? (manifest.overrides ?? options.overrides) : options.overrides,
       minimumReleaseAge:
         options.minimumReleaseAge ??
         (typeof configuredAge === 'string' ? configuredAge : DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE),
+      applyReleaseAgeToNewPackages: options.applyReleaseAgeToNewPackages ?? configuredAgeForNewPackages !== false,
       nowMs: options.nowMs ?? Date.now(),
     };
   }
@@ -153,7 +155,7 @@ export class PackageManifest {
     const manifestResult = snapshot ? ok(snapshot) : await this.readManifest();
     bag.mergeArray(manifestResult.diagnostics);
     if (!manifestResult.ok || bag.hasErrors()) return bag.toFailure();
-    const manifest = manifestResult.value;
+    let manifest = manifestResult.value;
     const policy = this.resolutionOptions(manifest, options);
 
     if (options.frozen) {
@@ -201,10 +203,22 @@ export class PackageManifest {
     }
     if (bag.hasErrors()) return bag.toFailure();
 
+    if (options.bareAdd) {
+      const { name, bucket, pin } = options.bareAdd;
+      const declarations = manifest[bucket];
+      if (!declarations || !Object.hasOwn(declarations, name) || !Object.hasOwn(lockfile.packages, name)) {
+        bag.add(createDependencyNotFoundDiagnostic(name));
+        return bag.toFailure();
+      }
+      const version = VersionRangeSchema.parse(`^${lockfile.packages[name].version}`);
+      manifest = this.mutator.addDependency(manifest, name, { ...declarations[name], version }, { bucket, pin });
+    }
+
+    const writeManifest = options.stagedManifest !== undefined || options.bareAdd !== undefined;
     const writeLock = !previous.value || diff.added.length > 0 || diff.updated.length > 0 || diff.removed.length > 0;
-    if (options.stagedManifest || writeLock) {
+    if (writeManifest || writeLock) {
       const write = await this.installWriter.write(this.manifestRoot, [
-        ...(options.stagedManifest ? [{ name: 'uapkg.json' as const, contents: this.writer.serialize(manifest) }] : []),
+        ...(writeManifest ? [{ name: 'uapkg.json' as const, contents: this.writer.serialize(manifest) }] : []),
         ...(writeLock ? [{ name: 'uapkg.lock' as const, contents: this.lockWriter.serialize(lockfile) }] : []),
       ]);
       bag.mergeArray(write.diagnostics);

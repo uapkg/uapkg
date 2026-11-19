@@ -1,4 +1,6 @@
+import type { PackageName } from '@uapkg/common-schema';
 import type { Dependency, Lockfile, Manifest } from '@uapkg/package-manifest-schema';
+import type { DependencyBucket } from '#package-manifest/core/DependencyMutator.ts';
 
 /** Options shared by manifest operations. */
 export interface ManifestOperationOptions {
@@ -34,10 +36,12 @@ export interface ResolverOptions {
   readonly recursive?: boolean;
   /** Packages the user explicitly added that appear in neither the original manifest nor the previous lockfile. */
   readonly newRoots?: readonly string[];
-  /** Exact versions requested on the command line or selected for a new `uapkg add <name>`. */
+  /** Exact versions requested on the command line. */
   readonly requiredVersions?: Readonly<Record<string, string>>;
   readonly ignoreReleaseAge?: boolean;
   readonly minimumReleaseAge?: string;
+  /** Defaults to true. Set to false to exempt packages introduced exclusively by a new add. */
+  readonly applyReleaseAgeToNewPackages?: boolean;
   readonly nowMs?: number;
   readonly overrideCommand?: string;
 }
@@ -66,6 +70,8 @@ export interface ManifestInstallOptions extends ResolverOptions {
   /** The manifest as it was before `add`, `update`, or `remove` changed its dependencies. */
   readonly originalManifest?: Manifest;
   readonly stagedManifest?: Manifest;
+  /** Replace the temporary wildcard for a new bare add with a caret range based on the resolved version. */
+  readonly bareAdd?: { readonly name: PackageName; readonly bucket: DependencyBucket; readonly pin: boolean };
 }
 
 /** The result of dependency resolution. */

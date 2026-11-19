@@ -8,6 +8,7 @@ import { partialConfigSchema } from '../src/schema/configSchema.ts';
 
 const directories: string[] = [];
 const property = 'packages.resolution.minimumReleaseAge';
+const newPackagePolicy = 'packages.resolution.applyReleaseAgeToNewPackages';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'uapkg-package-resolution-config-'));
@@ -32,13 +33,31 @@ afterEach(() => {
 });
 
 describe('package resolution minimum release age configuration', () => {
-  it('defaults to three days without creating profile files', () => {
+  it('defaults to a three-day cooldown for new packages without creating profile files', () => {
     const { profile, cwd } = fixture();
     const config = createConfig({ cwd });
-    expect(config.get('packages')).toEqual({ resolution: { minimumReleaseAge: '3d' } });
+    expect(config.get('packages')).toEqual({
+      resolution: { minimumReleaseAge: '3d', applyReleaseAgeToNewPackages: true },
+    });
     expect(config.getWithOrigin(property)).toMatchObject({ value: '3d', source: 'default' });
+    expect(config.getWithOrigin(newPackagePolicy)).toMatchObject({ value: true, source: 'default' });
     expect(config.getDiagnostics()).toEqual([]);
     expect(fs.existsSync(profile)).toBe(false);
+  });
+
+  it('accepts a boolean opt-out and retains it when a higher layer supplies an invalid value', () => {
+    const { profile, cwd } = fixture();
+    write(path.join(profile, 'config.json'), { packages: { resolution: { applyReleaseAgeToNewPackages: false } } });
+    write(path.join(cwd, '.uapkg/config.json'), {
+      packages: { resolution: { applyReleaseAgeToNewPackages: 'false', minimumReleaseAge: '12h' } },
+    });
+    const config = createConfig({ cwd });
+    expect(parseConfigCliValue(newPackagePolicy, 'false')).toEqual({ ok: true, value: false, diagnostics: [] });
+    expect(config.getWithOrigin(newPackagePolicy)).toMatchObject({ value: false, source: 'global' });
+    expect(config.get(property)).toBe('12h');
+    expect(config.getDiagnostics()).toMatchObject([
+      { code: 'CONFIG_INVALID_VALUE', data: { path: newPackagePolicy, source: 'local', ignored: true } },
+    ]);
   });
 
   it.each(['0', '0s', '15m', '1w2d3h4m5s', '10000000w'])(

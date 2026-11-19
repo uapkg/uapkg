@@ -207,6 +207,7 @@ describe('flat graph cooldown search', () => {
       { fresh: '*', protected: '*' },
       {
         newRoots: ['fresh'],
+        applyReleaseAgeToNewPackages: false,
         requiredVersions: { fresh: '1.0.0' },
         previousLockfile: lock({ protected: '2.0.0', nested: '1.0.0', shared: '1.0.0' }),
       },
@@ -323,16 +324,25 @@ describe('flat graph cooldown search', () => {
     ).toEqual({ alpha: '1.0.0', child: '1.0.0' });
   });
 
-  it('bypasses age throughout a genuinely new tree, but binds the actual preflight root', async () => {
-    const f = fixture({
-      alpha: { '1.0.0': entry(), '2.0.0': entry({ child: '*' }, 30) },
-      child: { '1.0.0': entry({ leaf: '*' }, 30) },
-      leaf: { '1.0.0': entry({}, 30) },
-    });
-    expect(
-      selected(await resolve(f, { alpha: '^2.0.0' }, { newRoots: ['alpha'], requiredVersions: { alpha: '2.0.0' } })),
-    ).toEqual({ alpha: '2.0.0', child: '1.0.0', leaf: '1.0.0' });
-  });
+  it.each([
+    ['*', {}, '1.0.0', '1.0.0'],
+    ['2.0.0', {}, '2.0.0', '1.0.0'],
+    ['^2.0.0', {}, '2.0.0', '1.0.0'],
+    ['*', { applyReleaseAgeToNewPackages: false }, '2.0.1', '1.1.0'],
+    ['*', { ignoreReleaseAge: true }, '2.0.1', '1.1.0'],
+  ] as const)(
+    'selects a new root with %s and policy %j independently from its dependencies',
+    async (range, options, alpha, leaf) => {
+      const dependency = { child: '*' };
+      const f = fixture({
+        alpha: { '1.0.0': entry(dependency), '2.0.0': entry(dependency, 60), '2.0.1': entry(dependency, 30) },
+        child: { '1.0.0': entry({ leaf: '*' }) },
+        leaf: { '1.0.0': entry(), '1.1.0': entry({}, 30) },
+      });
+      const result = await resolve(f, { alpha: range }, { newRoots: ['alpha'], ...options });
+      expect(selected(result)).toEqual({ alpha, child: '1.0.0', leaf });
+    },
+  );
 
   it('does not treat an inherited requiredVersions property as an exact selection', async () => {
     expect(

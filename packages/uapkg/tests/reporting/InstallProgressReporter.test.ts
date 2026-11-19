@@ -57,7 +57,7 @@ describe('InstallProgressReporter', () => {
     expect(sink.lines[0]).toMatch(/1 added, 2 updated, 3 removed, 4 unchanged/);
   });
 
-  it('reports held-back releases with remaining duration and an optional dependency blocker', () => {
+  it('reports the selected version and when a held-back dependency reaches the minimum age', () => {
     const sink = new MemoryTextSink();
     new InstallProgressReporter(sink).renderHeldBack(
       [
@@ -75,9 +75,27 @@ describe('InstallProgressReporter', () => {
       { retryCommand: 'uapkg update example --ignore-release-age' },
     );
     expect(sink.joined()).toContain('1 held back by minimum release age (3d)');
-    expect(sink.joined()).toContain('1d 1h 1m 1s');
-    expect(sink.joined()).toContain('waiting for child@2.0.0');
+    expect(sink.joined()).toContain('Selected example@1.0.0 from official.');
+    expect(sink.joined()).toContain('Version 1.1.0 is held back because child@2.0.0 will be eligible in 1d 1h 1m 1s.');
     expect(sink.joined()).toContain('uapkg update example --ignore-release-age');
+  });
+
+  it('names the newer release directly when its own publication time holds it back', () => {
+    const sink = new MemoryTextSink();
+    new InstallProgressReporter(sink).renderHeldBack(
+      [
+        {
+          name: 'example',
+          registry: 'official',
+          selectedVersion: '1.4.9',
+          blockedVersion: '2.0.0',
+          publishedAt: 100,
+          eligibleInSeconds: 255600,
+        },
+      ],
+      '3d',
+    );
+    expect(sink.joined()).toContain('Selected example@1.4.9 from official. Version 2.0.0 will be eligible in 2d 23h.');
   });
 
   it('explicitly reports an empty update hold count without an unnecessary retry tip', () => {
