@@ -82,7 +82,7 @@ export type ManifestWriteErrorDiagnostic = DiagnosticBase<
   }
 >;
 
-/** Remove was requested for a package that does not exist in manifest buckets. */
+/** The requested package is missing from the manifest's dependency declarations. */
 export type DependencyNotFoundDiagnostic = DiagnosticBase<
   'DEPENDENCY_NOT_FOUND',
   {
@@ -215,11 +215,14 @@ export function createManifestWriteErrorDiagnostic(filePath: string, reason: str
   };
 }
 
-export function createDependencyNotFoundDiagnostic(packageName: string): DependencyNotFoundDiagnostic {
+export function createDependencyNotFoundDiagnostic(
+  packageName: string,
+  level: 'info' | 'error' = 'info',
+): DependencyNotFoundDiagnostic {
   return {
-    level: 'info',
+    level,
     code: 'DEPENDENCY_NOT_FOUND',
-    message: `Package "${packageName}" is not declared in this manifest and will not be removed.`,
+    message: `Package "${packageName}" is not declared as a dependency in uapkg.json.`,
     hint: 'Run `uapkg list` to inspect currently declared dependencies.',
     data: { packageName },
   };

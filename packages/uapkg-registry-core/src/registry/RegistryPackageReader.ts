@@ -28,12 +28,12 @@ export class RegistryPackageReader {
   constructor(private readonly shortId: string) {}
 
   /** Read and validate a package registry manifest. */
-  async readPackageManifest(packageName: string): Promise<Result<PackageRegistryManifest>> {
+  async readPackageManifest(packageName: string, registryName?: string): Promise<Result<PackageRegistryManifest>> {
     const bag = new DiagnosticBag();
     const filePath = this.resolveManifestPath(packageName);
 
     if (!existsSync(filePath)) {
-      bag.add(createPackageNotFoundDiagnostic(packageName, this.shortId));
+      bag.add(createPackageNotFoundDiagnostic(packageName, registryName));
       return bag.toFailure();
     }
 

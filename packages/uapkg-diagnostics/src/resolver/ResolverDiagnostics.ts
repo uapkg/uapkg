@@ -22,12 +22,12 @@ export type CircularDepDiagnostic = DiagnosticBase<
   }
 >;
 
-/** Requested package could not be found in any configured registry. */
+/** The registry being searched has no entry for the requested package. */
 export type PackageNotFoundDiagnostic = DiagnosticBase<
   'PACKAGE_NOT_FOUND',
   {
     readonly packageName: string;
-    readonly registry: string;
+    readonly registry?: string;
   }
 >;
 
@@ -131,11 +131,13 @@ export function createCircularDepDiagnostic(path: readonly string[]): CircularDe
   };
 }
 
-export function createPackageNotFoundDiagnostic(packageName: string, registry: string): PackageNotFoundDiagnostic {
+export function createPackageNotFoundDiagnostic(packageName: string, registry?: string): PackageNotFoundDiagnostic {
   return {
     level: 'error',
     code: 'PACKAGE_NOT_FOUND',
-    message: `Package "${packageName}" not found in registry "${registry}".`,
+    message: registry
+      ? `Package "${packageName}" not found in registry "${registry}".`
+      : `Package "${packageName}" not found in the registry.`,
     hint: 'Verify the package name and ensure the registry is up-to-date.',
     data: { packageName, registry },
   };

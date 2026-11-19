@@ -38,7 +38,7 @@ function formatLockfileMissing(d: Diagnostic): string {
 
 function formatDependencyNotFound(d: Diagnostic): string {
   const data = (d as DependencyNotFoundDiagnostic).data;
-  const lines = [`[INFO DEPENDENCY_NOT_FOUND]: ${d.message}`, `  Package: ${data.packageName}`];
+  const lines = [`[${d.level.toUpperCase()} DEPENDENCY_NOT_FOUND]: ${d.message}`, `  Package: ${data.packageName}`];
   if (d.hint) lines.push(`  → ${d.hint}`);
   return lines.join('\n');
 }

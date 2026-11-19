@@ -38,6 +38,7 @@ function CircularDep({ diagnostic }: DiagnosticBodyProps): ReactElement {
 
 function PackageNotFound({ diagnostic }: DiagnosticBodyProps): ReactElement {
   const data = (diagnostic as PackageNotFoundDiagnostic).data;
+  if (!data.registry) return <Text>{diagnostic.message}</Text>;
   return (
     <Text>
       Could not find <Text color="cyan">{data.packageName}</Text> in registry <Text color="cyan">{data.registry}</Text>.

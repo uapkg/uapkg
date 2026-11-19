@@ -35,7 +35,6 @@ export class Registry {
   public readonly id: RegistryIdentifier;
   public readonly descriptor: RegistryDescriptor;
   public readonly shortId: string;
-  private readonly aliases = new Set<string>();
 
   private hasUpdatedThisProcess = false;
   private initPromise?: Promise<Result<void>>;
@@ -47,14 +46,13 @@ export class Registry {
   private ttlSeconds: number;
 
   private constructor(
-    initialAlias: string,
+    private readonly initialAlias: string,
     descriptor: RegistryDescriptor,
     id: RegistryIdentifier,
     shortId: string,
     gitBinary: string,
     ttlSeconds: number,
   ) {
-    this.aliases.add(initialAlias);
     this.descriptor = descriptor;
     this.id = id;
     this.shortId = shortId;
@@ -79,7 +77,6 @@ export class Registry {
 
   public registerAlias(alias: string, ttlSeconds?: number): void {
     if (alias.trim().length === 0) return;
-    this.aliases.add(alias);
     if (typeof ttlSeconds === 'number' && Number.isFinite(ttlSeconds)) {
       this.ttlSeconds = Math.min(this.ttlSeconds, ttlSeconds);
     }
@@ -124,11 +121,12 @@ export class Registry {
     logicalRegistryName?: string,
   ): Promise<Result<PackageRegistryManifest>> {
     const bag = new DiagnosticBag();
-    const readyResult = await this.ensureReady(logicalRegistryName);
+    const registryName = this.resolveDiagnosticRegistryName(logicalRegistryName);
+    const readyResult = await this.ensureReady(registryName);
     if (!readyResult.ok) return readyResult as Result<never>;
     bag.mergeArray(readyResult.diagnostics);
 
-    const packageResult = await this.packageReader.readPackageManifest(packageName);
+    const packageResult = await this.packageReader.readPackageManifest(packageName, registryName);
     if (!packageResult.ok) {
       bag.mergeArray(packageResult.diagnostics);
       return bag.toFailure();
@@ -162,13 +160,24 @@ export class Registry {
   // Internal
   // -------------------------------------------------------------------
 
-  private async ensureReady(logicalRegistryName?: string): Promise<Result<void>> {
+  private async ensureReady(registryName: string): Promise<Result<void>> {
     if (!this.initPromise) {
-      this.initPromise = this.ensureUpToDate({ logicalRegistryName }).then((r) =>
+      this.initPromise = this.ensureUpToDate({ logicalRegistryName: registryName }).then((r) =>
         r.ok ? ok(undefined, r.diagnostics) : r,
       );
     }
-    return this.initPromise;
+    const result = await this.initPromise;
+    // Aliases share a cache and one Git sync. Each caller's recovery command
+    // must use the name it selected, even if another alias started the sync.
+    if (!result.diagnostics.length) return result;
+    return {
+      ...result,
+      diagnostics: result.diagnostics.map((diagnostic) =>
+        diagnostic.code === 'REGISTRY_UNREACHABLE' && diagnostic.data.registryName !== registryName
+          ? createRegistryUnreachableDiagnostic({ ...diagnostic.data, registryName })
+          : diagnostic,
+      ),
+    };
   }
 
   private async performUpdate(logicalRegistryName?: string, forced = false): Promise<Result<RegistryUpdateResult>> {
@@ -243,21 +252,13 @@ export class Registry {
     const registryName = this.resolveDiagnosticRegistryName(logicalRegistryName);
     const safeUrl = sanitizeRegistryUrlForDisplay(this.descriptor.url);
 
-    const diagnostic = createRegistryUnreachableDiagnostic({
+    return createRegistryUnreachableDiagnostic({
       registryName,
       url: safeUrl,
       cause,
       initialized,
       httpStatus,
-      level: initialized ? 'warning' : 'error',
     });
-    return {
-      ...diagnostic,
-      message: `Git could not access the "${registryName}" registry at ${safeUrl}.`,
-      hint: `Confirm that the repository, network, and configured ref are available.
-For a private registry, configure system Git credentials and run 'uapkg registry auth ${registryName}'.
-Repository hosts may intentionally report an authorization failure as a missing repository.`,
-    };
   }
 
   private extractHttpStatus(text: string): number | undefined {
@@ -267,13 +268,6 @@ Repository hosts may intentionally report an authorization failure as a missing 
   }
 
   private resolveDiagnosticRegistryName(logicalRegistryName?: string): string {
-    if (logicalRegistryName && logicalRegistryName.trim().length > 0) {
-      return logicalRegistryName;
-    }
-
-    const aliases = [...this.aliases].sort((a, b) => a.localeCompare(b));
-    if (aliases.length === 0) return this.shortId;
-    if (aliases.length === 1) return aliases[0];
-    return `${aliases[0]} (+${aliases.length - 1} aliases)`;
+    return logicalRegistryName?.trim() ? logicalRegistryName : this.initialAlias;
   }
 }

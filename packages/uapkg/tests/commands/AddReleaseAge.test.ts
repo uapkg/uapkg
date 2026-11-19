@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { INTERNAL_PROFILE_HOME_ENV } from '@uapkg/common';
 import { ok } from '@uapkg/diagnostics';
 import { getRegistryRepoPath } from '@uapkg/registry-core';
@@ -98,6 +99,31 @@ describe('add with a local registry and project files', () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it.each(['default', 'studio'])('names the selected registry %s when a package is missing', async (registry) => {
+    const source = { url: 'https://example.test/studio' };
+    await writeJson(join(project, '.uapkg/config.json'), { registry, registries: { default: source, studio: source } });
+    root.config.reload();
+
+    const options = { spec: 'absent', registry: undefined };
+    const json = await add(options);
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.output)).toMatchObject({
+      status: 'error',
+      diagnostics: [
+        {
+          code: 'PACKAGE_NOT_FOUND',
+          message: `Package "absent" not found in registry "${registry}".`,
+          data: { packageName: 'absent', registry },
+        },
+      ],
+    });
+
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect((await add({ ...options, outputFormat: 'text' })).code).toBe(1);
+    const text = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(stripVTControlCharacters(text)).toContain(`Could not find absent in registry ${registry}.`);
   });
 
   it('writes the selected caret to the dev declaration and override, reporting the compatible newer major', async () => {

@@ -164,7 +164,7 @@ export class InstallPlanner {
       );
       return bag.toFailure();
     }
-    const registryType = await this.readRegistryType(registryResult.value.shortId);
+    const registryType = await this.readRegistryType(locked.registry, registryResult.value.shortId);
     if (!registryType.ok) {
       bag.mergeArray(registryType.diagnostics);
       return bag.toFailure();
@@ -190,35 +190,32 @@ export class InstallPlanner {
    * Missing, invalid, or unsupported metadata fails closed because package
    * validation cannot safely choose public or private policy without it.
    */
-  private async readRegistryType(shortId: string): Promise<Result<RegistryType>> {
+  private async readRegistryType(registry: RegistryName, shortId: string): Promise<Result<RegistryType>> {
+    function invalidRegistryMetaResult(issues: readonly string[]): Result<never> {
+      const bag = new DiagnosticBag();
+      bag.addError(
+        'INSTALL_REGISTRY_META_INVALID',
+        `Metadata for registry "${registry}" is missing, invalid, or uses an unsupported schema version.`,
+        { registry, shortId, issues },
+      );
+      return bag.toFailure();
+    }
+
     const metaPath = join(getRegistryRepoPath(shortId), '.uapkg', 'registry.meta.json');
     if (!existsSync(metaPath)) {
-      return invalidRegistryMetaResult(shortId, ['Required registry metadata file is missing.']);
+      return invalidRegistryMetaResult(['Required registry metadata file is missing.']);
     }
     try {
       const raw = await readFile(metaPath, 'utf8');
       const parsed = RegistryMetaSchema.safeParse(JSON.parse(raw) as unknown);
       if (!parsed.success) {
-        return invalidRegistryMetaResult(
-          shortId,
-          parsed.error.issues.map((issue) => issue.message),
-        );
+        return invalidRegistryMetaResult(parsed.error.issues.map((issue) => issue.message));
       }
       return ok(parsed.data.registry.registryType);
     } catch (error) {
-      return invalidRegistryMetaResult(shortId, [error instanceof Error ? error.message : String(error)]);
+      return invalidRegistryMetaResult([error instanceof Error ? error.message : String(error)]);
     }
   }
-}
-
-function invalidRegistryMetaResult(shortId: string, issues: readonly string[]): Result<never> {
-  const bag = new DiagnosticBag();
-  bag.addError(
-    'INSTALL_REGISTRY_META_INVALID',
-    `Registry metadata for cache "${shortId}" is invalid or uses an unsupported schema version.`,
-    { shortId, issues },
-  );
-  return bag.toFailure();
 }
 
 // Local aliases — avoid importing schema types directly to keep this file small.

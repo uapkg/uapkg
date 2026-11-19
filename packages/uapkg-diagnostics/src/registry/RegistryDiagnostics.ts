@@ -209,10 +209,11 @@ export function createRegistryUnreachableDiagnostic(input: {
   return {
     level: input.level ?? (input.initialized ? 'warning' : 'error'),
     code: 'REGISTRY_UNREACHABLE',
-    message: `The "${input.registryName}" registry could not be reached at ${input.url}.`,
+    message: `Git could not access the "${input.registryName}" registry at ${input.url}.`,
     emitPolicy: 'once',
-    hint: `Verify the registry URL with 'uapkg config get registries.${input.registryName}.url --trace'.
-The registry may also be temporarily unavailable.`,
+    hint: `Confirm that the repository, network, and configured ref are available.
+For a private registry, configure system Git credentials and run 'uapkg registry auth ${input.registryName}'.
+Repository hosts may intentionally report an authorization failure as a missing repository.`,
     data: {
       registryName: input.registryName,
       url: input.url,

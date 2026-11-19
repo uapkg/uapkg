@@ -1,9 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
 import { parsePackageSpec } from '@uapkg/common';
-import type { PackageName } from '@uapkg/common-schema';
 import {
+  createDependencyNotFoundDiagnostic,
   createInvalidPackageSpecDiagnostic,
-  createPackageNotFoundDiagnostic,
   type Diagnostic,
 } from '@uapkg/diagnostics';
 import { DependencyMutator } from '@uapkg/package-manifest';
@@ -57,10 +56,10 @@ export class UpdateCommand implements Command {
         );
         continue;
       }
-      const name = spec.name as unknown as string;
+      const name = spec.name;
       const declared = findDeclaredDependency(stagedManifest, name);
       if (!declared) {
-        diagnostics.push(createPackageNotFoundDiagnostic(name as PackageName, String(stagedManifest.name)));
+        diagnostics.push(createDependencyNotFoundDiagnostic(name, 'error'));
         continue;
       }
       targets.push(name);

@@ -108,7 +108,7 @@ function DependencyNotFound({ diagnostic }: DiagnosticBodyProps): ReactElement {
   const data = (diagnostic as DependencyNotFoundDiagnostic).data;
   return (
     <Text>
-      Package <Text color="cyan">{data.packageName}</Text> is not declared and will not be removed.
+      Package <Text color="cyan">{data.packageName}</Text> is not declared as a dependency in uapkg.json.
     </Text>
   );
 }

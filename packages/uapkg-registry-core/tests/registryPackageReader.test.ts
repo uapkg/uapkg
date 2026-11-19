@@ -2,9 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { INTERNAL_PROFILE_HOME_ENV } from '@uapkg/common';
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test';
-import { getRegistryRepoPath } from '../src/paths/RegistryPaths.ts';
+import type { RegistryIdentifier } from '@uapkg/common-schema';
+import { createGitErrorDiagnostic, fail } from '@uapkg/diagnostics';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
+import { getRegistryMetadataPath, getRegistryRepoPath } from '../src/paths/RegistryPaths.ts';
+import { Registry } from '../src/registry/Registry.ts';
 import { RegistryPackageReader } from '../src/registry/RegistryPackageReader.ts';
+import { RegistryUpdater } from '../src/registry/RegistryUpdater.ts';
 import {
   registryMetaFixture,
   type RegistryMetaFixtureFormat,
@@ -20,9 +24,63 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   if (previousProfileHome === undefined) delete process.env[INTERNAL_PROFILE_HOME_ENV];
   else process.env[INTERNAL_PROFILE_HOME_ENV] = previousProfileHome;
   await rm(profileHome, { recursive: true, force: true });
+});
+
+it('reports a missing package without a cache ID when the reader has no configured name', async () => {
+  const result = await new RegistryPackageReader(shortId).readPackageManifest('missing');
+
+  expect(result.ok).toBe(false);
+  expect(result.diagnostics).toMatchObject([{ code: 'PACKAGE_NOT_FOUND', data: { packageName: 'missing' } }]);
+  expect(JSON.stringify(result.diagnostics)).not.toContain(shortId);
+});
+
+it.each([false, true])('names each alias when a shared sync fails (initialized cache: %s)', async (initialized) => {
+  const id = 'a'.repeat(64) as RegistryIdentifier;
+  const registry = Registry.create(
+    'default',
+    { type: 'git', url: 'https://example.test/registry', ref: { type: 'branch', value: 'main' } },
+    id,
+    shortId,
+    'git',
+    300,
+  );
+  registry.registerAlias('studio');
+  if (initialized) {
+    await mkdir(getRegistryRepoPath(shortId), { recursive: true });
+    await writeFile(
+      getRegistryMetadataPath(shortId),
+      JSON.stringify({ registryIdentifier: id, lastRegistrySyncAt: 1 }),
+    );
+  }
+  const update = vi
+    .spyOn(RegistryUpdater.prototype, 'update')
+    .mockResolvedValue(fail([createGitErrorDiagnostic('git fetch', 'unreachable', 1)]));
+
+  const [first, second] = await Promise.all([
+    registry.getPackageManifest('missing'),
+    registry.getPackageManifest('missing', 'studio'),
+  ]);
+
+  expect(update).toHaveBeenCalledOnce();
+  for (const [result, name] of [
+    [first, 'default'],
+    [second, 'studio'],
+  ] as const) {
+    expect(result.ok).toBe(false);
+    const unreachable = {
+      code: 'REGISTRY_UNREACHABLE',
+      level: initialized ? 'warning' : 'error',
+      message: expect.stringContaining(`"${name}" registry`),
+      hint: expect.stringContaining(`uapkg registry auth ${name}'`),
+      data: { registryName: name },
+    };
+    const missing = { code: 'PACKAGE_NOT_FOUND', data: { packageName: 'missing', registry: name } };
+    expect(result.diagnostics).toMatchObject(initialized ? [unreachable, missing] : [unreachable]);
+  }
 });
 
 describe.each(['reduced', 'rich'] as const)('RegistryPackageReader (%s metadata)', (format) => {

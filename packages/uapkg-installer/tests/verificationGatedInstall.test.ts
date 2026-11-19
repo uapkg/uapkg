@@ -171,12 +171,13 @@ function buildConfig(): ConstructorParameters<typeof Installer>[0]['config'] {
 
 function buildLockfile(
   entries: Record<string, { version: string; sha256: string; dependencies?: Record<string, string> }>,
+  registry = 'default',
 ): Lockfile {
   const packages: Record<string, unknown> = {};
   for (const [name, entry] of Object.entries(entries)) {
     packages[name] = {
       version: entry.version,
-      registry: 'default',
+      registry,
       integrity: `sha256:${entry.sha256}`,
       gitTree: 'a'.repeat(40),
       ...(entry.dependencies ? { dependencies: entry.dependencies } : {}),
@@ -564,16 +565,14 @@ describe('verification-gated partial installation', () => {
       kind: 'plugin',
     });
     const fixtures = new Map<string, RegistryFixtureVersion>([[fixtureKey('missing-meta-pkg', '1.0.0'), { artifact }]]);
-    const lockfile = buildLockfile({
-      'missing-meta-pkg': { version: '1.0.0', sha256: artifact.sha256 },
-    });
+    const lockfile = buildLockfile({ 'missing-meta-pkg': { version: '1.0.0', sha256: artifact.sha256 } }, 'studio');
 
     const { result } = await runInstall(fixtures, lockfile, ['missing-meta-pkg'], shortId);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(
-      result.diagnostics.some((diagnostic) => (diagnostic.code as string) === 'INSTALL_REGISTRY_META_INVALID'),
-    ).toBe(true);
+    const diagnostic = result.diagnostics.find((item) => (item.code as string) === 'INSTALL_REGISTRY_META_INVALID');
+    expect(diagnostic?.message).toContain('registry "studio"');
+    expect(diagnostic?.message).not.toContain(shortId);
   });
 
   it.each(['reduced', 'rich'] as const)(

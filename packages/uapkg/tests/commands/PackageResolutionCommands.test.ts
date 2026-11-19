@@ -117,6 +117,18 @@ describe('package resolution command integration', () => {
         outputFormat: 'json',
       }).execute(),
     ).toBe(1);
+    expect(f.json.emit).toHaveBeenCalledWith({
+      command: 'update',
+      status: 'error',
+      diagnostics: [
+        expect.objectContaining({
+          code: 'DEPENDENCY_NOT_FOUND',
+          level: 'error',
+          message: 'Package "constructor" is not declared as a dependency in uapkg.json.',
+          data: { packageName: 'constructor' },
+        }),
+      ],
+    });
     expect(f.packageManifest.installWithReport).not.toHaveBeenCalled();
   });
 
