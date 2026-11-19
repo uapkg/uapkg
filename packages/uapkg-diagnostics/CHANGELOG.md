@@ -1,5 +1,13 @@
 # @uapkg/diagnostics
 
+## 1.7.5
+
+### Patch Changes
+
+- [`81f20a5`](https://github.com/uapkg/uapkg/commit/81f20a5d2bf4e4ecf825d987266a872537b0c2f4) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Apply the configured minimum release age when adding a new plugin and its dependencies. A bare `uapkg add` saves the highest eligible stable version that works with the project and reports any newer compatible release held back by age.
+
+  Set `packages.resolution.applyReleaseAgeToNewPackages` to `false` to opt out for newly added plugins and their exclusively new dependencies. Use `--ignore-release-age` to bypass the cooldown for a single command.
+
 ## 1.7.4
 
 ### Patch Changes

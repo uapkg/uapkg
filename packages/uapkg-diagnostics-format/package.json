@@ -1,6 +1,6 @@
 {
   "name": "@uapkg/diagnostics-format",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "engines": {
     "node": ">=22"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@uapkg/package-claims",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "engines": {
     "node": ">=22"
   },
