@@ -29,8 +29,11 @@ export const launcherConfigSchema = z
 
 const packageReleaseAgeSchema = DurationStringSchema.refine(
   (value) => parseReleaseAgeMilliseconds(value) !== undefined,
-  'Expected a duration representable as a non-negative safe integer in milliseconds',
-).describe('a compact duration using w, d, h, m, s in descending order, or 0 to disable the minimum release age');
+  {
+    when: ({ issues }) => issues.length === 0,
+    error: 'This duration is too long. Use a shorter duration, such as 3d',
+  },
+).describe('a duration using w, d, h, m, s in that order (such as 1d12h), or 0 to disable the cooldown');
 
 export const packagesConfigSchema = z
   .object({

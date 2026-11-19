@@ -83,7 +83,7 @@ describe('package resolution minimum release age configuration', () => {
         },
       ]);
       if (invalid === '9007199254741s' || invalid === `${'9'.repeat(63)}w`) {
-        expect(config.getDiagnostics()[0]?.message).toContain('safe integer in milliseconds');
+        expect(config.getDiagnostics()[0]?.message).toContain('This duration is too long. Use a shorter duration');
       }
     },
   );
@@ -117,7 +117,12 @@ describe('package resolution minimum release age configuration', () => {
     write(file, { packages: { resolution: { minimumReleaseAge: '7d' } } });
     const before = fs.readFileSync(file);
     const config = createConfig({ cwd });
-    expect(config.set(property, '9007199254741s', { scope: 'global' }).ok).toBe(false);
+    const input = '9007199254741s';
+    const parsed = parseConfigCliValue(property, input);
+    expect(parsed.diagnostics[0]?.message).toContain('This duration is too long. Use a shorter duration');
+    expect(config.set(property, input, { scope: 'global' }).ok).toBe(false);
+    const malformed = config.set(property, '-1d', { scope: 'global' });
+    expect(malformed.diagnostics).toMatchObject([{ message: expect.stringContaining('Expected 0 or a duration') }]);
     expect(fs.readFileSync(file)).toEqual(before);
   });
 });

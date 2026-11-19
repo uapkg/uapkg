@@ -56,7 +56,7 @@ describe('explicit declaration exceptions', () => {
   );
 });
 
-describe('Unix-second release age with a millisecond operation clock', () => {
+describe('release age calculated from the publication time and the current time', () => {
   it('includes the exact eligibility boundary and handles sub-day durations', () => {
     expect(releaseAgeEligible(100, 30_000, 129_999)).toBe(false);
     expect(releaseAgeEligible(100, 30_000, 130_000)).toBe(true);

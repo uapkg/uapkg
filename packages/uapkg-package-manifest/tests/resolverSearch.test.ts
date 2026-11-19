@@ -73,6 +73,28 @@ function selected(result: Awaited<ReturnType<typeof resolve>>) {
 }
 
 describe('flat graph cooldown search', () => {
+  it('identifies an invalid package release age and suggests a supported duration', async () => {
+    const result = await resolve(fixture({}), {}, { minimumReleaseAge: 'yesterday' });
+    expect(result.diagnostics).toMatchObject([
+      {
+        code: 'PARSE_ERROR',
+        message: expect.stringContaining('"yesterday" is invalid for "packages.resolution.minimumReleaseAge"'),
+        hint: expect.stringContaining('"3d"'),
+      },
+    ]);
+  });
+
+  it('explains why package resolution needs the current time', async () => {
+    const result = await resolve(fixture({}), {}, { nowMs: Number.NaN });
+    expect(result.diagnostics).toMatchObject([
+      {
+        code: 'PARSE_ERROR',
+        message: expect.stringContaining('current time to check release ages'),
+        hint: expect.stringContaining('system date and time'),
+      },
+    ]);
+  });
+
   it('intersects root buckets, keeps roots unique, and applies effective overrides first', async () => {
     const f = fixture({ alpha: { '1.2.0': entry(), '1.8.0': entry(), '2.0.0': entry() } });
     const manifest = ManifestSchema.parse({
@@ -123,7 +145,7 @@ describe('flat graph cooldown search', () => {
     },
   );
 
-  it('reports all age-filtered matches when a synthetic minimum cannot bypass cooldown', async () => {
+  it('lists the matching releases that are too recent when the range has no explicit minimum version', async () => {
     const result = await resolve(fixture({ alpha: { '1.7.2': entry({}, 60), '1.7.3': entry({}, 30) } }), {
       alpha: '^1.7',
     });

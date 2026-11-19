@@ -1,7 +1,7 @@
 import { DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE, parseReleaseAgeMilliseconds } from '@uapkg/common';
 import { DEFAULT_REGISTRY_ALIAS } from '@uapkg/common-schema';
 import {
-  createParseErrorDiagnostic,
+  createDiagnostic,
   createReleaseAgeBlockedDiagnostic,
   fail,
   ok,
@@ -36,9 +36,23 @@ export class Resolver {
     const minimumReleaseAge = options.minimumReleaseAge ?? DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE;
     const minimumAgeMs = parseReleaseAgeMilliseconds(minimumReleaseAge);
     const nowMs = options.nowMs ?? Date.now();
-    if (minimumAgeMs === undefined || !Number.isSafeInteger(nowMs) || nowMs < 0) {
+    if (minimumAgeMs === undefined) {
+      const reason = `Cannot resolve package versions. The value ${JSON.stringify(minimumReleaseAge)} is invalid for "packages.resolution.minimumReleaseAge".`;
       return fail([
-        createParseErrorDiagnostic('Resolution requires a valid minimumReleaseAge duration and operation clock.'),
+        createDiagnostic(
+          'PARSE_ERROR',
+          'error',
+          reason,
+          { reason },
+          'Use a duration such as "3d" or "12h", or set it to "0" to disable the cooldown.',
+        ),
+      ]);
+    }
+    if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+      const reason =
+        'Cannot resolve package versions because UAPKG could not determine the current time to check release ages.';
+      return fail([
+        createDiagnostic('PARSE_ERROR', 'error', reason, { reason }, 'Check the system date and time, then try again.'),
       ]);
     }
     const rootDeps = new Map<string, Dependency[]>();
@@ -69,8 +83,8 @@ export class Resolver {
       if ('solution' in reusable) return this.buildGraph(search, reusable.solution, []);
     }
     let strict = await search.solve(false);
-    // Only a complete age-disabled graph proves that release age, rather than
-    // an intrinsic range/metadata/graph error, prevented resolution.
+    // Try again without the cooldown to see which releases would actually work
+    // with the project's other packages. Only those can be reported as held back.
     let unrestricted = search.rejectedForAge ? await search.solve(true) : strict;
     if (
       !('solution' in strict) &&
@@ -78,8 +92,9 @@ export class Resolver {
       !options.frozen &&
       Number.isFinite(search.repairBudget)
     ) {
-      // Minimize the age-independent structural repair first. Cooldown cannot
-      // spend an additional downgrade merely to avoid a young dependency.
+      // Find the fewest locked packages that must be downgraded to satisfy all
+      // dependencies with the cooldown disabled. Use the same limit when the
+      // cooldown is enabled so a recent release cannot cause an extra downgrade.
       let lower = 1;
       let upper = search.repairBudget;
       let witness: { budget: number; outcome: Awaited<ReturnType<ResolutionSearch['solve']>> } | undefined;

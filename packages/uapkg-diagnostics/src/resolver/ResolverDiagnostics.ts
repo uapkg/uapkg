@@ -64,11 +64,11 @@ export function createReleaseAgeBlockedDiagnostic(data: ReleaseAgeBlockedData): 
     level: 'error',
     code: 'RELEASE_AGE_BLOCKED',
     message: [
-      `Cannot resolve "${data.packageName}" in registry "${data.registry}" for ${data.ranges.join(' and ')}.`,
-      `Minimum release age: ${data.minimumReleaseAge}. Matching releases still within the cooldown:`,
+      `Cannot resolve package "${data.packageName}" from registry "${data.registry}".`,
+      `These versions match ${data.ranges.join(' and ')} and are still within the ${data.minimumReleaseAge} cooldown.`,
       ...versions,
     ].join('\n'),
-    hint: `To bypass the release age for this operation, run: ${data.overrideCommand}`,
+    hint: `To allow newer releases for this command, run ${data.overrideCommand}`,
     data,
   };
 }

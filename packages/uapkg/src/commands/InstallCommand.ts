@@ -22,8 +22,8 @@ export interface InstallCommandOptions {
  *
  * Pipeline (never throws; errors become diagnostics):
  *
- *   1. Resolve staged declarations against the previous lock through the manifest facade.
- *   2. Persist the successful manifest/lock result.
+ *   1. Select package versions using the requested dependencies and the existing lockfile.
+ *   2. Save changes to the manifest and lockfile once those versions are known.
  *   3. `Installer.execute(...)` → executes the install plan.
  *   4. Consume installer's status stream in parallel via `InstallProgressReporter`.
  *   5. On success (non-dryRun), `PostinstallOrchestrator.run()` for added/updated plugins.

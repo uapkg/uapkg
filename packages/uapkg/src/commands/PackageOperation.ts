@@ -16,7 +16,7 @@ export function findDeclaredDependency(
   return undefined;
 }
 
-/** A reviewable retry command; no shell executes this string. */
+/** Format the command shown to users who want to retry with the release-age check disabled. */
 export function releaseAgeOverrideCommand(command: PackageOperationName, args: readonly string[] = []): string {
   const quote = (value: string) => (/^[A-Za-z0-9_@./:^*+-]+$/.test(value) ? value : JSON.stringify(value));
   return ['uapkg', command, ...args.filter((arg) => arg !== '--ignore-release-age'), '--ignore-release-age']

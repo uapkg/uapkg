@@ -55,7 +55,7 @@ export class LockfileSyncValidator {
         severity: 'error',
         code: 'LOCKFILE_PACKAGE_EXTRA',
         packageName: name,
-        message: `"${name}" is not reachable from the manifest.`,
+        message: `uapkg.lock includes "${name}" even though uapkg.json does not require it directly or through another package.`,
       });
     }
     for (const { name } of diff.added) {

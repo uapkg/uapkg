@@ -26,7 +26,7 @@ export class UpdateCommandModule implements UAPKGCommandModule {
           .option('recursive', {
             type: 'boolean',
             default: false,
-            describe: 'Also update dependencies within the selected package subtrees',
+            describe: 'Also update the direct and indirect dependencies of the selected packages',
           })
           .option('ignore-release-age', {
             type: 'boolean',

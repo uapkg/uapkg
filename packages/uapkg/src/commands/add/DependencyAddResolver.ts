@@ -37,7 +37,7 @@ export class DependencyAddResolver {
 
     const dependencyRange = spec.range ?? VersionRangeSchema.parse(`^${resolution.value.version}`);
 
-    // Bind the selected non-default alias so the graph uses the preflight's registry.
+    // Save the registry name with the dependency so future installs look up the package in the same registry.
     const recordedRegistry = registryName !== DEFAULT_REGISTRY_ALIAS ? registryName : undefined;
 
     return ok(

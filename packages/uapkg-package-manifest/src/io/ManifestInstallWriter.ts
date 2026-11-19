@@ -17,7 +17,7 @@ interface StagedFile {
   keepBackup: boolean;
 }
 
-/** Stage the resolved manifest/lock pair before replacing either existing file. */
+/** Prepare the new manifest and lockfile on disk, keeping backups so a failed write can be rolled back. */
 export class ManifestInstallWriter {
   async write(manifestRoot: string, files: readonly InstallFile[]): Promise<Result<void>> {
     const bag = new DiagnosticBag();
@@ -45,7 +45,7 @@ export class ManifestInstallWriter {
           mode = info.mode & 0o777;
         }
         const identity = randomUUID();
-        // Existing links keep their identity; replacements are siblings of their actual destination.
+        // Write beside the file a symlink points to so the final rename stays on that volume and preserves the link.
         const destinationDirectory = dirname(activePath);
         const entry: StagedFile = {
           target: activePath,
@@ -72,7 +72,7 @@ export class ManifestInstallWriter {
           else await fs.unlink(entry.target);
         } catch (recoveryError) {
           entry.keepBackup = true;
-          const recovery = entry.backup ? ` Original bytes remain at ${entry.backup}.` : '';
+          const recovery = entry.backup ? ` The backup of the original file is at ${entry.backup}.` : '';
           bag.add(
             createManifestWriteErrorDiagnostic(
               entry.target,
@@ -85,7 +85,7 @@ export class ManifestInstallWriter {
       for (const entry of staged) {
         const cleanup = [entry.pending, ...(entry.backup && !entry.keepBackup ? [entry.backup] : [])];
         for (const path of cleanup) {
-          // Failed cleanup leaves only uniquely named staging files; never delete a user-visible target here.
+          // Each write uses unique temporary filenames, so a later write can proceed if cleanup fails.
           await fs.unlink(path).catch(() => undefined);
         }
       }

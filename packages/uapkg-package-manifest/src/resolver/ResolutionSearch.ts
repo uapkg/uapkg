@@ -58,9 +58,18 @@ export function packageIdentity(registry: string, name: string): string {
 }
 
 /**
- * A finite depth-first search of flat package assignments. Every branch rebuilds
- * its live edges from the chosen parent versions, so failed alternatives cannot
- * leave requirements or exemption provenance behind in the next branch.
+ * Chooses one published version of each package for the whole project. If two
+ * packages depend on package `mesh`, they must both accept the same version of `mesh`.
+ *
+ * Suppose the project pins `mesh` to 1.0.0. The search tries version 1.2.0 of
+ * package `terrain`, discovers that it requires `mesh` 2.x, and tries the next
+ * eligible `terrain` release. If `terrain` 1.1.0 accepts `mesh` 1.x, the two can
+ * be installed together. The requirement for `mesh` 2.x applied only to `terrain` 1.2.0.
+ *
+ * After each choice, the search follows the dependencies of the selected releases
+ * again to see which packages need each plugin. A dependency introduced solely
+ * by a new `uapkg add` can use a recent release. If an existing package also
+ * needs that plugin, updates to it follow the minimum release age policy.
  */
 export class ResolutionSearch {
   private readonly policy = new SemverSelectionPolicy();
@@ -132,8 +141,8 @@ export class ResolutionSearch {
           }
         }
         if (downgraded.length > maximumCompatibleDowngrades) {
-          // Reaching a complete graph proves a structural repair exists. An
-          // ordinary unsatisfiable graph never triggers repair retries.
+          // All version requirements can be met with these downgrades. Record how
+          // many so the resolver can look for a solution that needs fewer.
           this.repairBudget = Math.min(this.repairBudget, downgraded.length);
           const involved = new Set<string>();
           for (const demand of downgraded) for (const key of this.parents(demand, closure.demands)) involved.add(key);
@@ -159,8 +168,8 @@ export class ResolutionSearch {
         const outcome = await search(next);
         if ('solution' in outcome) return outcome;
         firstFailure ??= outcome.diagnostics;
-        // This contradiction cannot be repaired by another version of this
-        // unrelated decision, so unwind directly to an involved parent.
+        // If changing this package's version cannot affect the conflict, return
+        // to the package choice that introduced it.
         if (
           !outcome.involved.has(unresolved.demand.key) &&
           !(await this.canAffect(unresolved.demand, outcome.involved))
@@ -274,9 +283,8 @@ export class ResolutionSearch {
       return locked !== undefined && Object.hasOwn(versionEntries(manifest), locked) && matches(locked) ? [locked] : [];
     let candidates = this.policy.rankCandidates(Object.keys(manifest.versions), ranges, locked).filter(matches);
     const compatibleLock = locked !== undefined && candidates.includes(locked);
-    // Lower alternatives remain provisional until all parent requirements are
-    // known: a late edge may make the old lock incompatible. The complete
-    // solution check prevents a downgrade when that lock still satisfies.
+    // Try older versions last. A package selected later may require an older
+    // version even though the locked version fits the ranges seen so far.
     if (compatibleLock)
       candidates = [
         ...candidates.filter((version) => !semver.lt(version, locked)),
@@ -429,9 +437,9 @@ export class ResolutionSearch {
   }
 
   private async canAffect(demand: PackageDemand, involved: ReadonlySet<string>): Promise<boolean> {
-    // Prune only after proving that every possible dependency of this decision
-    // is disjoint from the contradiction. This remains sound when a later edge
-    // changes a shared node's lock compatibility or exemption provenance.
+    // A different release can introduce a dependency involved in the conflict.
+    // Check the cached dependencies of every release before skipping alternatives.
+    // If any registry metadata is missing, keep trying versions.
     let potential = this.potentialDependencies.get(demand.key);
     if (potential === undefined) {
       const reachable = new Set<string>();

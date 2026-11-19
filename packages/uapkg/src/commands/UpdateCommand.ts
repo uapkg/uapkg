@@ -22,7 +22,7 @@ export interface UpdateCommandOptions {
   readonly outputFormat: 'text' | 'json';
 }
 
-/** Stage every requested declaration before one targeted resolution/install pass. */
+/** Collect the requested updates so the resolver chooses versions that work together before installation. */
 export class UpdateCommand implements Command {
   public constructor(
     private readonly root: CompositionRoot,

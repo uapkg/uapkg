@@ -5,13 +5,13 @@ const exactLiteral = new RegExp(`^(?:=\\s*)?v?(${versionLiteral})$`);
 const lowerBoundLiteral = new RegExp(`(?:^|\\s)(?:\\^|~|>=)\\s*v?(${versionLiteral})(?=\\s|$)`, 'g');
 const hyphenLiteral = new RegExp(`^v?(${versionLiteral})\\s+-\\s+`);
 
-/** An actual exact declaration, rather than a synthetic SemVer minimum. */
+/** Read an exact version such as `1.2.3` or `=1.2.3` from a dependency declaration. */
 export function exactDeclaredVersion(range: string): string | undefined {
   const literal = exactLiteral.exec(range.trim())?.[1];
   return literal && semver.valid(literal) !== null ? literal : undefined;
 }
 
-/** Only full, explicit, inclusive lower bounds can supply a project floor exception. */
+/** Return the minimum version if the range names it in full and allows it, as `^1.2.3` allows `1.2.3`. */
 export function explicitMinimumVersion(range: string): string | undefined {
   if (range.includes('||')) return undefined;
   const exact = exactDeclaredVersion(range);
@@ -33,7 +33,7 @@ export function explicitMinimumVersion(range: string): string | undefined {
   return matching.length === 1 ? matching[0] : undefined;
 }
 
-/** Registry publication timestamps use Unix seconds; the operation clock uses milliseconds. */
+/** Compare the cutoff in Unix seconds to avoid multiplying large registry timestamps by 1,000. */
 export function releaseAgeEligible(publishedAt: number, minimumAgeMs: number, nowMs: number): boolean {
   if (minimumAgeMs === 0) return true;
   return (

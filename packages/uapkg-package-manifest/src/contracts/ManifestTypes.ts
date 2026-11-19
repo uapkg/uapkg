@@ -29,12 +29,12 @@ export interface ResolverOptions {
   /** If true, use lockfile and skip fresh resolution. */
   readonly frozen?: boolean;
   readonly previousLockfile?: Lockfile | null;
-  /** Absent: reuse compatible locks. Empty: update all. Otherwise update the named roots. */
+  /** Omit to reuse compatible locked versions. Pass an empty list to update all packages, or name the packages to update. */
   readonly updateTargets?: readonly string[];
   readonly recursive?: boolean;
-  /** Explicitly added roots absent from both the previous manifest and the lock. */
+  /** Packages the user explicitly added that appear in neither the original manifest nor the previous lockfile. */
   readonly newRoots?: readonly string[];
-  /** Exact selections made before a bare new add writes its caret declaration. */
+  /** Exact versions requested on the command line or selected for a new `uapkg add <name>`. */
   readonly requiredVersions?: Readonly<Record<string, string>>;
   readonly ignoreReleaseAge?: boolean;
   readonly minimumReleaseAge?: string;
@@ -47,7 +47,7 @@ export interface HeldBackRelease {
   readonly registry: string;
   readonly selectedVersion: string;
   readonly blockedVersion: string;
-  /** Present when a dependency introduced by the blocked version is still cooling down. */
+  /** The dependency release that must reach the minimum age before this package can update, if any. */
   readonly blockedDependency?: { readonly name: string; readonly version: string };
   /** Publication time of the release causing the hold, in Unix seconds. */
   readonly publishedAt: number;
@@ -63,7 +63,7 @@ export interface ManifestInstallReport {
 }
 
 export interface ManifestInstallOptions extends ResolverOptions {
-  /** Snapshot captured by add/update/remove before staging declarations. */
+  /** The manifest as it was before `add`, `update`, or `remove` changed its dependencies. */
   readonly originalManifest?: Manifest;
   readonly stagedManifest?: Manifest;
 }

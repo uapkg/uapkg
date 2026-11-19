@@ -35,7 +35,7 @@ export class SemverSelectionPolicy {
     return (this.rankCandidates(candidates, [range], current)[0] as PackageVersion | undefined) ?? null;
   }
 
-  /** Rank published candidates satisfying every incoming range independently. */
+  /** List published versions that satisfy every requested range for this package, preferred version first. */
   rankCandidates(candidates: readonly string[], ranges: readonly string[], current?: string): string[] {
     const currentIsPrerelease = current !== undefined && this.isPrerelease(current);
     return candidates

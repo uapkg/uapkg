@@ -29,7 +29,7 @@ it('rejects an undated registry write before overwriting a valid package file', 
     const file = store.resolveManifestPath(manifest.name);
     const before = await readFile(file, 'utf8');
 
-    // Model input from a JS consumer which cannot enforce the TS publication contract.
+    // A JavaScript caller can supply a release with no publication timestamp.
     Reflect.deleteProperty(Object.values(manifest.versions)[0], 'meta');
     const refused = await store.write(manifest);
     expect(refused.ok).toBe(false);

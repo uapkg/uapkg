@@ -95,7 +95,7 @@ export class Installer {
     try {
       return await this.executePlan(lockfile, previousLockfile, options, runtime, maxConcurrent);
     } finally {
-      // The command's summary waits for the progress consumer, including on planning failures.
+      // Closing the stream lets the CLI finish reading progress and report the result, including a planning error.
       runtime.stream.close();
     }
   }

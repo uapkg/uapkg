@@ -145,7 +145,7 @@ export class PackageManifest {
     return result.ok ? ok(result.value.lockfile, result.diagnostics) : result;
   }
 
-  /** Reconcile staged declarations and the previous lock in a single resolution before writing either. */
+  /** Select package versions using the requested manifest and the existing lockfile before saving any changes. */
   async installWithReport(options: ManifestInstallOptions = {}): Promise<Result<ManifestInstallReport>> {
     const bag = new DiagnosticBag();
     bag.mergeArray(this.config?.getDiagnostics() ?? []);
@@ -182,7 +182,8 @@ export class PackageManifest {
 
     const lockfile = this.lockSync.buildLockfile(graph.value);
     const diff = this.differ.diff(previous.value, lockfile);
-    // A stale dependency edge can be repaired, but the same published artifact cannot acquire a new hash or Git tree.
+    // Updating a dependency can change a package's lockfile entry even when the package itself stays at the same version.
+    // For the same package version from the same registry, the archive hash and Git tree must still match.
     for (const { name, previous: before, current: after } of diff.updated) {
       if (!before || !after || before.registry !== after.registry || before.version !== after.version) continue;
       if (before.integrity !== after.integrity) {
@@ -292,7 +293,7 @@ export class PackageManifest {
       return bag.toResult(lockResult.value);
     }
 
-    // Reports without a lock describe available versions; they never adopt one.
+    // This report only lists available versions, so it can include releases still in their cooldown period.
     const resolveResult = await this.resolve({ ignoreReleaseAge: true });
     if (!resolveResult.ok) {
       bag.mergeArray(resolveResult.diagnostics);
