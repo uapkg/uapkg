@@ -1,6 +1,6 @@
 {
   "name": "@uapkg/common",
-  "version": "1.7.3",
+  "version": "1.7.4",
   "engines": {
     "node": ">=22"
   },

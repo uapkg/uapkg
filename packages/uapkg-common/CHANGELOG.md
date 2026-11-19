@@ -1,5 +1,17 @@
 # @uapkg/common
 
+## 1.7.4
+
+### Patch Changes
+
+- [`8b5b4df`](https://github.com/uapkg/uapkg/commit/8b5b4df45655d4f84fdacc290d83d2e14665ed7f) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Apply a configurable minimum release age to implicit plugin resolution and updates. The default is three days. Preserve compatible lockfile entries, support recursive targeted updates, and report releases held back by the cooldown. Registry package versions now require a publication timestamp in Unix seconds.
+
+  Finish CLI progress reporting when an installation completes or fails, and stage extracted plugins on the project volume so installs work across Windows drives.
+
+- Updated dependencies [[`8b5b4df`](https://github.com/uapkg/uapkg/commit/8b5b4df45655d4f84fdacc290d83d2e14665ed7f)]:
+  - @uapkg/diagnostics@1.7.4
+  - @uapkg/common-schema@1.7.4
+
 ## 1.7.3
 
 ### Patch Changes

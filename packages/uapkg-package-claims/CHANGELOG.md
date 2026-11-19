@@ -1,5 +1,15 @@
 # @uapkg/package-claims
 
+## 1.7.4
+
+### Patch Changes
+
+- Updated dependencies [[`8b5b4df`](https://github.com/uapkg/uapkg/commit/8b5b4df45655d4f84fdacc290d83d2e14665ed7f)]:
+  - @uapkg/diagnostics@1.7.4
+  - @uapkg/registry-schema@1.7.4
+  - @uapkg/common-schema@1.7.4
+  - @uapkg/package-manifest-schema@1.7.4
+
 ## 1.7.3
 
 ### Patch Changes
