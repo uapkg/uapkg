@@ -42,3 +42,10 @@ export {
 } from '#registry-core/registry/RegistryUrlSanitizer.ts';
 export { type ResolvedVersion, resolveVersion } from '#registry-core/resolution/PackageResolver.ts';
 export { SemverSelectionPolicy } from '#registry-core/resolution/SemverSelectionPolicy.ts';
+export type { PackageRegistryManifest, RegistryVersion } from '@uapkg/registry-schema';
+export {
+  exactDeclaredVersion,
+  explicitMinimumVersion,
+  releaseAgeEligible,
+  releaseAgeRemainingSeconds,
+} from '#registry-core/resolution/ReleaseAgePolicy.ts';

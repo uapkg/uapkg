@@ -1,15 +1,20 @@
 import type { Diagnostic } from '@uapkg/diagnostics';
-import type { Lockfile } from '@uapkg/package-manifest-schema';
+import type { ManifestInstallOptions } from '@uapkg/package-manifest';
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
 import { InstallProgressReporter } from '#cli/reporting/InstallProgressReporter.ts';
 import type { Command } from '#cli/commands/Command.ts';
 import { PostinstallCandidateBuilder } from '#cli/commands/PostinstallCandidateBuilder.ts';
+import { releaseAgeOverrideCommand, type PackageOperationName } from '#cli/commands/PackageOperation.ts';
 
 export interface InstallCommandOptions {
   readonly force: boolean;
   readonly frozen: boolean;
   readonly dryRun: boolean;
   readonly outputFormat: 'text' | 'json';
+  readonly ignoreReleaseAge?: boolean;
+  readonly command?: PackageOperationName;
+  readonly resolution?: ManifestInstallOptions;
+  readonly diagnostics?: readonly Diagnostic[];
 }
 
 /**
@@ -17,8 +22,8 @@ export interface InstallCommandOptions {
  *
  * Pipeline (never throws; errors become diagnostics):
  *
- *   1. Read manifest + previous lockfile (best-effort).
- *   2. `PackageManifest.install({ frozen })` → writes a fresh lockfile.
+ *   1. Resolve staged declarations against the previous lock through the manifest facade.
+ *   2. Persist the successful manifest/lock result.
  *   3. `Installer.execute(...)` → executes the install plan.
  *   4. Consume installer's status stream in parallel via `InstallProgressReporter`.
  *   5. On success (non-dryRun), `PostinstallOrchestrator.run()` for added/updated plugins.
@@ -34,29 +39,29 @@ export class InstallCommand implements Command {
 
   public async execute(): Promise<number> {
     const pm = this.root.packageManifest;
-    const commandDiagnostics: Diagnostic[] = [];
-
-    const manifestResult = await pm.readManifest();
-    if (!manifestResult.ok) return this.fail(manifestResult.diagnostics);
-    const manifest = manifestResult.value;
-
-    let previousLockfile: Lockfile | null = null;
-    if (!this.options.frozen) {
-      const previousLockfileResult = await pm.readLockfileOptional();
-      if (!previousLockfileResult.ok) return this.fail(previousLockfileResult.diagnostics);
-      previousLockfile = previousLockfileResult.value;
-    }
-
-    const installResult = await pm.install({ frozen: this.options.frozen });
+    const commandDiagnostics: Diagnostic[] = [...(this.options.diagnostics ?? [])];
+    const overrideCommand =
+      this.options.resolution?.overrideCommand ??
+      releaseAgeOverrideCommand(this.commandName, [
+        ...(this.options.force ? ['--force'] : []),
+        ...(this.options.frozen ? ['--frozen'] : []),
+        ...(this.options.dryRun ? ['--dry-run'] : []),
+        ...(this.options.outputFormat === 'json' ? ['--json'] : []),
+      ]);
+    const installResult = await pm.installWithReport({
+      ...this.options.resolution,
+      frozen: this.options.frozen,
+      ignoreReleaseAge: this.options.ignoreReleaseAge === true,
+      nowMs: this.options.resolution?.nowMs ?? Date.now(),
+      overrideCommand,
+    });
     if (!installResult.ok) return this.fail([...commandDiagnostics, ...installResult.diagnostics]);
     commandDiagnostics.push(...installResult.diagnostics);
-    const lockfile = installResult.value;
-    if (this.options.frozen) {
-      previousLockfile = lockfile;
-    }
+    const { manifest, lockfile, previousLockfile, heldBack, minimumReleaseAge } = installResult.value;
 
-    const progress = new InstallProgressReporter();
-    const consumer = progress.consume(this.root.installer.getStatusStream());
+    const progress = new InstallProgressReporter(
+      this.options.outputFormat === 'json' ? { write() {}, writeLine() {} } : undefined,
+    );
 
     // Trusted roots for verification-gated traversal: the manifest's declared buckets.
     const rootDependencies = [
@@ -65,13 +70,13 @@ export class InstallCommand implements Command {
       ...Object.keys(manifest.peerDependencies ?? {}),
     ];
 
-    const executeResult = await this.root.installer.execute(lockfile, previousLockfile, {
+    const execution = this.root.installer.execute(lockfile, previousLockfile, {
       manifestRoot: this.root.cwd,
       force: this.options.force,
       dryRun: this.options.dryRun,
       rootDependencies,
     });
-    await consumer;
+    const [executeResult] = await Promise.all([execution, progress.consume(this.root.installer.getStatusStream())]);
 
     if (!executeResult.ok) return this.fail([...commandDiagnostics, ...executeResult.diagnostics]);
     const report = executeResult.value;
@@ -100,13 +105,16 @@ export class InstallCommand implements Command {
     if (this.options.outputFormat === 'json') {
       this.root.json.emit({
         status: hasBranchFailures ? 'error' : 'ok',
-        command: 'install',
+        command: this.commandName,
         data: {
           plan: plan.summary,
           installed: report.installed,
           failed: report.failed,
           skipped: report.skipped,
           incompleteClosure: report.incompleteClosure,
+          heldBack,
+          ...(this.commandName === 'update' ? { heldBackCount: heldBack.length } : {}),
+          minimumReleaseAge,
         },
         diagnostics: [...commandDiagnostics, ...executeResult.diagnostics, ...postDiagnostics],
       });
@@ -115,15 +123,23 @@ export class InstallCommand implements Command {
 
     this.root.diagnostics.reportAll([...commandDiagnostics, ...executeResult.diagnostics, ...postDiagnostics]);
     progress.renderSummary(plan.summary);
+    progress.renderHeldBack(heldBack, minimumReleaseAge, {
+      showEmpty: this.commandName === 'update',
+      retryCommand: overrideCommand,
+    });
     return hasBranchFailures ? 1 : 0;
   }
 
   private fail(diagnostics: readonly Diagnostic[]): number {
     if (this.options.outputFormat === 'json') {
-      this.root.json.emit({ status: 'error', command: 'install', diagnostics });
+      this.root.json.emit({ status: 'error', command: this.commandName, diagnostics });
     } else {
       this.root.diagnostics.reportAll(diagnostics);
     }
     return 1;
+  }
+
+  private get commandName(): PackageOperationName {
+    return this.options.command ?? 'install';
   }
 }

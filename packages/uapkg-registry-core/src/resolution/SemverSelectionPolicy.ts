@@ -32,35 +32,28 @@ export class SemverSelectionPolicy {
     range: VersionRange,
     current?: PackageVersion,
   ): PackageVersion | null {
-    if (candidates.length === 0) return null;
+    return (this.rankCandidates(candidates, [range], current)[0] as PackageVersion | undefined) ?? null;
+  }
 
-    const includePrerelease = this.rangeExplicitlyOptsInToPrerelease(range as unknown as string);
-    const currentIsPrerelease = current !== undefined && this.isPrerelease(current as unknown as string);
-
-    const satisfying = candidates
-      .filter((v) => semver.satisfies(v as unknown as string, range as unknown as string, { includePrerelease }))
+  /** Rank published candidates satisfying every incoming range independently. */
+  rankCandidates(candidates: readonly string[], ranges: readonly string[], current?: string): string[] {
+    const currentIsPrerelease = current !== undefined && this.isPrerelease(current);
+    return candidates
+      .filter((version) => ranges.every((range) => this.matches(version, range)))
       .slice()
-      .sort((a, b) => semver.rcompare(a as unknown as string, b as unknown as string));
+      .sort((left, right) => {
+        if (currentIsPrerelease) {
+          const stablePreference = Number(this.isPrerelease(left)) - Number(this.isPrerelease(right));
+          if (stablePreference !== 0) return stablePreference;
+        }
+        return semver.rcompare(left, right) || left.localeCompare(right, 'en');
+      });
+  }
 
-    if (satisfying.length === 0) return null;
-
-    // Rule 1+2: if the range does not opt-in, strip prereleases unless the
-    // ONLY matches are prereleases. `semver.satisfies` with
-    // `includePrerelease: false` already excludes prereleases unless the
-    // range specifies one — but be defensive.
-    if (!includePrerelease) {
-      const stable = satisfying.filter((v) => !this.isPrerelease(v as unknown as string));
-      if (stable.length > 0) return stable[0];
-    }
-
-    // Rule 3: when the user is stuck on a prerelease but a stable satisfies
-    // the range, prefer the stable.
-    if (currentIsPrerelease) {
-      const stable = satisfying.find((v) => !this.isPrerelease(v as unknown as string));
-      if (stable) return stable;
-    }
-
-    return satisfying[0];
+  matches(version: string, range: string): boolean {
+    return semver.satisfies(version, range, {
+      includePrerelease: this.rangeExplicitlyOptsInToPrerelease(range),
+    });
   }
 
   /** Does the range string itself mention a prerelease tag? */

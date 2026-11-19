@@ -5,6 +5,7 @@ import { INTERNAL_PROFILE_HOME_ENV } from '@uapkg/common';
 import Log from '@uapkg/log';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import { ConfigCommand, type ConfigCommandOptions } from '../../src/commands/ConfigCommand.ts';
+import { DiagnosticReporter } from '../../src/reporting/DiagnosticReporter.ts';
 
 const directories: string[] = [];
 
@@ -107,22 +108,60 @@ describe('launcher settings through the normal config command', () => {
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ term: { verbose: true } });
   });
 
-  it('reads and writes the minimum release age as a string, including zero shorthand', async () => {
+  it.each(['launcher.autoUpdate.minimumReleaseAge', 'packages.resolution.minimumReleaseAge'])(
+    'reads and writes %s as a string, including zero shorthand',
+    async (pathToProperty) => {
+      const { project, invoke } = fixture();
+      const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('"3d"');
+      expect(await invoke({ action: 'set', pathToProperty, rawValue: '12h', scope: 'global' })).toBe(0);
+      expect(await invoke({ pathToProperty, scope: 'global' })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('"12h"');
+      expect(await invoke({ action: 'set', pathToProperty, rawValue: '0' })).toBe(0);
+      const localFile = path.join(project, '.uapkg', 'config.json');
+      const local = JSON.parse(fs.readFileSync(localFile, 'utf8'));
+      expect(pathToProperty.split('.').reduce((value, key) => value[key], local)).toBe('0');
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('"0"');
+      expect(await invoke({ action: 'delete', pathToProperty, scope: 'local' })).toBe(0);
+      expect(await invoke({ pathToProperty })).toBe(0);
+      expect(log).toHaveBeenLastCalledWith('"12h"');
+    },
+  );
+
+  it('reports ignored overflowing package age settings and retains the global origin', async () => {
     const { file, project, invoke } = fixture();
-    const pathToProperty = 'launcher.autoUpdate.minimumReleaseAge';
+    const pathToProperty = 'packages.resolution.minimumReleaseAge';
+    fs.writeFileSync(file, JSON.stringify({ packages: { resolution: { minimumReleaseAge: '7d' } } }));
+    fs.mkdirSync(path.join(project, '.uapkg'));
+    fs.writeFileSync(
+      path.join(project, '.uapkg/config.json'),
+      JSON.stringify({ packages: { resolution: { minimumReleaseAge: '9007199254741s' } } }),
+    );
     const log = vi.spyOn(Log, 'info').mockImplementation(() => {});
-    expect(await invoke({ pathToProperty })).toBe(0);
-    expect(log).toHaveBeenLastCalledWith('"3d"');
-    expect(await invoke({ action: 'set', pathToProperty, rawValue: '12h', scope: 'global' })).toBe(0);
-    expect(JSON.parse(fs.readFileSync(file, 'utf8')).launcher.autoUpdate.minimumReleaseAge).toBe('12h');
-    expect(await invoke({ action: 'set', pathToProperty, rawValue: '0' })).toBe(0);
-    const localFile = path.join(project, '.uapkg', 'config.json');
-    expect(JSON.parse(fs.readFileSync(localFile, 'utf8')).launcher.autoUpdate.minimumReleaseAge).toBe('0');
-    expect(await invoke({ pathToProperty })).toBe(0);
-    expect(log).toHaveBeenLastCalledWith('"0"');
-    expect(await invoke({ action: 'delete', pathToProperty, scope: 'local' })).toBe(0);
-    expect(await invoke({ pathToProperty })).toBe(0);
-    expect(log).toHaveBeenLastCalledWith('"12h"');
+    const report = vi.spyOn(DiagnosticReporter.prototype, 'reportAll').mockImplementation(() => {});
+    expect(await invoke({ pathToProperty, showOrigin: true, output: 'text' })).toBe(0);
+    expect(report).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          level: 'warning',
+          code: 'CONFIG_INVALID_VALUE',
+          data: expect.objectContaining({ path: pathToProperty, source: 'local', ignored: true }),
+        }),
+      ]),
+    );
+    expect(await invoke({ pathToProperty, showOrigin: true })).toBe(0);
+    expect(JSON.parse(log.mock.lastCall?.[0] ?? '')).toMatchObject({ value: '7d', source: 'global' });
+    expect(await invoke({ pathToProperty, trace: true })).toBe(0);
+    expect(JSON.parse(log.mock.lastCall?.[0] ?? '')).toMatchObject([
+      { source: 'default', value: '3d', status: 'accepted' },
+      { source: 'global', value: '7d', status: 'accepted' },
+      { source: 'local', value: '9007199254741s', status: 'ignored' },
+    ]);
+    const before = fs.readFileSync(file);
+    expect(await invoke({ action: 'set', pathToProperty, rawValue: '-1d', scope: 'global' })).toBe(1);
+    expect(fs.readFileSync(file)).toEqual(before);
   });
 
   it.each(['autoLauncherUpdate', 'autoCLIUpdate'])(

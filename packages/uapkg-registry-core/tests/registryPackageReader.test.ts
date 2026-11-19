@@ -89,6 +89,7 @@ async function writeRegistry(
       packageSource: { type: 'git', url: 'https://github.com/acme/no-tree' },
       versions: {
         '1.0.0': {
+          meta: { publishedAt: 1_700_000_000 },
           ...(includeGitTree ? { gitTree: 'a'.repeat(40) } : {}),
           releaseFiles: {
             package: {

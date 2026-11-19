@@ -1,9 +1,11 @@
 import { join } from 'node:path';
+import { DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE } from '@uapkg/common';
 import type { PackageName } from '@uapkg/common-schema';
 import type { ConfigInstance } from '@uapkg/config';
 import {
   createDependencyNotFoundDiagnostic,
   createForbiddenOverridesDiagnostic,
+  createIntegrityMismatchDiagnostic,
   createLockfileOutOfSyncDiagnostic,
   DiagnosticBag,
   ok,
@@ -11,17 +13,22 @@ import {
 } from '@uapkg/diagnostics';
 import type { Dependency, Lockfile, Manifest } from '@uapkg/package-manifest-schema';
 import type { RegistryCore } from '@uapkg/registry-core';
-import type { ResolvedGraph, ResolverOptions } from '#package-manifest/contracts/ManifestTypes.ts';
+import type {
+  ManifestInstallOptions,
+  ManifestInstallReport,
+  ResolvedGraph,
+  ResolverOptions,
+} from '#package-manifest/contracts/ManifestTypes.ts';
 import { LockfileReader } from '#package-manifest/io/LockfileReader.ts';
 import { LockfileSyncIssueWriter } from '#package-manifest/io/LockfileSyncIssueWriter.ts';
 import { LockfileWriter } from '#package-manifest/io/LockfileWriter.ts';
 import { ManifestReader } from '#package-manifest/io/ManifestReader.ts';
 import { ManifestWriter } from '#package-manifest/io/ManifestWriter.ts';
+import { ManifestInstallWriter } from '#package-manifest/io/ManifestInstallWriter.ts';
 import { LockfileSync } from '#package-manifest/resolver/LockfileSync.ts';
 import { Resolver } from '#package-manifest/resolver/Resolver.ts';
 import { type AddDependencyOptions, DependencyMutator } from '#package-manifest/core/DependencyMutator.ts';
 import { type LockfileDiff, LockfileDiffer } from '#package-manifest/core/LockfileDiffer.ts';
-import { sortLockfileSyncIssues } from '#package-manifest/core/LockfileSyncIssue.ts';
 import { LockfileSyncValidator } from '#package-manifest/core/LockfileSyncValidator.ts';
 import { OutdatedChecker, type OutdatedEntry } from '#package-manifest/core/OutdatedChecker.ts';
 import { WhyGraph, type WhyResult } from '#package-manifest/core/WhyGraph.ts';
@@ -45,11 +52,12 @@ export interface PackageManifestOptions {
  */
 export class PackageManifest {
   private readonly manifestRoot: string;
-  private readonly registryCore: RegistryCore;
+  private readonly config?: InstanceType<typeof ConfigInstance>;
   private readonly reader = new ManifestReader();
   private readonly writer = new ManifestWriter();
   private readonly lockReader = new LockfileReader();
   private readonly lockWriter = new LockfileWriter();
+  private readonly installWriter = new ManifestInstallWriter();
   private readonly resolver: Resolver;
   private readonly lockSync = new LockfileSync();
   private readonly mutator = new DependencyMutator();
@@ -61,7 +69,7 @@ export class PackageManifest {
 
   constructor(options: PackageManifestOptions) {
     this.manifestRoot = options.manifestRoot;
-    this.registryCore = options.registryCore;
+    this.config = options.configInstance;
     this.resolver = new Resolver(options.registryCore);
     this.outdated = new OutdatedChecker(options.registryCore);
     this.lockfileSyncValidator = new LockfileSyncValidator(
@@ -114,63 +122,100 @@ export class PackageManifest {
     return bag.hasErrors() ? bag.toFailure() : ok(manifest);
   }
 
+  private resolutionOptions(manifest: Manifest, options: ResolverOptions) {
+    const configuredAge = this.config?.get('packages.resolution.minimumReleaseAge');
+    return {
+      ...options,
+      overrides: manifest.kind === 'project' ? (manifest.overrides ?? options.overrides) : options.overrides,
+      minimumReleaseAge:
+        options.minimumReleaseAge ??
+        (typeof configuredAge === 'string' ? configuredAge : DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE),
+      nowMs: options.nowMs ?? Date.now(),
+    };
+  }
+
   async resolve(options: ResolverOptions = {}): Promise<Result<ResolvedGraph>> {
-    const manifestResult = await this.readManifest();
-    if (!manifestResult.ok) return manifestResult as Result<never>;
-
-    const manifest = manifestResult.value;
-    const overrides =
-      manifest.kind === 'project' && 'overrides' in manifest
-        ? (manifest as { overrides?: Record<string, Dependency> }).overrides
-        : undefined;
-
-    return this.resolver.resolve(manifest, { ...options, overrides });
+    const manifest = await this.readManifest();
+    if (!manifest.ok) return manifest;
+    return this.resolver.resolve(manifest.value, this.resolutionOptions(manifest.value, options));
   }
 
   async install(options: ResolverOptions = {}): Promise<Result<Lockfile>> {
+    const result = await this.installWithReport(options);
+    return result.ok ? ok(result.value.lockfile, result.diagnostics) : result;
+  }
+
+  /** Reconcile staged declarations and the previous lock in a single resolution before writing either. */
+  async installWithReport(options: ManifestInstallOptions = {}): Promise<Result<ManifestInstallReport>> {
     const bag = new DiagnosticBag();
+    bag.mergeArray(this.config?.getDiagnostics() ?? []);
+    const snapshot = options.stagedManifest ?? options.originalManifest;
+    const manifestResult = snapshot ? ok(snapshot) : await this.readManifest();
+    bag.mergeArray(manifestResult.diagnostics);
+    if (!manifestResult.ok || bag.hasErrors()) return bag.toFailure();
+    const manifest = manifestResult.value;
+    const policy = this.resolutionOptions(manifest, options);
 
     if (options.frozen) {
-      const lockResult = await this.readLockfile();
-      if (!lockResult.ok) return lockResult;
-
-      const syncResult = await this.validateLockfileSync(lockResult.value);
-      if (!syncResult.ok) return syncResult;
-
-      return ok(lockResult.value, [...lockResult.diagnostics, ...syncResult.diagnostics]);
+      const locked = await this.readLockfile();
+      bag.mergeArray(locked.diagnostics);
+      if (!locked.ok) return bag.toFailure();
+      const sync = await this.checkLockedManifest(manifest, locked.value, policy);
+      bag.mergeArray(sync.diagnostics);
+      return bag.toResult({
+        manifest,
+        lockfile: locked.value,
+        previousLockfile: locked.value,
+        minimumReleaseAge: policy.minimumReleaseAge,
+        heldBack: [],
+      });
     }
 
-    const existingLockResult = await this.readLockfileOptional();
-    if (!existingLockResult.ok) {
-      bag.mergeArray(existingLockResult.diagnostics);
-      return bag.toFailure();
-    }
-    bag.mergeArray(existingLockResult.diagnostics);
+    const previous =
+      options.previousLockfile !== undefined ? ok(options.previousLockfile) : await this.readLockfileOptional();
+    bag.mergeArray(previous.diagnostics);
+    if (!previous.ok) return bag.toFailure();
 
-    if (existingLockResult.value !== null) {
-      const manifestResult = await this.readManifest();
-      if (!manifestResult.ok) return manifestResult as Result<never>;
+    const graph = await this.resolver.resolve(manifest, { ...policy, previousLockfile: previous.value });
+    bag.mergeArray(graph.diagnostics);
+    if (!graph.ok) return bag.toFailure();
 
-      const issues = await this.lockfileSyncValidator.collectIssues(manifestResult.value, existingLockResult.value);
-      if (issues.length === 0) {
-        return bag.toResult(existingLockResult.value);
+    const lockfile = this.lockSync.buildLockfile(graph.value);
+    const diff = this.differ.diff(previous.value, lockfile);
+    // A stale dependency edge can be repaired, but the same published artifact cannot acquire a new hash or Git tree.
+    for (const { name, previous: before, current: after } of diff.updated) {
+      if (!before || !after || before.registry !== after.registry || before.version !== after.version) continue;
+      if (before.integrity !== after.integrity) {
+        bag.add(createIntegrityMismatchDiagnostic(`${name}@${after.version}`, before.integrity, after.integrity));
+      }
+      if (before.gitTree !== after.gitTree) {
+        bag.add(
+          createIntegrityMismatchDiagnostic(
+            `${name}@${after.version} Git tree`,
+            before.gitTree ?? '(absent)',
+            after.gitTree ?? '(absent)',
+          ),
+        );
       }
     }
+    if (bag.hasErrors()) return bag.toFailure();
 
-    const graphResult = await this.resolve(options);
-    if (!graphResult.ok) {
-      bag.mergeArray(graphResult.diagnostics);
-      return bag.toFailure();
+    const writeLock = !previous.value || diff.added.length > 0 || diff.updated.length > 0 || diff.removed.length > 0;
+    if (options.stagedManifest || writeLock) {
+      const write = await this.installWriter.write(this.manifestRoot, [
+        ...(options.stagedManifest ? [{ name: 'uapkg.json' as const, contents: this.writer.serialize(manifest) }] : []),
+        ...(writeLock ? [{ name: 'uapkg.lock' as const, contents: this.lockWriter.serialize(lockfile) }] : []),
+      ]);
+      bag.mergeArray(write.diagnostics);
+      if (!write.ok) return bag.toFailure();
     }
-
-    const lockfile = this.lockSync.buildLockfile(graphResult.value);
-    const writeResult = await this.writeLockfile(lockfile);
-    if (!writeResult.ok) {
-      bag.mergeArray(writeResult.diagnostics);
-      return bag.toFailure();
-    }
-
-    return ok(lockfile);
+    return bag.toResult({
+      manifest,
+      previousLockfile: previous.value,
+      lockfile,
+      minimumReleaseAge: policy.minimumReleaseAge,
+      heldBack: graph.value.heldBack,
+    });
   }
 
   // -------------------------------------------------------------------
@@ -232,7 +277,7 @@ export class PackageManifest {
     if (!lockResult.ok) return lockResult as Result<never>;
     bag.mergeArray(lockResult.diagnostics);
 
-    const graphResult = await this.resolve();
+    const graphResult = await this.resolve({ previousLockfile: lockResult.value, ignoreReleaseAge: true });
     if (!graphResult.ok) return graphResult as Result<never>;
     return bag.toResult(this.whyGraph.explain(graphResult.value, target));
   }
@@ -247,7 +292,8 @@ export class PackageManifest {
       return bag.toResult(lockResult.value);
     }
 
-    const resolveResult = await this.resolve();
+    // Reports without a lock describe available versions; they never adopt one.
+    const resolveResult = await this.resolve({ ignoreReleaseAge: true });
     if (!resolveResult.ok) {
       bag.mergeArray(resolveResult.diagnostics);
       return bag.toFailure();
@@ -258,37 +304,25 @@ export class PackageManifest {
   }
 
   async validateLockfileSync(lockfile: Lockfile): Promise<Result<void>> {
-    const bag = new DiagnosticBag();
     const manifestResult = await this.readManifest();
     if (!manifestResult.ok) return manifestResult as Result<never>;
+    return this.checkLockedManifest(manifestResult.value, lockfile);
+  }
 
-    const issues = await this.lockfileSyncValidator.collectIssues(manifestResult.value, lockfile);
-    if (issues.length === 0) return ok(undefined);
-
-    const sortedIssues = sortLockfileSyncIssues(issues);
-    const topIssues = this.lockfileSyncValidator.topIssues(sortedIssues, 3);
+  private async checkLockedManifest(
+    manifest: Manifest,
+    lockfile: Lockfile,
+    options?: ResolverOptions,
+  ): Promise<Result<void>> {
+    const bag = new DiagnosticBag();
+    const issues = await this.lockfileSyncValidator.collectIssues(manifest, lockfile, bag, options);
+    if (issues.length === 0) return bag.toResult(undefined);
 
     let logPath = join(this.manifestRoot, '.uapkg', 'logs', 'lockfile-sync.log');
-    const logResult = await this.lockfileSyncIssueWriter.write(this.manifestRoot, sortedIssues);
-    if (logResult.ok) {
-      logPath = logResult.value;
-      bag.mergeArray(logResult.diagnostics);
-    } else {
-      bag.mergeArray(logResult.diagnostics);
-    }
-
-    bag.add(
-      createLockfileOutOfSyncDiagnostic(
-        topIssues.map((issue) => ({
-          severity: issue.severity,
-          code: issue.code,
-          message: issue.message,
-          packageName: issue.packageName,
-        })),
-        sortedIssues.length,
-        logPath,
-      ),
-    );
+    const logResult = await this.lockfileSyncIssueWriter.write(this.manifestRoot, issues);
+    if (logResult.ok) logPath = logResult.value;
+    bag.mergeArray(logResult.diagnostics);
+    bag.add(createLockfileOutOfSyncDiagnostic(issues.slice(0, 3), issues.length, logPath));
 
     return bag.toFailure();
   }

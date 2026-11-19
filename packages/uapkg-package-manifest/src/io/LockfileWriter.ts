@@ -18,11 +18,15 @@ export class LockfileWriter {
       if (!existsSync(manifestRoot)) {
         await mkdir(manifestRoot, { recursive: true });
       }
-      await writeFile(filePath, `${JSON.stringify(lockfile, null, 2)}\n`, 'utf-8');
+      await writeFile(filePath, this.serialize(lockfile), 'utf-8');
       return ok(undefined);
     } catch (err) {
       bag.add(createManifestWriteErrorDiagnostic(filePath, String(err)));
       return bag.toFailure();
     }
+  }
+
+  serialize(lockfile: Lockfile): string {
+    return `${JSON.stringify(lockfile, null, 2)}\n`;
   }
 }

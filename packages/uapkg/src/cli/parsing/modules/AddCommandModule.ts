@@ -33,7 +33,12 @@ export class AddCommandModule implements UAPKGCommandModule {
             default: false,
             describe: 'Preview installation; the manifest, lockfile, and registry cache may still change',
           })
-          .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' }),
+          .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' })
+          .option('ignore-release-age', {
+            type: 'boolean',
+            default: false,
+            describe: 'Resolve packages without the minimum release age policy',
+          }),
       (argv) => {
         sink.set(
           this.factory.createAdd(String(argv.source), {
@@ -43,6 +48,7 @@ export class AddCommandModule implements UAPKGCommandModule {
             dev: argv.dev,
             registry: typeof argv.registry === 'string' ? argv.registry : undefined,
             dryRun: argv['dry-run'],
+            ignoreReleaseAge: argv['ignore-release-age'],
             outputFormat: argv.json ? 'json' : 'text',
           }),
         );

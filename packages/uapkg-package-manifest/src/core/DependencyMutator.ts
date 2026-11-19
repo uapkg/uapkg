@@ -2,7 +2,7 @@ import {
   type Dependency,
   type Manifest,
   type ProjectManifest,
-  toDependencyDeclaration,
+  normalizeDependencyDeclaration,
 } from '@uapkg/package-manifest-schema';
 
 /**
@@ -42,7 +42,7 @@ export class DependencyMutator {
    * project, the same entry is mirrored into `overrides`.
    */
   addDependency(manifest: Manifest, name: string, dep: Dependency, options: AddDependencyOptions = {}): Manifest {
-    const declaration = toDependencyDeclaration(dep) as unknown as Dependency;
+    const declaration = normalizeDependencyDeclaration(dep);
     const bucket: DependencyBucket = options.bucket ?? 'dependencies';
     const next: Manifest = {
       ...manifest,
@@ -69,7 +69,7 @@ export class DependencyMutator {
 
     const stripFromBucket = (bucket: DependencyBucket) => {
       const existing = manifest[bucket];
-      if (!existing || !(name in existing)) return existing;
+      if (!existing || !Object.hasOwn(existing, name)) return existing;
       const { [name]: _removed, ...rest } = existing;
       removed = true;
       return Object.keys(rest).length === 0 ? undefined : rest;
@@ -84,7 +84,7 @@ export class DependencyMutator {
 
     if (next.kind === 'project') {
       const project = next as ProjectManifest;
-      if (project.overrides && name in project.overrides) {
+      if (project.overrides && Object.hasOwn(project.overrides, name)) {
         const { [name]: _overridden, ...restOverrides } = project.overrides;
         removed = true;
         return {
@@ -107,7 +107,7 @@ export class DependencyMutator {
     if (manifest.kind !== 'project') return manifest;
     const project = manifest as ProjectManifest;
     if (dep === null) {
-      if (!project.overrides || !(name in project.overrides)) return manifest;
+      if (!project.overrides || !Object.hasOwn(project.overrides, name)) return manifest;
       const { [name]: _removed, ...rest } = project.overrides;
       return {
         ...project,
@@ -115,7 +115,7 @@ export class DependencyMutator {
       } as Manifest;
     }
 
-    const declaration = toDependencyDeclaration(dep) as unknown as Dependency;
+    const declaration = normalizeDependencyDeclaration(dep);
     return {
       ...project,
       overrides: { ...project.overrides, [name]: declaration },

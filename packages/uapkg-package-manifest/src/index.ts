@@ -4,6 +4,9 @@
 
 export type {
   DependencyChangeResult,
+  HeldBackRelease,
+  ManifestInstallOptions,
+  ManifestInstallReport,
   ManifestOperationOptions,
   PackageNode,
   ResolvedGraph,

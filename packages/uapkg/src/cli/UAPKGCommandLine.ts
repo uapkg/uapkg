@@ -57,6 +57,7 @@ export interface AddCommandLine extends BaseCommandLine {
   dev: boolean;
   registry?: string;
   dryRun: boolean;
+  ignoreReleaseAge: boolean;
   outputFormat: UAPKGOutputFormat;
 }
 
@@ -65,6 +66,7 @@ export interface InstallCommandLine extends BaseCommandLine {
   force: boolean;
   frozen: boolean;
   dryRun: boolean;
+  ignoreReleaseAge: boolean;
   outputFormat: UAPKGOutputFormat;
 }
 
@@ -73,6 +75,8 @@ export interface UpdateCommandLine extends BaseCommandLine {
   specs: string[];
   force: boolean;
   dryRun: boolean;
+  recursive: boolean;
+  ignoreReleaseAge: boolean;
   outputFormat: UAPKGOutputFormat;
 }
 
@@ -129,6 +133,7 @@ export interface ListCommandLine extends BaseCommandLine {
 export interface RemoveCommandLine extends BaseCommandLine {
   command: 'remove';
   packageName: string;
+  ignoreReleaseAge: boolean;
   outputFormat: UAPKGOutputFormat;
 }
 
@@ -220,6 +225,7 @@ export interface AddCommandLineOptions extends CommonCommandLineOptions {
   dev?: boolean;
   registry?: string;
   dryRun?: boolean;
+  ignoreReleaseAge?: boolean;
   outputFormat?: UAPKGOutputFormat;
 }
 
@@ -227,11 +233,13 @@ export interface InstallOrUpdateCommandLineOptions extends CommonCommandLineOpti
   force?: boolean;
   frozen?: boolean;
   dryRun?: boolean;
+  ignoreReleaseAge?: boolean;
   outputFormat?: UAPKGOutputFormat;
 }
 
 export interface UpdateFactoryOptions extends InstallOrUpdateCommandLineOptions {
   specs?: string[];
+  recursive?: boolean;
 }
 
 export interface OutdatedFactoryOptions extends CommonCommandLineOptions {
@@ -248,6 +256,7 @@ export interface ListFactoryOptions extends CommonCommandLineOptions {
 }
 
 export interface RemoveFactoryOptions extends CommonCommandLineOptions {
+  ignoreReleaseAge?: boolean;
   outputFormat?: UAPKGOutputFormat;
 }
 
@@ -336,6 +345,7 @@ export class UAPKGCommandLineFactory {
       dev: options.dev === true,
       registry: options.registry,
       dryRun: options.dryRun === true,
+      ignoreReleaseAge: options.ignoreReleaseAge === true,
       outputFormat: options.outputFormat ?? 'text',
     };
   }
@@ -347,6 +357,7 @@ export class UAPKGCommandLineFactory {
       force: options.force === true,
       frozen: options.frozen === true,
       dryRun: options.dryRun === true,
+      ignoreReleaseAge: options.ignoreReleaseAge === true,
       outputFormat: options.outputFormat ?? 'text',
     };
   }
@@ -358,6 +369,8 @@ export class UAPKGCommandLineFactory {
       specs: options.specs ?? [],
       force: options.force === true,
       dryRun: options.dryRun === true,
+      recursive: options.recursive === true,
+      ignoreReleaseAge: options.ignoreReleaseAge === true,
       outputFormat: options.outputFormat ?? 'text',
     };
   }
@@ -393,6 +406,7 @@ export class UAPKGCommandLineFactory {
       command: 'remove',
       cwd: this.resolveCwd(options.cwd),
       packageName,
+      ignoreReleaseAge: options.ignoreReleaseAge === true,
       outputFormat: options.outputFormat ?? 'text',
     };
   }

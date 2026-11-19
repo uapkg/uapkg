@@ -31,7 +31,7 @@ export const RegistryVersionSchema = z.object({
   gitTree: GitTreeSchema.optional(),
   // Normalized packaged `private` claim; records predating the field read as false.
   private: z.boolean().default(false),
-  meta: VersionMetaSchema.optional(),
+  meta: VersionMetaSchema,
   releaseFiles: ReleaseFilesSchema,
   dependencies: z.record(PackageNameSchema, RegistryDependencySchema).optional(),
   devDependencies: z.record(PackageNameSchema, RegistryDependencySchema).optional(),

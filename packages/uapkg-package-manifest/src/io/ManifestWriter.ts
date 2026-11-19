@@ -19,12 +19,16 @@ export class ManifestWriter {
       if (!existsSync(manifestRoot)) {
         await mkdir(manifestRoot, { recursive: true });
       }
-      await writeFile(filePath, `${JSON.stringify(this.toSerializableManifest(manifest), null, 2)}\n`, 'utf-8');
+      await writeFile(filePath, this.serialize(manifest), 'utf-8');
       return ok(undefined);
     } catch (err) {
       bag.add(createManifestWriteErrorDiagnostic(filePath, String(err)));
       return bag.toFailure();
     }
+  }
+
+  serialize(manifest: Manifest): string {
+    return `${JSON.stringify(this.toSerializableManifest(manifest), null, 2)}\n`;
   }
 
   private toSerializableManifest(manifest: Manifest): Record<string, unknown> {

@@ -8,7 +8,7 @@ import type {
 import { ConfigMerger } from '#config/merge/ConfigMerger.ts';
 import { getValueByPath } from '#config/schema/pathSchema.ts';
 import { ConfigSemanticValidator } from '#config/core/ConfigSemanticValidator.ts';
-import { projectLauncherLayers } from '#config/core/LauncherConfigProjection.ts';
+import { isValidatedConfigPath, projectValidatedLayers } from '#config/core/ValidatedConfigProjection.ts';
 import { isRecordValue } from '#config/schema/runtime/ConfigSchemaIntrospection.ts';
 
 export class ConfigResolver {
@@ -18,7 +18,7 @@ export class ConfigResolver {
   ) {}
 
   resolveAll(layers: ConfigLayer[]): ConfigResolvedResult {
-    const projected = projectLauncherLayers(layers);
+    const projected = projectValidatedLayers(layers);
     const merged = this.merger.mergeLayers(projected.layers);
     const semanticDiagnostics = this.semanticValidator.validate(merged.value);
     return {
@@ -40,14 +40,13 @@ export class ConfigResolver {
     let source: ConfigLayer['source'] = 'default';
     let file: string | undefined;
 
-    const launcherPath = pathToProperty === 'launcher' || pathToProperty.startsWith('launcher.');
-    const projection = launcherPath ? projectLauncherLayers(layers) : null;
+    const projection = isValidatedConfigPath(pathToProperty) ? projectValidatedLayers(layers) : null;
     const effectiveLayers = projection?.layers ?? layers;
     const resolvedValue = projection ? getValueByPath(this.resolveAll(layers).value, pathToProperty) : null;
-    const launcherObject = launcherPath && isRecordValue(resolvedValue);
+    const validatedObject = projection !== null && isRecordValue(resolvedValue);
     for (const [index, layer] of effectiveLayers.entries()) {
       if (
-        launcherObject &&
+        validatedObject &&
         !Object.entries(projection?.decisions[index] ?? {}).some(
           ([property, decision]) =>
             property.startsWith(`${pathToProperty}.`) &&
@@ -65,15 +64,14 @@ export class ConfigResolver {
     }
 
     return {
-      value: launcherObject ? resolvedValue : value,
+      value: validatedObject ? resolvedValue : value,
       source,
       file,
     };
   }
 
   trace(layers: ConfigLayer[], pathToProperty: string): ConfigTraceEntry[] {
-    const launcherPath = pathToProperty === 'launcher' || pathToProperty.startsWith('launcher.');
-    const projection = launcherPath ? projectLauncherLayers(layers) : null;
+    const projection = isValidatedConfigPath(pathToProperty) ? projectValidatedLayers(layers) : null;
     return layers.map((layer, index) => {
       const decisions = projection?.decisions[index];
       let decision = decisions?.[pathToProperty];

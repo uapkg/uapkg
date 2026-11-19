@@ -56,4 +56,36 @@ describe('InstallProgressReporter', () => {
     expect(sink.lines).toHaveLength(1);
     expect(sink.lines[0]).toMatch(/1 added, 2 updated, 3 removed, 4 unchanged/);
   });
+
+  it('reports held-back releases with remaining duration and an optional dependency blocker', () => {
+    const sink = new MemoryTextSink();
+    new InstallProgressReporter(sink).renderHeldBack(
+      [
+        {
+          name: 'example',
+          registry: 'official',
+          selectedVersion: '1.0.0',
+          blockedVersion: '1.1.0',
+          publishedAt: 100,
+          eligibleInSeconds: 90061,
+          blockedDependency: { name: 'child', version: '2.0.0' },
+        },
+      ],
+      '3d',
+      { retryCommand: 'uapkg update example --ignore-release-age' },
+    );
+    expect(sink.joined()).toContain('1 held back by minimum release age (3d)');
+    expect(sink.joined()).toContain('1d 1h 1m 1s');
+    expect(sink.joined()).toContain('waiting for child@2.0.0');
+    expect(sink.joined()).toContain('uapkg update example --ignore-release-age');
+  });
+
+  it('explicitly reports an empty update hold count without an unnecessary retry tip', () => {
+    const sink = new MemoryTextSink();
+    new InstallProgressReporter(sink).renderHeldBack([], '3d', {
+      showEmpty: true,
+      retryCommand: 'uapkg update --ignore-release-age',
+    });
+    expect(sink.lines).toEqual(['0 held back.']);
+  });
 });

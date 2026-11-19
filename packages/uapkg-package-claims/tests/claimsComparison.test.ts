@@ -20,6 +20,7 @@ function packagedClaims(overrides: Partial<Record<string, unknown>> = {}): Packa
 
 function registryEntry(overrides: Partial<Record<string, unknown>> = {}) {
   return RegistryVersionSchema.parse({
+    meta: { publishedAt: 1_700_000_000 },
     gitTree: 'a'.repeat(40),
     releaseFiles: {
       package: {

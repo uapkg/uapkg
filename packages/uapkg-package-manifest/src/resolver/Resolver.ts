@@ -1,17 +1,31 @@
-import { DEFAULT_REGISTRY_ALIAS, type RegistryName } from '@uapkg/common-schema';
+import { DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE, parseReleaseAgeMilliseconds } from '@uapkg/common';
+import { DEFAULT_REGISTRY_ALIAS } from '@uapkg/common-schema';
 import {
-  createCircularDepDiagnostic,
-  createRegistryNameCollisionDiagnostic,
-  createUnresolvedRegistryDiagnostic,
-  createVersionConflictDiagnostic,
-  DiagnosticBag,
+  createParseErrorDiagnostic,
+  createReleaseAgeBlockedDiagnostic,
+  fail,
   ok,
+  type Diagnostic,
   type Result,
 } from '@uapkg/diagnostics';
 import type { Dependency, Manifest } from '@uapkg/package-manifest-schema';
-import type { RegistryCore } from '@uapkg/registry-core';
-import type { PackageNode, ResolvedGraph, ResolverOptions } from '#package-manifest/contracts/ManifestTypes.ts';
+import { releaseAgeRemainingSeconds, SemverSelectionPolicy, type RegistryCore } from '@uapkg/registry-core';
+import semver from 'semver';
+import type {
+  HeldBackRelease,
+  PackageNode,
+  ResolvedGraph,
+  ResolverOptions,
+} from '#package-manifest/contracts/ManifestTypes.ts';
 import { DevDependencyPolicy } from '#package-manifest/core/DevDependencyPolicy.ts';
+import {
+  packageIdentity,
+  ResolutionSearch,
+  versionEntries,
+  type PackageDemand,
+  type Requirement,
+  type SearchSolution,
+} from '#package-manifest/resolver/ResolutionSearch.ts';
 
 export class Resolver {
   private readonly devPolicy = new DevDependencyPolicy();
@@ -19,125 +33,239 @@ export class Resolver {
   constructor(private readonly registryCore: RegistryCore) {}
 
   async resolve(manifest: Manifest, options: ResolverOptions = {}): Promise<Result<ResolvedGraph>> {
-    const bag = new DiagnosticBag();
+    const minimumReleaseAge = options.minimumReleaseAge ?? DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE;
+    const minimumAgeMs = parseReleaseAgeMilliseconds(minimumReleaseAge);
+    const nowMs = options.nowMs ?? Date.now();
+    if (minimumAgeMs === undefined || !Number.isSafeInteger(nowMs) || nowMs < 0) {
+      return fail([
+        createParseErrorDiagnostic('Resolution requires a valid minimumReleaseAge duration and operation clock.'),
+      ]);
+    }
+    const rootDeps = new Map<string, Dependency[]>();
+    for (const bucket of this.devPolicy.pickBuckets(manifest, true)) {
+      for (const [name, dep] of Object.entries(bucket.map)) rootDeps.set(name, [...(rootDeps.get(name) ?? []), dep]);
+    }
+    for (const [name, dep] of Object.entries(options.overrides ?? {})) rootDeps.set(name, [dep]);
+    const roots: Requirement[] = [...rootDeps]
+      .sort(([left], [right]) => left.localeCompare(right, 'en'))
+      .flatMap(([name, dependencies]) =>
+        dependencies.map((dep) => ({
+          name,
+          registry: dep.registry ?? DEFAULT_REGISTRY_ALIAS,
+          range: dep.version,
+          root: name,
+          newTree: options.newRoots?.includes(name) ?? false,
+          direct: true,
+        })),
+      );
+    const search = new ResolutionSearch(this.registryCore, roots, options, minimumAgeMs, nowMs);
+    if (
+      options.previousLockfile &&
+      options.updateTargets === undefined &&
+      !options.frozen &&
+      !options.newRoots?.length
+    ) {
+      const reusable = await search.solve(false, true);
+      if ('solution' in reusable) return this.buildGraph(search, reusable.solution, []);
+    }
+    let strict = await search.solve(false);
+    // Only a complete age-disabled graph proves that release age, rather than
+    // an intrinsic range/metadata/graph error, prevented resolution.
+    let unrestricted = search.rejectedForAge ? await search.solve(true) : strict;
+    if (
+      !('solution' in strict) &&
+      !('solution' in unrestricted) &&
+      !options.frozen &&
+      Number.isFinite(search.repairBudget)
+    ) {
+      // Minimize the age-independent structural repair first. Cooldown cannot
+      // spend an additional downgrade merely to avoid a young dependency.
+      let lower = 1;
+      let upper = search.repairBudget;
+      let witness: { budget: number; outcome: Awaited<ReturnType<ResolutionSearch['solve']>> } | undefined;
+      while (lower < upper) {
+        const budget = Math.floor((lower + upper) / 2);
+        const outcome = await search.solve(true, false, budget);
+        if ('solution' in outcome) {
+          upper = budget;
+          witness = { budget, outcome };
+        } else lower = budget + 1;
+      }
+      unrestricted = witness?.budget === lower ? witness.outcome : await search.solve(true, false, lower);
+      strict = await search.solve(false, false, lower);
+    }
+    if (!('solution' in strict)) {
+      if (!('solution' in unrestricted)) return fail(unrestricted.diagnostics);
+      const blocked = await this.blocked(search, unrestricted.solution);
+      if (blocked.length === 0) return fail(strict.diagnostics);
+      const diagnostics = await Promise.all(
+        blocked.map(async ({ demand }) =>
+          createReleaseAgeBlockedDiagnostic({
+            packageName: demand.name,
+            registry: demand.registry,
+            ranges: [...new Set(demand.requirements.map((requirement) => requirement.range))],
+            minimumReleaseAge,
+            candidates: await search.blockedReleases(demand),
+            overrideCommand: options.overrideCommand ?? 'uapkg install --ignore-release-age',
+          }),
+        ),
+      );
+      return fail(diagnostics);
+    }
+    const heldBack =
+      'solution' in unrestricted
+        ? await this.heldBack(
+            search,
+            strict.solution,
+            unrestricted.solution,
+            minimumAgeMs,
+            nowMs,
+            options.updateTargets,
+          )
+        : [];
+    return this.buildGraph(search, strict.solution, heldBack);
+  }
+
+  private async blocked(
+    search: ResolutionSearch,
+    solution: SearchSolution,
+  ): Promise<
+    {
+      demand: PackageDemand;
+      version: string;
+      publishedAt: number;
+    }[]
+  > {
+    const blocked: { demand: PackageDemand; version: string; publishedAt: number }[] = [];
+    for (const demand of [...solution.demands.values()].sort((left, right) =>
+      left.key.localeCompare(right.key, 'en'),
+    )) {
+      const manifest = await search.getManifest(demand);
+      if (!manifest.ok) continue;
+      const version = solution.assignments.get(demand.key)!;
+      const entry = versionEntries(manifest.value)[version]!;
+      if (!search.ageAllowed(demand, version, entry))
+        blocked.push({ demand, version, publishedAt: entry.meta.publishedAt });
+    }
+    return blocked;
+  }
+
+  private async heldBack(
+    search: ResolutionSearch,
+    selected: SearchSolution,
+    unrestricted: SearchSolution,
+    minimumAgeMs: number,
+    nowMs: number,
+    targets?: readonly string[],
+  ): Promise<HeldBackRelease[]> {
+    const rows = new Map<string, HeldBackRelease>();
+    const policy = new SemverSelectionPolicy();
+    const scope = targets?.length ? new Set<string>() : undefined;
+    if (scope) {
+      for (const solution of [selected, unrestricted]) {
+        const queue = search.roots
+          .filter((root) => targets!.includes(root.root))
+          .map((root) => packageIdentity(root.registry, root.name));
+        const visited = new Set<string>();
+        for (let index = 0; index < queue.length; index++) {
+          const key = queue[index]!;
+          if (visited.has(key)) continue;
+          visited.add(key);
+          scope.add(key);
+          queue.push(...(solution.edges.get(key) ?? []));
+        }
+      }
+    }
+    for (const blocked of await this.blocked(search, unrestricted)) {
+      const currentDemand = selected.demands.get(blocked.demand.key);
+      const direct =
+        currentDemand &&
+        currentDemand.requirements.every((requirement) => policy.matches(blocked.version, requirement.range)) &&
+        semver.gt(blocked.version, selected.assignments.get(blocked.demand.key)!)
+          ? blocked.demand.key
+          : undefined;
+      const affected = new Set<string>();
+      if (direct) affected.add(direct);
+      else {
+        const visited = new Set<string>();
+        const queue = [blocked.demand.key];
+        for (let index = 0; index < queue.length; index++) {
+          const key = queue[index]!;
+          if (visited.has(key)) continue;
+          visited.add(key);
+          for (const [parent, children] of [...unrestricted.edges].sort(([left], [right]) =>
+            left.localeCompare(right, 'en'),
+          )) {
+            if (!children.includes(key)) continue;
+            if (
+              selected.assignments.has(parent) &&
+              semver.gt(unrestricted.assignments.get(parent)!, selected.assignments.get(parent)!)
+            ) {
+              affected.add(parent);
+              continue;
+            }
+            queue.push(parent);
+          }
+        }
+      }
+      const eligibleInSeconds = releaseAgeRemainingSeconds(blocked.publishedAt, minimumAgeMs, nowMs);
+      for (const identity of affected) {
+        if (scope && !scope.has(identity)) continue;
+        const demand = selected.demands.get(identity)!;
+        if ((rows.get(identity)?.eligibleInSeconds ?? -1) >= eligibleInSeconds) continue;
+        rows.set(identity, {
+          name: demand.name,
+          registry: demand.registry,
+          selectedVersion: selected.assignments.get(identity)!,
+          blockedVersion: unrestricted.assignments.get(identity)!,
+          ...(identity === blocked.demand.key
+            ? {}
+            : { blockedDependency: { name: blocked.demand.name, version: blocked.version } }),
+          publishedAt: blocked.publishedAt,
+          eligibleInSeconds,
+        });
+      }
+    }
+    return [...rows.values()].sort(
+      (left, right) => left.name.localeCompare(right.name, 'en') || left.registry.localeCompare(right.registry, 'en'),
+    );
+  }
+
+  private async buildGraph(
+    search: ResolutionSearch,
+    solution: SearchSolution,
+    heldBack: readonly HeldBackRelease[],
+  ): Promise<Result<ResolvedGraph>> {
+    const identities = new Map<string, PackageNode>();
     const nodes = new Map<string, PackageNode>();
-    const visiting = new Set<string>();
-    const roots: PackageNode[] = [];
-
-    const rootBuckets = this.devPolicy.pickBuckets(manifest, true);
-    const rootDeps: Record<string, Dependency> = {};
-    for (const b of rootBuckets) {
-      for (const [n, d] of Object.entries(b.map)) rootDeps[n] = d;
+    const diagnostics: Diagnostic[] = [];
+    for (const demand of [...solution.demands.values()].sort((left, right) =>
+      left.key.localeCompare(right.key, 'en'),
+    )) {
+      const manifest = await search.getManifest(demand);
+      if (!manifest.ok) return manifest;
+      diagnostics.push(...manifest.diagnostics);
+      const version = solution.assignments.get(demand.key)!;
+      const entry = versionEntries(manifest.value)[version]!;
+      const node: PackageNode = {
+        name: demand.name,
+        version,
+        registry: demand.registry,
+        integrity: entry.releaseFiles.package.integrity.hash,
+        ...(entry.gitTree === undefined ? {} : { gitTree: entry.gitTree }),
+        dependencies: new Map(),
+      };
+      identities.set(demand.key, node);
+      nodes.set(demand.registry + '::' + demand.name + '@' + version, node);
     }
-    const deps = this.applyOverrides(rootDeps, options.overrides);
-
-    for (const [name, dep] of Object.entries(deps)) {
-      // At the project root an absent registry means the configured default alias.
-      const result = await this.resolveNode(name, dep, DEFAULT_REGISTRY_ALIAS, bag, nodes, visiting, []);
-      if (result) roots.push(result);
+    for (const [parent, children] of solution.edges) {
+      const node = identities.get(parent)!;
+      const dependencies = node.dependencies as Map<string, PackageNode>;
+      for (const child of children) dependencies.set(identities.get(child)!.name, identities.get(child)!);
     }
-
-    this.checkNameCollisions(nodes, bag);
-
-    if (bag.hasErrors()) return bag.toFailure();
-    return ok({ nodes, roots });
-  }
-
-  private async resolveNode(
-    name: string,
-    dep: Dependency,
-    inheritedRegistry: RegistryName,
-    bag: DiagnosticBag,
-    nodes: Map<string, PackageNode>,
-    visiting: Set<string>,
-    path: string[],
-  ): Promise<PackageNode | null> {
-    const effectiveRegistry = dep.registry ?? inheritedRegistry;
-    const registryResult = this.registryCore.getOrCreateRegistry(effectiveRegistry);
-    if (!registryResult.ok) {
-      bag.add(createUnresolvedRegistryDiagnostic(effectiveRegistry, name));
-      return null;
-    }
-
-    const registry = registryResult.value;
-    const resolved = await registry.resolvePackage(name, dep.version, effectiveRegistry);
-    if (!resolved.ok) {
-      bag.mergeArray(resolved.diagnostics);
-      return null;
-    }
-
-    const nodeKey = `${effectiveRegistry}::${name}@${resolved.value.version}`;
-
-    if (visiting.has(nodeKey)) {
-      bag.add(createCircularDepDiagnostic([...path, name]));
-      return null;
-    }
-
-    const existing = nodes.get(nodeKey);
-    if (existing) return existing;
-
-    visiting.add(nodeKey);
-    const childDeps = new Map<string, PackageNode>();
-
-    const versionEntry = resolved.value.entry;
-    if (versionEntry.dependencies && !this.devPolicy.includeTransitiveDev()) {
-      for (const [childName, childDep] of Object.entries(versionEntry.dependencies)) {
-        // Registry-record dependencies inherit the parent's effective registry when absent.
-        const child = await this.resolveNode(
-          childName,
-          { version: childDep.version, ...(childDep.registry !== undefined ? { registry: childDep.registry } : {}) },
-          effectiveRegistry,
-          bag,
-          nodes,
-          visiting,
-          [...path, name],
-        );
-        if (child) childDeps.set(childName, child);
-      }
-    }
-
-    visiting.delete(nodeKey);
-
-    const node: PackageNode = {
-      name,
-      version: resolved.value.version,
-      registry: effectiveRegistry,
-      integrity: versionEntry.releaseFiles.package.integrity.hash,
-      gitTree: versionEntry.gitTree,
-      dependencies: childDeps,
-    };
-
-    const conflictKey = `${effectiveRegistry}::${name}`;
-    for (const [key, existing] of nodes) {
-      if (key.startsWith(conflictKey) && existing.version !== node.version) {
-        bag.add(createVersionConflictDiagnostic(name, [existing.version, node.version], effectiveRegistry));
-      }
-    }
-
-    nodes.set(nodeKey, node);
-    return node;
-  }
-
-  private applyOverrides(
-    deps: Record<string, Dependency>,
-    overrides?: Record<string, Dependency>,
-  ): Record<string, Dependency> {
-    if (!overrides) return deps;
-    return { ...deps, ...overrides };
-  }
-
-  private checkNameCollisions(nodes: Map<string, PackageNode>, bag: DiagnosticBag): void {
-    const nameToRegistries = new Map<string, Set<string>>();
-    for (const node of nodes.values()) {
-      const registries = nameToRegistries.get(node.name) ?? new Set();
-      registries.add(node.registry);
-      nameToRegistries.set(node.name, registries);
-    }
-
-    for (const [name, registries] of nameToRegistries) {
-      if (registries.size > 1) {
-        bag.add(createRegistryNameCollisionDiagnostic(name, [...registries]));
-      }
-    }
+    const roots = [...new Set(search.roots.map((root) => packageIdentity(root.registry, root.name)))].map((identity) =>
+      identities.get(identity)!,
+    );
+    return ok({ nodes, roots, heldBack }, diagnostics);
   }
 }

@@ -27,7 +27,15 @@ export class InstallCommandModule implements UAPKGCommandModule {
             describe: 'Preview installation; the lockfile and registry cache may still change',
           })
           .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' })
-          .conflicts('force', 'frozen'),
+          .option('ignore-release-age', {
+            type: 'boolean',
+            default: false,
+            describe: 'Resolve packages without the minimum release age policy',
+          })
+          .check((argv) => {
+            if (argv.force && argv.frozen) throw new Error('--force and --frozen are mutually exclusive');
+            return true;
+          }),
       (argv) => {
         sink.set(
           this.factory.createInstall({
@@ -35,6 +43,7 @@ export class InstallCommandModule implements UAPKGCommandModule {
             force: argv.force,
             frozen: argv.frozen,
             dryRun: argv['dry-run'],
+            ignoreReleaseAge: argv['ignore-release-age'],
             outputFormat: argv.json ? 'json' : 'text',
           }),
         );

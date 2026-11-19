@@ -22,7 +22,17 @@ export class UpdateCommandModule implements UAPKGCommandModule {
             default: false,
             describe: 'Preview installation; the manifest, lockfile, and registry cache may still change',
           })
-          .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' }),
+          .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' })
+          .option('recursive', {
+            type: 'boolean',
+            default: false,
+            describe: 'Also update dependencies within the selected package subtrees',
+          })
+          .option('ignore-release-age', {
+            type: 'boolean',
+            default: false,
+            describe: 'Resolve packages without the minimum release age policy',
+          }),
       (argv) => {
         const specsArg = argv.specs;
         const specs = Array.isArray(specsArg) ? (specsArg.filter((v) => typeof v === 'string') as string[]) : [];
@@ -32,6 +42,8 @@ export class UpdateCommandModule implements UAPKGCommandModule {
             specs,
             force: argv.force,
             dryRun: argv['dry-run'],
+            recursive: argv.recursive,
+            ignoreReleaseAge: argv['ignore-release-age'],
             outputFormat: argv.json ? 'json' : 'text',
           }),
         );

@@ -37,9 +37,8 @@ export class DependencyAddResolver {
 
     const dependencyRange = spec.range ?? VersionRangeSchema.parse(`^${resolution.value.version}`);
 
-    // Only an explicit non-default --registry is recorded; the default alias stays absent in the manifest.
-    const recordedRegistry =
-      registryNameInput !== undefined && registryName !== DEFAULT_REGISTRY_ALIAS ? registryName : undefined;
+    // Bind the selected non-default alias so the graph uses the preflight's registry.
+    const recordedRegistry = registryName !== DEFAULT_REGISTRY_ALIAS ? registryName : undefined;
 
     return ok(
       {

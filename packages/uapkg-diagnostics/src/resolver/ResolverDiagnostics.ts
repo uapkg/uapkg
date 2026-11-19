@@ -42,6 +42,37 @@ export type VersionNotFoundDiagnostic = DiagnosticBase<
   }
 >;
 
+/** Matching published versions excluded by the project's release-age policy. */
+export interface ReleaseAgeBlockedData {
+  readonly packageName: string;
+  readonly registry: string;
+  readonly ranges: readonly string[];
+  readonly minimumReleaseAge: string;
+  readonly candidates: readonly { version: string; publishedAt: number }[];
+  readonly overrideCommand: string;
+}
+
+export type ReleaseAgeBlockedDiagnostic = DiagnosticBase<'RELEASE_AGE_BLOCKED', ReleaseAgeBlockedData>;
+
+export function createReleaseAgeBlockedDiagnostic(data: ReleaseAgeBlockedData): ReleaseAgeBlockedDiagnostic {
+  const versions = data.candidates.map(({ version, publishedAt }) => {
+    const date = new Date(publishedAt * 1000);
+    const published = Number.isNaN(date.getTime()) ? `Unix timestamp ${publishedAt}` : date.toISOString();
+    return `  ${version}  published ${published}`;
+  });
+  return {
+    level: 'error',
+    code: 'RELEASE_AGE_BLOCKED',
+    message: [
+      `Cannot resolve "${data.packageName}" in registry "${data.registry}" for ${data.ranges.join(' and ')}.`,
+      `Minimum release age: ${data.minimumReleaseAge}. Matching releases still within the cooldown:`,
+      ...versions,
+    ].join('\n'),
+    hint: `To bypass the release age for this operation, run: ${data.overrideCommand}`,
+    data,
+  };
+}
+
 /** Same package name required from two different registries. */
 export type RegistryNameCollisionDiagnostic = DiagnosticBase<
   'REGISTRY_NAME_COLLISION',
@@ -57,6 +88,7 @@ export type ResolverDiagnostic =
   | CircularDepDiagnostic
   | PackageNotFoundDiagnostic
   | VersionNotFoundDiagnostic
+  | ReleaseAgeBlockedDiagnostic
   | RegistryNameCollisionDiagnostic;
 
 // ---------------------------------------------------------------------------

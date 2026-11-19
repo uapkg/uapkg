@@ -1,5 +1,4 @@
-import { mkdir, rename, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { InstallPath } from '@uapkg/common-schema';
 import { createExtractionFailedDiagnostic, DiagnosticBag, ok, type Result } from '@uapkg/diagnostics';
@@ -25,13 +24,14 @@ export class PackageExtractor {
   ): Promise<Result<void>> {
     const bag = new DiagnosticBag();
     const targetAbs = resolve(manifestRoot, installPath);
-    const tempDir = join(tmpdir(), 'uapkg-installer', `extract-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    const parentDir = dirname(targetAbs);
+    let tempDir: string | undefined;
 
     try {
-      await mkdir(tempDir, { recursive: true });
+      await mkdir(parentDir, { recursive: true });
+      tempDir = await mkdtemp(join(parentDir, '.uapkg-extract-'));
       await tarExtract({ file: tgzPath, cwd: tempDir, strip: 1 });
 
-      await mkdir(dirname(targetAbs), { recursive: true });
       await rm(targetAbs, { recursive: true, force: true });
       await rename(tempDir, targetAbs);
 
@@ -39,7 +39,7 @@ export class PackageExtractor {
     } catch (err) {
       bag.add(createExtractionFailedDiagnostic(packageName, installPath as unknown as string, String(err)));
       // best-effort cleanup
-      await this.cleanup(tempDir);
+      if (tempDir !== undefined) await this.cleanup(tempDir);
       return bag.toFailure();
     }
   }

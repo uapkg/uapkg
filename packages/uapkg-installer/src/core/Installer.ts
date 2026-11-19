@@ -61,8 +61,8 @@ export class Installer {
   private readonly remover = new PackageRemover();
   private readonly safety = new SafetyPolicyRegistry();
 
-  private slots: SlotTable | null = null;
   private stream: StatusStream | null = null;
+  private pendingRuntime?: ExecutionRuntime;
 
   constructor(private readonly deps: InstallerConstructorOptions) {
     this.planner = new InstallPlanner(deps.registryCore);
@@ -76,10 +76,9 @@ export class Installer {
 
   getStatusStream(): AsyncIterable<DownloadStatusSnapshot> {
     if (!this.stream) {
-      // Lazy creation — if execute() hasn't been called yet, use a single slot
-      // so the stream is still iterable (yields empty snapshots).
-      this.slots = new SlotTable(this.readMaxConcurrent());
-      this.stream = new StatusStream(this.slots);
+      // A subscriber may attach before the first execution starts.
+      this.pendingRuntime = this.createExecutionRuntime(this.readMaxConcurrent());
+      this.stream = this.pendingRuntime.stream;
     }
     return this.stream;
   }
@@ -89,10 +88,26 @@ export class Installer {
     previousLockfile: Lockfile | null,
     options: InstallerOptions,
   ): Promise<Result<InstallReport>> {
-    const bag = new DiagnosticBag();
     const maxConcurrent = this.readMaxConcurrent();
-    const runtime = this.createExecutionRuntime(maxConcurrent);
+    const runtime = this.pendingRuntime ?? this.createExecutionRuntime(maxConcurrent);
+    this.pendingRuntime = undefined;
+    this.stream = runtime.stream;
+    try {
+      return await this.executePlan(lockfile, previousLockfile, options, runtime, maxConcurrent);
+    } finally {
+      // The command's summary waits for the progress consumer, including on planning failures.
+      runtime.stream.close();
+    }
+  }
 
+  private async executePlan(
+    lockfile: Lockfile,
+    previousLockfile: Lockfile | null,
+    options: InstallerOptions,
+    runtime: ExecutionRuntime,
+    maxConcurrent: number,
+  ): Promise<Result<InstallReport>> {
+    const bag = new DiagnosticBag();
     // 1. Inspect disk
     const diskResult = await this.inspector.inspect(options.manifestRoot, lockfile);
     if (!diskResult.ok) return diskResult as Result<never>;
@@ -117,12 +132,10 @@ export class Installer {
     const verdictsResult = await this.safety.evaluatePlan(options.manifestRoot, plan.actions, options.force ?? false);
     if (!verdictsResult.ok) {
       bag.mergeArray(verdictsResult.diagnostics);
-      runtime.stream.close();
       return bag.toFailure();
     }
 
     if (options.dryRun) {
-      runtime.stream.close();
       return ok(this.emptyReport(plan));
     }
 
@@ -212,8 +225,6 @@ export class Installer {
         this.skippedDiagnostic(action.packageName, 'no trusted root or verified parent requires this package'),
       );
     }
-
-    runtime.stream.close();
 
     const report = this.buildReport(plan, outcomes, edges, verified);
     return ok(report, failureDiagnostics);
@@ -454,8 +465,6 @@ export class Installer {
   private createExecutionRuntime(maxConcurrent: number): ExecutionRuntime {
     const slots = new SlotTable(maxConcurrent);
     const stream = new StatusStream(slots);
-    this.slots = slots;
-    this.stream = stream;
     return { slots, stream };
   }
 

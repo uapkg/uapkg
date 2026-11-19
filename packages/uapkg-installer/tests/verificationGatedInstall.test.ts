@@ -128,6 +128,7 @@ function buildRegistryCore(fixtures: Map<string, RegistryFixtureVersion>, shortI
             const [name, version] = key.split('@@');
             if (name !== packageName) continue;
             versions[version] = {
+              meta: { publishedAt: 1_700_000_000 },
               ...(fixture.omitGitTree ? {} : { gitTree: 'a'.repeat(40) }),
               private: fixture.recordPrivate ?? false,
               releaseFiles: {
@@ -221,6 +222,37 @@ function fixtureKey(name: string, version: string): string {
 }
 
 describe('verification-gated partial installation', () => {
+  it('finishes a progress subscription attached before execution', async () => {
+    const installer = new Installer({
+      registryCore: buildRegistryCore(new Map(), 'testshortid'),
+      config: buildConfig(),
+    });
+    const progress = installer.getStatusStream()[Symbol.asyncIterator]();
+    const first = progress.next();
+    const manifestRoot = await makeTempDir('uapkg-progress-');
+    const result = await installer.execute(buildLockfile({}), null, { manifestRoot, dryRun: true });
+    expect(result.ok).toBe(true);
+    expect((await first).done).toBe(false);
+    expect((await progress.next()).done).toBe(true);
+  });
+
+  it('finishes progress when the registry rejects the install plan', async () => {
+    const fixture = await makeArtifact('mesh', '1.0.0', { name: 'mesh', version: '1.0.0', kind: 'plugin' });
+    const registryCore = buildRegistryCore(
+      new Map([[fixtureKey('mesh', '1.0.0'), { artifact: fixture }]]),
+      'testshortid',
+    );
+    const installer = new Installer({ registryCore, config: buildConfig() });
+    const manifestRoot = await makeTempDir('uapkg-progress-');
+    const execution = installer.execute(buildLockfile({ mesh: { version: '2.0.0', sha256: fixture.sha256 } }), null, {
+      manifestRoot,
+    });
+    const last = installer.getStatusStream()[Symbol.asyncIterator]().next();
+    const result = await execution;
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain('INSTALL_VERSION_NOT_IN_REGISTRY');
+    expect((await last).done).toBe(true);
+  });
+
   it('installs a verified root and its verified dependency', async () => {
     const childArtifact = await makeArtifact('child-pkg', '1.0.0', {
       name: 'child-pkg',

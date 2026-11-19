@@ -70,6 +70,7 @@ export class PostinstallPolicyGate {
  */
 const FALLBACK_RESOLVED_CONFIG: ResolvedConfig = {
   launcher: {},
+  packages: {},
   registry: '',
   registries: {},
   git: 'git',

@@ -1,5 +1,6 @@
 import { prettyBytes } from '@uapkg/common';
 import type { DownloadStatusSnapshot } from '@uapkg/installer';
+import type { HeldBackRelease } from '@uapkg/package-manifest';
 import { ProcessTextSink, type TextSink } from '#cli/reporting/TextSink.ts';
 
 /**
@@ -61,4 +62,41 @@ export class InstallProgressReporter {
       `${summary.added} added, ${summary.updated} updated, ${summary.removed} removed, ${summary.unchanged} unchanged (${prettyBytes(summary.totalBytes)})`,
     );
   }
+
+  public renderHeldBack(
+    releases: readonly HeldBackRelease[],
+    minimumReleaseAge: string,
+    options: { readonly showEmpty?: boolean; readonly retryCommand?: string } = {},
+  ): void {
+    if (releases.length === 0) {
+      if (options.showEmpty) this.sink.writeLine('0 held back.');
+      return;
+    }
+    this.sink.writeLine(`${releases.length} held back by minimum release age (${minimumReleaseAge}):`);
+    for (const release of releases) {
+      this.sink.writeLine(
+        `  ${release.name} [${release.registry}]: ${release.selectedVersion} selected; ${release.blockedVersion} eligible in ${formatRemainingAge(release.eligibleInSeconds)}${release.blockedDependency ? ` (waiting for ${release.blockedDependency.name}@${release.blockedDependency.version})` : ''}`,
+      );
+    }
+    if (options.retryCommand) {
+      this.sink.writeLine(`Use \`${options.retryCommand}\` to ignore the minimum release age for this command.`);
+    }
+  }
+}
+
+function formatRemainingAge(seconds: number): string {
+  let remaining = Math.max(0, Math.ceil(seconds));
+  const parts: string[] = [];
+  for (const [unit, size] of [
+    ['w', 604800],
+    ['d', 86400],
+    ['h', 3600],
+    ['m', 60],
+    ['s', 1],
+  ] as const) {
+    const amount = Math.floor(remaining / size);
+    if (amount > 0) parts.push(`${amount}${unit}`);
+    remaining %= size;
+  }
+  return parts.join(' ') || '0s';
 }

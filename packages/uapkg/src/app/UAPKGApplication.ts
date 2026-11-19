@@ -40,6 +40,7 @@ export class UAPKGApplication {
           force: commandLine.force,
           frozen: commandLine.frozen,
           dryRun: commandLine.dryRun,
+          ignoreReleaseAge: commandLine.ignoreReleaseAge,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
@@ -51,6 +52,7 @@ export class UAPKGApplication {
           registry: commandLine.registry,
           force: commandLine.force,
           dryRun: commandLine.dryRun,
+          ignoreReleaseAge: commandLine.ignoreReleaseAge,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
@@ -59,12 +61,15 @@ export class UAPKGApplication {
           specs: commandLine.specs,
           force: commandLine.force,
           dryRun: commandLine.dryRun,
+          recursive: commandLine.recursive,
+          ignoreReleaseAge: commandLine.ignoreReleaseAge,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
       case 'remove':
         return new RemoveCommand(root, {
           packageName: commandLine.packageName,
+          ignoreReleaseAge: commandLine.ignoreReleaseAge,
           outputFormat: commandLine.outputFormat,
         }).execute();
 

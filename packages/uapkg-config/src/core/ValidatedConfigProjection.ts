@@ -1,6 +1,6 @@
 import { createConfigInvalidValueDiagnostic, type Diagnostic } from '@uapkg/diagnostics';
 import type { ConfigLayer, ConfigTraceEntry, ConfigValueWithOrigin } from '#config/contracts/ConfigTypes.ts';
-import { launcherConfigSchema } from '#config/schema/configSchema.ts';
+import { launcherConfigSchema, packagesConfigSchema } from '#config/schema/configSchema.ts';
 import {
   describeValueType,
   getConfigSchemaNodeKind,
@@ -12,8 +12,14 @@ import type { z } from 'zod';
 
 type Decision = Pick<ConfigTraceEntry, 'status' | 'reason'>;
 
+const validatedGroups = { launcher: launcherConfigSchema, packages: packagesConfigSchema };
+
+export function isValidatedConfigPath(path: string): boolean {
+  return Object.keys(validatedGroups).some((group) => path === group || path.startsWith(`${group}.`));
+}
+
 /** Validate each consumed override before merging; unrelated config keeps its existing policy. */
-export function projectLauncherLayers(layers: readonly ConfigLayer[]): {
+export function projectValidatedLayers(layers: readonly ConfigLayer[]): {
   layers: ConfigLayer[];
   diagnostics: Diagnostic[];
   decisions: Record<string, Decision>[];
@@ -25,15 +31,16 @@ export function projectLauncherLayers(layers: readonly ConfigLayer[]): {
     const decision: Record<string, Decision> = {};
     decisions.push(decision);
     if (layer.ignoredReason) decision.$ = { status: 'ignored', reason: layer.ignoredReason };
-    if (!Object.hasOwn(layer.values, 'launcher')) return layer;
+    if (!Object.keys(validatedGroups).some((group) => Object.hasOwn(layer.values, group))) return layer;
     const values = { ...layer.values };
-    const ignore = (property: string, expected: string, received: unknown) => {
+    const ignore = (property: string, expected: string, received: unknown, validationReason?: string) => {
       const retained = origins.get(property);
       const fallback = retained
         ? `; retaining ${JSON.stringify(retained.value)} from ${retained.source} config${retained.file ? ` "${retained.file}"` : ''}`
         : '; retaining earlier valid settings';
       const preview = typeof received === 'string' ? ` ${JSON.stringify(received).slice(0, 120)}` : '';
-      const reason = `expected ${expected}, received ${describeValueType(received)}${preview}${fallback}`;
+      const detail = validationReason ? ` (${validationReason})` : '';
+      const reason = `expected ${expected}, received ${describeValueType(received)}${preview}${detail}${fallback}`;
       decision[property] = { status: 'ignored', reason };
       diagnostics.push(
         createConfigInvalidValueDiagnostic(property, reason, {
@@ -59,17 +66,26 @@ export function projectLauncherLayers(layers: readonly ConfigLayer[]): {
         }
         return { value: object };
       }
-      if (!schema.safeParse(raw).success) {
-        ignore(property, unwrapConfigSchema(schema).description ?? 'a valid value', raw);
+      const validation = schema.safeParse(raw);
+      if (!validation.success) {
+        ignore(
+          property,
+          unwrapConfigSchema(schema).description ?? 'a valid value',
+          raw,
+          validation.error.issues[0]?.message,
+        );
         return null;
       }
       decision[property] = { status: 'accepted' };
       origins.set(property, { source: layer.source, file: layer.file, value: raw });
       return { value: raw };
     };
-    const launcher = project(launcherConfigSchema, layer.values.launcher, 'launcher');
-    if (launcher) values.launcher = launcher.value;
-    else delete values.launcher;
+    for (const [group, schema] of Object.entries(validatedGroups)) {
+      if (!Object.hasOwn(layer.values, group)) continue;
+      const projected = project(schema, layer.values[group], group);
+      if (projected) values[group] = projected.value;
+      else delete values[group];
+    }
     return { ...layer, values };
   });
   return { layers: projected, decisions, diagnostics };

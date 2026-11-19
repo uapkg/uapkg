@@ -1,11 +1,15 @@
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
+import { createDependencyNotFoundDiagnostic } from '@uapkg/diagnostics';
+import { DependencyMutator } from '@uapkg/package-manifest';
 import type { Command } from '#cli/commands/Command.ts';
 import { InstallCommand } from '#cli/commands/InstallCommand.ts';
+import { releaseAgeOverrideCommand } from '#cli/commands/PackageOperation.ts';
 
 export interface RemoveCommandOptions {
   readonly packageName: string;
   readonly outputFormat: 'text' | 'json';
   readonly dryRun?: boolean;
+  readonly ignoreReleaseAge?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -22,7 +26,8 @@ export class RemoveCommand implements Command {
   ) {}
 
   public async execute(): Promise<number> {
-    const result = await this.root.packageManifest.removeDependency(this.options.packageName);
+    const nowMs = Date.now();
+    const result = await this.root.packageManifest.readManifest();
 
     if (!result.ok) {
       if (this.options.outputFormat === 'json') {
@@ -33,26 +38,23 @@ export class RemoveCommand implements Command {
       return 1;
     }
 
-    const missing = result.diagnostics.some((diagnostic) => diagnostic.code === 'DEPENDENCY_NOT_FOUND');
+    const staged = new DependencyMutator().removeDependency(result.value, this.options.packageName);
+    const diagnostics = [
+      ...result.diagnostics,
+      ...(!staged.removed ? [createDependencyNotFoundDiagnostic(this.options.packageName)] : []),
+    ];
 
-    if (result.diagnostics.length > 0 && this.options.outputFormat === 'text') {
-      this.root.diagnostics.reportAll(result.diagnostics);
-    }
-
-    if (missing) {
+    if (!staged.removed) {
+      if (this.options.outputFormat === 'text') this.root.diagnostics.reportAll(diagnostics);
       if (this.options.outputFormat === 'json') {
         this.root.json.emit({
           status: 'ok',
           command: 'remove',
           data: { removed: false, packageName: this.options.packageName },
-          diagnostics: result.diagnostics,
+          diagnostics,
         });
       }
       return 0;
-    }
-
-    if (this.options.outputFormat === 'text') {
-      process.stdout.write(`Removed "${this.options.packageName}" from uapkg.json\n`);
     }
 
     // Reconcile on-disk state by delegating to the installer pipeline.
@@ -61,6 +63,18 @@ export class RemoveCommand implements Command {
       frozen: false,
       dryRun: this.options.dryRun === true,
       outputFormat: this.options.outputFormat,
+      command: 'remove',
+      ignoreReleaseAge: this.options.ignoreReleaseAge,
+      diagnostics,
+      resolution: {
+        originalManifest: result.value,
+        stagedManifest: staged.manifest,
+        nowMs,
+        overrideCommand: releaseAgeOverrideCommand('remove', [
+          this.options.packageName,
+          ...(this.options.outputFormat === 'json' ? ['--json'] : []),
+        ]),
+      },
     });
     return install.execute();
   }

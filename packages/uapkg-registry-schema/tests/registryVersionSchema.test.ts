@@ -10,6 +10,7 @@ import {
 import { registryMetaFixture } from './fixtures/registryMetaFixture.ts';
 
 const versionRecord = {
+  meta: { publishedAt: 1_700_000_000 },
   gitTree: 'a'.repeat(40),
   releaseFiles: {
     package: {
@@ -20,6 +21,12 @@ const versionRecord = {
 };
 
 describe('RegistryVersionSchema', () => {
+  it.each([undefined, {}, { publishedAt: -1 }, { publishedAt: 1.5 }, { publishedAt: '2026-11-18' }])(
+    'requires integer Unix publication seconds on every record (%j)',
+    (meta) => {
+      expect(RegistryVersionSchema.safeParse({ ...versionRecord, meta }).success).toBe(false);
+    },
+  );
   it('defaults private to false for records predating the field', () => {
     const parsed = RegistryVersionSchema.parse(versionRecord);
     expect(parsed.private).toBe(false);
@@ -59,7 +66,7 @@ describe('PackageRegistryManifestSchema', () => {
       name: 'tool',
       packageSource: { type: 'git', url: 'https://github.com/acme/tool' },
       versions: {
-        '1.0.0': { releaseFiles: versionRecord.releaseFiles },
+        '1.0.0': { meta: versionRecord.meta, releaseFiles: versionRecord.releaseFiles },
       },
     };
     expect(createPackageRegistryManifestSchema('private').safeParse(withoutGitTree).success).toBe(true);
@@ -70,7 +77,7 @@ describe('PackageRegistryManifestSchema', () => {
       name: 'tool',
       packageSource: { type: 'git', url: 'https://github.com/acme/tool' },
       versions: {
-        '1.0.0': { releaseFiles: versionRecord.releaseFiles },
+        '1.0.0': { meta: versionRecord.meta, releaseFiles: versionRecord.releaseFiles },
       },
     };
     const parsed = createPackageRegistryManifestSchema('public').safeParse(withoutGitTree);

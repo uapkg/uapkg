@@ -1,6 +1,7 @@
 import { ok } from '@uapkg/diagnostics';
 import type { InstallReport } from '@uapkg/installer';
-import type { Lockfile, Manifest } from '@uapkg/package-manifest-schema';
+import { ManifestSchema, type Lockfile, type Manifest } from '@uapkg/package-manifest-schema';
+import type { ResolverOptions } from '@uapkg/package-manifest';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { CompositionRoot } from '../../src/app/CompositionRoot.ts';
 import { AddCommand } from '../../src/commands/AddCommand.ts';
@@ -61,7 +62,15 @@ describe('decentralized read command authentication isolation', () => {
         readManifest: vi.fn(async () => ok(manifest)),
         readLockfileOptional: vi.fn(async () => ok(null)),
         addDependency: vi.fn(async () => ok(undefined)),
-        install: vi.fn(async () => ok(lockfile)),
+        installWithReport: vi.fn(async (options: ResolverOptions & { stagedManifest?: Manifest }) =>
+          ok({
+            manifest: options.stagedManifest ? ManifestSchema.parse(options.stagedManifest) : manifest,
+            lockfile,
+            previousLockfile: null,
+            heldBack: [],
+            minimumReleaseAge: '3d',
+          }),
+        ),
       };
       const installer = {
         getStatusStream: vi.fn(() => emptyStatusStream()),
@@ -111,10 +120,8 @@ describe('decentralized read command authentication isolation', () => {
 
       await expect(command.execute()).resolves.toBe(0);
 
-      expect(packageManifest.install).toHaveBeenCalledWith({ frozen: false });
-      if (commandName === 'add') {
-        expect(packageManifest.addDependency).toHaveBeenCalledOnce();
-      }
+      expect(packageManifest.installWithReport).toHaveBeenCalledWith(expect.objectContaining({ frozen: false }));
+      expect(packageManifest.addDependency).not.toHaveBeenCalled();
       expect(installer.execute).toHaveBeenCalledOnce();
       expect(metadataFind).not.toHaveBeenCalled();
       expect(loadKeyring).not.toHaveBeenCalled();

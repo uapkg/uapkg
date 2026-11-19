@@ -108,6 +108,13 @@ export class ManifestStore {
     const bag = new DiagnosticBag();
     const filePath = this.paths.manifestPath(manifest.name);
 
+    const validated = PackageRegistryManifestSchema.safeParse(manifest);
+    if (!validated.success) {
+      const issues = validated.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
+      const diagnostic = createSchemaInvalidDiagnostic(filePath, issues);
+      this.aggregator.add(diagnostic);
+      return bag.add(diagnostic).toFailure();
+    }
     const normalized = this.normalize(manifest);
     const body = `${stableStringify(normalized)}\n`;
 

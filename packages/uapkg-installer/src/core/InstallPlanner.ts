@@ -100,7 +100,7 @@ export class InstallPlanner {
     // Removals (in previous but not in current)
     if (previous) {
       for (const rawName of Object.keys(previous)) {
-        if (rawName in current) continue;
+        if (Object.hasOwn(current, rawName)) continue;
         const name = rawName as PackageName;
         const state = diskState.get(name);
         actions.push({

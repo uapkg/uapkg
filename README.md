@@ -10,6 +10,22 @@ The native `uapkg` launcher selects the CLI version pinned by a game project's
 `@uapkg/cli` is the TypeScript engine package. It does not register a command;
 installing it globally with npm does not install the launcher.
 
+## Plugin updates
+
+UAPKG waits three days before automatically selecting a newly published plugin version.
+To change the window, run `uapkg config set packages.resolution.minimumReleaseAge 12h --global`.
+Durations accept weeks, days, hours, minutes, and seconds in descending order (for example, `1d12h`).
+Use `0` to disable the cooldown.
+
+`uapkg install` reuses compatible locked versions. A new `uapkg add mesh` requests the latest
+stable Mesh immediately. Exact project pins and the explicitly declared minimum of a range
+such as `^1.2.3` can also select a fresh release.
+
+`uapkg update mesh` updates Mesh and changes other locked dependencies only as required.
+Use `uapkg update mesh --recursive` to check its dependencies for optional upgrades, or
+`uapkg update` to check the whole project. The update summary lists releases held back
+by age. Add `--ignore-release-age` to bypass the cooldown for that command.
+
 ## Prerequisites
 
 - [Git](https://git-scm.com/)

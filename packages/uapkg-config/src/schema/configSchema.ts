@@ -1,4 +1,4 @@
-import { resolveUapkgBuildMode } from '@uapkg/common';
+import { DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE, parseReleaseAgeMilliseconds, resolveUapkgBuildMode } from '@uapkg/common';
 import { CliVersionSelectorSchema, DurationStringSchema, RegistryURLSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 
@@ -24,6 +24,17 @@ export const launcherConfigSchema = z
       })
       .strict()
       .optional(),
+  })
+  .strict();
+
+const packageReleaseAgeSchema = DurationStringSchema.refine(
+  (value) => parseReleaseAgeMilliseconds(value) !== undefined,
+  'Expected a duration representable as a non-negative safe integer in milliseconds',
+).describe('a compact duration using w, d, h, m, s in descending order, or 0 to disable the minimum release age');
+
+export const packagesConfigSchema = z
+  .object({
+    resolution: z.object({ minimumReleaseAge: packageReleaseAgeSchema.optional() }).strict().optional(),
   })
   .strict();
 
@@ -72,6 +83,7 @@ export const configSchema = z
     registry: z.string().min(1),
     registries: z.record(z.string(), registryConfigSchema),
     launcher: launcherConfigSchema,
+    packages: packagesConfigSchema,
     git: z.string().min(1),
     editor: z.string().min(1),
     exec: z
@@ -124,6 +136,7 @@ export const partialConfigSchema = z
     registry: z.string().min(1).optional(),
     registries: z.record(z.string(), partialRegistryConfigSchema).optional(),
     launcher: launcherConfigSchema.partial().optional(),
+    packages: packagesConfigSchema.partial().optional(),
     git: z.string().min(1).optional(),
     editor: z.string().min(1).optional(),
     exec: z
@@ -206,6 +219,7 @@ export function getDefaultConfig(): ResolvedConfig {
       autoCLIUpdate: true,
       autoUpdate: { minimumReleaseAge: DurationStringSchema.parse('3d') },
     },
+    packages: { resolution: { minimumReleaseAge: DurationStringSchema.parse(DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE) } },
     registries: {
       default: {
         url: registryUrlConfigSchema.parse(defaultRegistryUrl),

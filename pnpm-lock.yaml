@@ -164,6 +164,9 @@ importers:
       '@uapkg/diagnostics':
         specifier: workspace:^
         version: link:../uapkg-diagnostics
+      parse-duration-ms:
+        specifier: 0.1.0
+        version: 0.1.0
       semver:
         specifier: 7.7.1
         version: 7.7.1
@@ -2386,6 +2389,10 @@ packages:
   package-manager-detector@0.2.11:
     resolution: {integrity: sha512-BEnLolu+yuz22S56CU1SUKq3XC3PkwD5wv4ikR4MfGvnRVcmzXR9DwSlW2fEamyTPyXHomBJRzgapeuBvRNzJQ==}
 
+  parse-duration-ms@0.1.0:
+    resolution: {integrity: sha512-6yvHGGtBLcxF7pXLOxDOSCD8hnAycp1uiS+4vJ2x5O01wxC0mbEg5Zyc1Ru/+Sj5He/D+IwvQTFQ1SuJ/yAL0g==}
+    engines: {node: '>=20'}
+
   patch-console@2.0.0:
     resolution: {integrity: sha512-0YNdUceMdaQwoKce1gatDScmMo5pu/tfABfnzEqeG0gtTmd7mh/WcwgUjtAeOU7N8nFFlbQBnFK2gXW5fGvmMA==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
@@ -4393,6 +4400,8 @@ snapshots:
   package-manager-detector@0.2.11:
     dependencies:
       quansync: 0.2.11
+
+  parse-duration-ms@0.1.0: {}
 
   patch-console@2.0.0: {}
 

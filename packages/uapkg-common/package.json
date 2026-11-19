@@ -30,6 +30,7 @@
   "dependencies": {
     "@uapkg/common-schema": "workspace:^",
     "@uapkg/diagnostics": "workspace:^",
+    "parse-duration-ms": "0.1.0",
     "semver": "7.7.1"
   },
   "devDependencies": {

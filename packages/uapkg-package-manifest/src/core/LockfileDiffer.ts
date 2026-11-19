@@ -46,8 +46,8 @@ export class LockfileDiffer {
     const allNames = new Set<string>([...Object.keys(prev), ...Object.keys(next)]);
 
     for (const name of allNames) {
-      const before = (prev as Record<string, LockDependency>)[name];
-      const after = (next as Record<string, LockDependency>)[name];
+      const before = Object.hasOwn(prev, name) ? (prev as Record<string, LockDependency>)[name] : undefined;
+      const after = Object.hasOwn(next, name) ? (next as Record<string, LockDependency>)[name] : undefined;
 
       if (!before && after) {
         added.push({ name: name as PackageName, current: after });

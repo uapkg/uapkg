@@ -12,11 +12,17 @@ export class RemoveCommandModule implements UAPKGCommandModule {
       (builder) =>
         builder
           .positional('package', { type: 'string', demandOption: true, describe: 'Package name to remove' })
-          .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' }),
+          .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' })
+          .option('ignore-release-age', {
+            type: 'boolean',
+            default: false,
+            describe: 'Resolve packages without the minimum release age policy',
+          }),
       (argv) => {
         sink.set(
           this.factory.createRemove(String(argv.package), {
             cwd: process.cwd(),
+            ignoreReleaseAge: argv['ignore-release-age'],
             outputFormat: argv.json ? 'json' : 'text',
           }),
         );

@@ -214,6 +214,8 @@ export type {
   CircularDepDiagnostic,
   PackageNotFoundDiagnostic,
   RegistryNameCollisionDiagnostic,
+  ReleaseAgeBlockedDiagnostic,
+  ReleaseAgeBlockedData,
   ResolverDiagnostic,
   VersionConflictDiagnostic,
   VersionNotFoundDiagnostic,
@@ -222,6 +224,7 @@ export {
   createCircularDepDiagnostic,
   createPackageNotFoundDiagnostic,
   createRegistryNameCollisionDiagnostic,
+  createReleaseAgeBlockedDiagnostic,
   createVersionConflictDiagnostic,
   createVersionNotFoundDiagnostic,
 } from '#diagnostics/resolver/ResolverDiagnostics.ts';

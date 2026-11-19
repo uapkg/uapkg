@@ -12,6 +12,10 @@ export {
 // Hashing
 export { sha256, sha256Prefixed } from '#common/hash/sha256.ts';
 export { safeJsonParse } from '#common/json/safeJsonParse.ts';
+export {
+  DEFAULT_PACKAGE_MINIMUM_RELEASE_AGE,
+  parseReleaseAgeMilliseconds,
+} from '#common/time/parseReleaseAgeMilliseconds.ts';
 // JSON
 export { stableStringify } from '#common/json/stableStringify.ts';
 // Normalization

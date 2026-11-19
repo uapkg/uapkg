@@ -5,6 +5,7 @@ import { PostinstallPolicyGate } from '../../src/postinstall/policy/PostinstallP
 function makeConfig(partial: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
     launcher: {},
+    packages: {},
     registry: '',
     registries: {},
     git: 'git',
