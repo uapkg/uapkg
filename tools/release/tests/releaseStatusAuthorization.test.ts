@@ -30,6 +30,28 @@ describe('release status workflow authorization', () => {
       assertReleaseStatusAuthorization({ ...run, run_attempt: 1 }, { ...context, runAttempt: '1' }),
     ).not.toThrow();
   });
+  it('accepts the dispatcher bot only for an attempt run by the same bot', () => {
+    const bot = { id: 357194997 };
+    const botContext = { ...context, actorId: String(bot.id) };
+    expect(assertReleaseStatusAuthorization({ ...run, actor: bot, triggering_actor: bot }, botContext)).toBe(
+      'dispatcher',
+    );
+    expect(() => assertReleaseStatusAuthorization({ ...run, actor: bot }, botContext)).toThrow();
+    expect(() => assertReleaseStatusAuthorization({ ...run, triggering_actor: bot }, context)).toThrow();
+    expect(() => assertReleaseStatusAuthorization({ ...run, actor: bot, triggering_actor: bot }, context)).toThrow();
+  });
+  it('authorizes the current human attempt inside every publication job that receives publishing credentials', () => {
+    const workflow = readFileSync(path.resolve(import.meta.dirname, '../../../.github/workflows/release.yml'), 'utf8');
+    expect(workflow).toContain('.actor.id == 10104630 and .triggering_actor.id == 10104630');
+    expect(workflow).toContain('actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT');
+    expect(workflow).not.toContain('357194997');
+    for (const job of ['npm', 'publish']) {
+      const block = workflow.split(`\n  ${job}:\n`)[1]!.split(/\n  [a-z]+:\n/)[0]!;
+      expect(block).toContain("github.actor_id == '10104630' && github.triggering_actor == github.actor");
+      expect(block.indexOf('- *authorize_release')).toBeGreaterThan(0);
+      expect(block.indexOf('- *authorize_release')).toBeLessThan(block.indexOf('uses: actions/checkout'));
+    }
+  });
   it.each([
     { actor: { id: 7 } },
     { triggering_actor: { id: 7 } },
@@ -61,7 +83,9 @@ describe('release status workflow authorization', () => {
       'utf8',
     );
     expect(workflow).toContain('actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT');
-    expect(workflow).toContain('.actor.id == 10104630 and .triggering_actor.id == 10104630');
+    expect(workflow).toContain(
+      '(.actor.id == 10104630 or .actor.id == 357194997) and .actor.id == .triggering_actor.id',
+    );
     expect(workflow.indexOf('name: Authorize this workflow attempt')).toBeLessThan(
       workflow.indexOf('uses: actions/checkout'),
     );

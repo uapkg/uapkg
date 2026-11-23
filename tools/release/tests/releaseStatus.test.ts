@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symli
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
-import { changeReleaseStatus, type ReleaseStatusRequest } from '../releaseStatus.ts';
+import { changeReleaseStatus, type ReleaseStatusRequest } from '../releaseStatusMutation.ts';
 import { type CatalogAdapter } from '../publishCatalog.ts';
 import { type CatalogEntry, HISTORICAL_PLATFORMS, releaseTag, type ReleaseProduct } from '../ReleaseContract.ts';
 

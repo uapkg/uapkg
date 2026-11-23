@@ -1,8 +1,15 @@
 name: Release status
+run-name: ${{ github.actor_id == '357194997' && format('Release status {0}', inputs.command_id) || 'Manual release status' }}
 
 on:
   workflow_dispatch:
     inputs:
+      command_id:
+        description: Dispatcher command UUID
+        type: string
+      expected_catalog_revision:
+        description: Catalog revision approved for the dispatcher command
+        type: string
       product:
         type: choice
         options: [cli, launcher]
@@ -29,7 +36,7 @@ concurrency:
 
 jobs:
   update:
-    if: github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && github.actor_id == '10104630'
+    if: github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && (github.actor_id == '10104630' || github.actor_id == '357194997') && github.actor == github.triggering_actor
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -44,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           authorized="$(gh api "repos/uapkg/uapkg/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" --jq \
-            ".actor.id == 10104630 and .triggering_actor.id == 10104630 and .event == \"workflow_dispatch\" and .head_branch == \"main\" and .head_sha == \"$GITHUB_SHA\" and .repository.full_name == \"uapkg/uapkg\" and .path == \".github/workflows/release-status.yml\" and .id == $GITHUB_RUN_ID and .run_attempt == $GITHUB_RUN_ATTEMPT")"
+            "(.actor.id == 10104630 or .actor.id == 357194997) and .actor.id == .triggering_actor.id and .actor.id == $GITHUB_ACTOR_ID and .event == \"workflow_dispatch\" and .head_branch == \"main\" and .head_sha == \"$GITHUB_SHA\" and .repository.full_name == \"uapkg/uapkg\" and .path == \".github/workflows/release-status.yml\" and .id == $GITHUB_RUN_ID and .run_attempt == $GITHUB_RUN_ATTEMPT")"
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$authorized" = true
       - uses: actions/checkout@v7.0.1
@@ -61,10 +68,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh auth setup-git
       - name: Update the catalog status only
+        id: command
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_STATUS_COMMAND_ID: ${{ inputs.command_id }}
+          RELEASE_STATUS_EXPECTED_REVISION: ${{ inputs.expected_catalog_revision }}
           RELEASE_PRODUCT: ${{ inputs.product }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_STATUS_OPERATION: ${{ inputs.operation }}
           RELEASE_STATUS_REASON: ${{ inputs.reason }}
         run: vp exec node tools/release/releaseStatus.ts
+      - name: Catalog result ${{ steps.command.outputs.command_id }} ${{ steps.command.outputs.outcome }} ${{ steps.command.outputs.catalog_revision }}
+        if: steps.command.outputs.command_id != ''
+        run: echo 'Recorded the release status command result.'
+      - name: Preserve the command receipt
+        if: steps.command.outputs.command_id != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-status-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-status-result.json
+          if-no-files-found: error
+          retention-days: 90

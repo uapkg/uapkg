@@ -17,6 +17,7 @@ on:
         default: ''
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -25,12 +26,22 @@ concurrency:
 
 jobs:
   preflight:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && github.actor_id == '10104630' && github.triggering_actor == github.actor
     runs-on: ubuntu-24.04
     outputs:
       complete: ${{ steps.status.outputs.complete }}
       current: ${{ steps.identity.outputs.current }}
     steps:
+      - &authorize_release
+        name: Authorize this publication attempt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(gh api "repos/uapkg/uapkg/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" --jq \
+            ".actor.id == 10104630 and .triggering_actor.id == 10104630 and .event == \"workflow_dispatch\" and .head_branch == \"main\" and .head_sha == \"$GITHUB_SHA\" and .repository.full_name == \"uapkg/uapkg\" and .path == \".github/workflows/release.yml\" and .id == $GITHUB_RUN_ID and .run_attempt == $GITHUB_RUN_ATTEMPT")"
+          test "$result" = true
       - uses: actions/checkout@v7.0.1
       - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
@@ -61,24 +72,32 @@ jobs:
 
   cli:
     needs: preflight
-    if: inputs.product == 'cli' && needs.preflight.outputs.complete != 'true'
+    if: >-
+      github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && github.actor_id == '10104630' && github.triggering_actor == github.actor &&
+      inputs.product == 'cli' && needs.preflight.outputs.complete != 'true'
     uses: ./.github/workflows/_native.yml
     with:
       smoke-launcher-version: ${{ inputs.smoke-launcher-version }}
 
   launcher:
     needs: preflight
-    if: inputs.product == 'launcher' && needs.preflight.outputs.complete != 'true'
+    if: >-
+      github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && github.actor_id == '10104630' && github.triggering_actor == github.actor &&
+      inputs.product == 'launcher' && needs.preflight.outputs.complete != 'true'
     uses: ./.github/workflows/_launcher.yml
 
   npm:
     needs: preflight
-    if: inputs.product == 'cli' && needs.preflight.outputs.current == 'true'
+    if: >-
+      github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && github.actor_id == '10104630' && github.triggering_actor == github.actor &&
+      inputs.product == 'cli' && needs.preflight.outputs.current == 'true'
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
       id-token: write
     steps:
+      - *authorize_release
       - uses: actions/checkout@v7.0.1
       - uses: voidzero-dev/setup-vp@313600b80b104eadebb9111787d37a2e83e014ca # v1.17.0
         with:
@@ -124,18 +143,20 @@ jobs:
   publish:
     needs: [preflight, cli, launcher]
     if: >-
+      github.repository == 'uapkg/uapkg' && github.ref == 'refs/heads/main' && github.actor_id == '10104630' && github.triggering_actor == github.actor &&
       always() && !cancelled() && needs.preflight.result == 'success' &&
       (needs.preflight.outputs.complete == 'true' || needs.cli.result == 'success' || needs.launcher.result == 'success')
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       UAPKG_RELEASE_PUBLIC_KEY: ${{ vars.UAPKG_RELEASE_PUBLIC_KEY }}
-      UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
       RELEASE_PRODUCT: ${{ inputs.product }}
       RELEASE_VERSION: ${{ inputs.version }}
     steps:
+      - *authorize_release
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
@@ -161,4 +182,6 @@ jobs:
       - name: Configure authenticated catalog pushes
         run: gh auth setup-git
       - name: Publish immutable assets, verify GitHub bytes, then commit the catalog
+        env:
+          UAPKG_RELEASE_SECRET_KEY: ${{ secrets.UAPKG_RELEASE_SECRET_KEY }}
         run: vp exec node tools/release/publishNative.ts publish "$RELEASE_PRODUCT" "$RELEASE_VERSION" dist/release

@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const REPOSITORY = 'uapkg/uapkg';
 const OWNER_ID = 10104630;
+const DISPATCHER_ID = 357194997;
 const WORKFLOW = '.github/workflows/release-status.yml';
 
 export interface ReleaseStatusRunContext {
@@ -15,7 +16,10 @@ export interface ReleaseStatusRunContext {
 }
 
 /** Check this attempt, including rerun initiators, before any catalog mutation. */
-export function assertReleaseStatusAuthorization(value: unknown, context: ReleaseStatusRunContext): void {
+export function assertReleaseStatusAuthorization(
+  value: unknown,
+  context: ReleaseStatusRunContext,
+): 'owner' | 'dispatcher' {
   const run = value as {
     id?: unknown;
     run_attempt?: unknown;
@@ -31,7 +35,7 @@ export function assertReleaseStatusAuthorization(value: unknown, context: Releas
     context.repository !== REPOSITORY ||
     context.ref !== 'refs/heads/main' ||
     context.eventName !== 'workflow_dispatch' ||
-    context.actorId !== String(OWNER_ID) ||
+    (context.actorId !== String(OWNER_ID) && context.actorId !== String(DISPATCHER_ID)) ||
     !/^\d+$/.test(context.runId ?? '') ||
     !/^[1-9]\d*$/.test(context.runAttempt ?? '') ||
     !/^[a-f0-9]{40}$/.test(context.sha ?? '') ||
@@ -43,13 +47,16 @@ export function assertReleaseStatusAuthorization(value: unknown, context: Releas
     run.head_sha !== context.sha ||
     run.path !== WORKFLOW ||
     run.repository?.full_name !== REPOSITORY ||
-    run.actor?.id !== OWNER_ID ||
-    run.triggering_actor?.id !== OWNER_ID
+    run.actor?.id !== Number(context.actorId) ||
+    run.triggering_actor?.id !== Number(context.actorId)
   )
-    throw new Error('Release status changes require a main-branch dispatch and rerun by GitHub user ID 10104630.');
+    throw new Error(
+      'Release status changes require an authorized GitHub user ID for both dispatch and the current attempt.',
+    );
+  return run.actor.id === OWNER_ID ? 'owner' : 'dispatcher';
 }
 
-export function authorizeReleaseStatus(environment: NodeJS.ProcessEnv = process.env): void {
+export function authorizeReleaseStatus(environment: NodeJS.ProcessEnv = process.env): 'owner' | 'dispatcher' {
   const context = {
     repository: environment.GITHUB_REPOSITORY,
     ref: environment.GITHUB_REF,
@@ -69,5 +76,5 @@ export function authorizeReleaseStatus(environment: NodeJS.ProcessEnv = process.
   );
   if (response.error || response.status !== 0)
     throw new Error(`Could not authorize the current workflow attempt: ${response.error?.message ?? response.stderr}`);
-  assertReleaseStatusAuthorization(JSON.parse(response.stdout), context);
+  return assertReleaseStatusAuthorization(JSON.parse(response.stdout), context);
 }

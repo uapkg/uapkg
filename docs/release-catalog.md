@@ -279,9 +279,25 @@ verified launcher and the CLI candidate; these are not published bundles.
 
 Run the `Release status` workflow on `main` with `product` (`cli` or `launcher`),
 an exact published `version`, and `operation` (`yank`, `unyank`, `quarantine`, or
-`unquarantine`). Supply a reason for yank/quarantine. Only GitHub account ID
-`10104630` may dispatch or rerun this workflow; every mutation attempt verifies
-both actor identities.
+`unquarantine`). Supply the public reason when setting a status. The manual path
+accepts GitHub account ID `10104630` for both dispatch and reruns. Leave the
+dispatcher command fields empty on a manual run.
+
+The production administrator can submit the same four operations through the
+workflow dispatcher. The workflow verifies that both the dispatch and the current
+attempt belong to dispatcher bot user ID `357194997`. Each dispatcher request
+carries a command UUID and the exact reviewed `catalog-release` revision. A newer
+head requires a fresh review and command. The native/npm `Release` workflow
+checks the designated human's identity again in every publication attempt.
+
+The publisher records each dispatcher's intent digest, outcome and catalog
+revision under its UUID on the separate `catalog-status-commands` branch. An
+applied change pushes the release and command receipt atomically. An unchanged
+release or stale review writes only the receipt. Repeating a command returns
+its original receipt even after subsequent changes. Reusing its UUID for a
+different intent fails. The run records `applied`, `no_change` or `stale` and
+the catalog revision in its job steps and `release-status-result.json` artifact.
+The releases-site workflow separately verifies the public deployment.
 
 The workflow changes only the selected status key in the existing catalog entry.
 Repeating the same reason preserves its timestamp; clearing an absent status does
