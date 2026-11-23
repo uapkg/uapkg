@@ -1,6 +1,7 @@
 import { chmodSync, cpSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { runChecked, writeJson } from '../../packages/uapkg/build/EnginePackage.ts';
+import { NOTICE_FILENAME } from '../../packages/uapkg/build/Notices.ts';
 import { renderRuntimeSmoke } from './Smoke.ts';
 
 /** Build the same frozen runtime in SEA and in a separate qualification executable. */
@@ -23,7 +24,9 @@ export function buildSea(packageRoot: string, engineRoot: string, probeRoot: str
   for (const entry of readdirSync(packageRoot, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath, entry.name);
-    assets[path.relative(packageRoot, file).replaceAll('\\', '/')] = file;
+    const relative = path.relative(packageRoot, file).replaceAll('\\', '/');
+    // The notices ship at the archive root, outside the executable.
+    if (relative !== NOTICE_FILENAME) assets[relative] = file;
   }
   const openSource = readFileSync(path.join(packageRoot, 'node_modules/open/index.js'), 'utf8');
   const originalHelper = "const localXdgOpenPath = path.join(__dirname, 'xdg-open');";

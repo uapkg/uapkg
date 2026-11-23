@@ -1,0 +1,10 @@
+{
+  "pkg:npm/%40amplication/ast-types@0.0.2": {
+    "id": "Apache-2.0",
+    "references": ["https://github.com/amplication/ast-types/blob/3e36e05bb6b96f14df1153cb6fb4ca8351f6ba23/LICENSE"]
+  },
+  "pkg:npm/%40amplication/csharp-ast@0.1.0": {
+    "id": "Apache-2.0",
+    "references": ["https://github.com/amplication/ast-types/blob/3e36e05bb6b96f14df1153cb6fb4ca8351f6ba23/LICENSE"]
+  }
+}

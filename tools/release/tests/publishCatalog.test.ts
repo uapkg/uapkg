@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vite-plus/test';
@@ -76,6 +76,9 @@ describe('durable release catalog publication', () => {
     const published = record();
     expect(publishCatalog(published, target.adapter)).toEqual({ changed: true, attempts: 1 });
     expect(publishCatalog(published, target.adapter)).toEqual({ changed: false, attempts: 1 });
+    expect(readdirSync(path.join(target.directory, 'cli/1.6.0')).sort()).toEqual(
+      ['entry.json', 'SHASUMS256.txt', 'SHASUMS256.txt.minisig'].sort(),
+    );
     expect(readFileSync(path.join(target.directory, 'cli/1.6.0/SHASUMS256.txt.minisig'))).toEqual(published.signature);
     expect(() => publishCatalog({ ...published, signature: Buffer.from('different') }, target.adapter)).toThrow(
       'Immutable',

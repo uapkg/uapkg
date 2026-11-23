@@ -56,6 +56,46 @@ fn write(path: &Path, value: serde_json::Value) {
 }
 
 #[test]
+fn license_document_is_available_before_installation_and_matches_this_build() {
+    let directory = tempfile::tempdir().unwrap();
+    let home = directory.path().join("missing-home");
+    let output = Command::new(env!("CARGO_BIN_EXE_uapkg"))
+        .args(["launcher", "--license", "--offline"])
+        .current_dir(directory.path())
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!home.exists());
+    assert_eq!(
+        output.stdout,
+        include_bytes!(concat!(env!("OUT_DIR"), "/launcher.cdx.json")).as_slice()
+    );
+    let text = std::str::from_utf8(&output.stdout).unwrap();
+    assert!(text.starts_with("{\n  \""));
+    let bom: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(bom["bomFormat"], "CycloneDX");
+    assert_eq!(bom["specVersion"], "1.6");
+    assert_eq!(
+        bom["metadata"]["component"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(bom["metadata"]["component"]["name"], env!("CARGO_PKG_NAME"));
+    let components = bom["components"].as_array().unwrap();
+    let contains = |name: &str| components.iter().any(|component| component["name"] == name);
+    assert!(contains("uapkg-slim-config"));
+    assert!(!contains("portable-pty"));
+    assert!(!contains("cargo-cyclonedx"));
+    assert_eq!(contains("colored"), cfg!(feature = "development"));
+    assert_eq!(contains("ctrlc"), cfg!(windows));
+}
+
+#[test]
 fn command_scopes_are_independent_of_launcher_option_placement() {
     for command in ["login", "logout", "whoami"] {
         assert_eq!(invocation(&[command]).scope(), Scope::Global);

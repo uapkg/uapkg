@@ -54,16 +54,22 @@ function fixture(product: ReleaseProduct = 'cli') {
 describe('immutable independent release attachment', () => {
   it.each(['cli', 'launcher'] as const)('publishes %s without npm and retries without replacements', (product) => {
     const test = fixture(product);
+    // Release staging may contain reports. Only the platform archives and signed checksums are public assets.
+    writeFileSync(path.join(test.directory, 'THIRD-PARTY-NOTICES.txt'), '{}');
+    writeFileSync(path.join(test.directory, 'sbom.cdx.json'), '{}');
     const first = test.artifacts[0]!.fileName;
     test.remote.set(first, readFileSync(path.join(test.directory, first)));
     expect(attachReleaseAssets(test.directory, test.adapter)).toHaveLength(8);
     expect(test.adapter.getRelease).toHaveBeenCalledWith(releaseTag(product, test.version));
     expect(test.uploads.slice(-2)).toEqual(['SHASUMS256.txt', 'SHASUMS256.txt.minisig']);
+    expect([...test.remote.keys()].sort()).toEqual(
+      [...test.artifacts.map((artifact) => artifact.fileName), 'SHASUMS256.txt', 'SHASUMS256.txt.minisig'].sort(),
+    );
     expect(attachReleaseAssets(test.directory, test.adapter)).toEqual([]);
     expect(test.adapter.sign).toHaveBeenCalledTimes(1);
     const entry = verifyPublishedRelease(temporary(), product, test.version, test.adapter);
     expect(entry.publishedAt).toBe('2026-11-01T12:34:56Z');
-    expect(entry.files).toHaveLength(7);
+    expect(entry.files).toEqual(PLATFORMS);
   });
   it('checks every existing archive before any signing/upload', () => {
     const test = fixture();

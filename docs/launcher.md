@@ -81,6 +81,9 @@ also works. A standalone `--` ends launcher option parsing and preserves all
 following arguments. `uapkg --version` reports the CLI version;
 `uapkg launcher --version` reports the launcher version.
 `uapkg launcher --platform` reports its compiled distribution identifier.
+`uapkg launcher --license` prints the launcher's embedded CycloneDX JSON,
+including Cargo dependencies and their declared licenses. It works offline
+before any CLI is installed.
 `uapkg version current` reports the project-scoped selection, including an
 explicit override, without installing it.
 

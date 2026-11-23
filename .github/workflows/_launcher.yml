@@ -70,6 +70,9 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package only the launcher
         run: vp exec node tools/release/runRelease.ts build-launcher --output dist/native/launcher --launcher launcher/target/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }}
+      - name: Verify the archived launcher prints its SBOM offline before CLI installation
+        shell: bash
+        run: vp exec node tools/release/verifyReleaseNotices.ts launcher dist/native/launcher/*.tar.gz '${{ matrix.platform }}'
       - name: Inspect executable architecture and Linux ABI
         if: runner.os != 'macOS'
         run: vp exec node tools/release/BinaryAudit.ts launcher/target/${{ matrix.target }}/release/${{ matrix.executable }} '${{ matrix.platform }}' dist/evidence/abi-launcher.json

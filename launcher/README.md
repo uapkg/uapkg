@@ -4,6 +4,9 @@ The native executable selects and starts the TypeScript CLI. It owns CLI
 installation, verified release metadata, the engine cache, and launcher updates.
 See [the user guide](../docs/launcher.md) for installation and version selection.
 
+`uapkg launcher --license` prints the executable's CycloneDX 1.6 software
+bill of materials (SBOM). It works offline before a CLI is installed.
+
 ## Development
 
 Rustup reads the exact toolchain pin from this directory. Repository wrappers use
@@ -21,6 +24,12 @@ When running Cargo directly, use `launcher/` as the working directory:
 cargo test --locked --all-features
 cargo clippy --locked --all-targets --all-features -- -D warnings
 ```
+
+Cargo embeds the JSON produced by the pinned `cargo-cyclonedx` build dependency.
+The generator uses the current target triple, the enabled launcher features,
+and normal Cargo dependencies. An exact package URL in the
+[shared license overrides](../tools/release/license-overrides.json) supplies
+the license and its source links when the generated declaration is missing.
 
 Normal builds embed two independent Minisign public keys from the repository:
 [`docs/release-catalog-signing.pub`](../docs/release-catalog-signing.pub)

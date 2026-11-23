@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { build } from 'esbuild';
+import { NOTICE_FILENAME, writeNpmSbom } from './Notices.ts';
 import { satisfies, valid } from 'semver';
 import {
   createBuildMetadata,
@@ -74,7 +75,7 @@ export function createRuntimePackageManifest(
     type: 'module',
     sideEffects: false,
     engines: runtime.engines,
-    files: ['dist', 'README.md', 'LICENSE'],
+    files: ['dist', 'README.md', 'LICENSE', NOTICE_FILENAME],
     types: './dist/types/uapkg/index.d.ts',
     exports: { '.': { types: './dist/types/uapkg/index.d.ts', default: './dist/index.js' } },
     dependencies: runtime.dependencies,
@@ -256,5 +257,6 @@ export async function prepareNpmPackage(): Promise<string> {
     path.join(destination, 'README.md'),
     '# UAPKG CLI engine\n\nThis package is downloaded and run by the UAPKG launcher. Install the launcher from the [UAPKG releases](https://github.com/uapkg/uapkg/releases).\n',
   );
+  writeNpmSbom(destination, 'lockfile', BUILD_NPM_VERSION);
   return destination;
 }

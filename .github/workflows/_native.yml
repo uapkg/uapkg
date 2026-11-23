@@ -107,6 +107,9 @@ jobs:
       - name: Build native archives
         shell: bash
         run: '"$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts build-native --format node --output dist/native/node'
+      - name: Validate the SBOM in the bundled Node release archive
+        shell: bash
+        run: vp exec node tools/release/verifyReleaseNotices.ts node dist/native/node/*.tar.gz '${{ matrix.platform }}'
       - name: Prepare Linux credential-store service
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus-x11 libsecret-1-0
@@ -145,9 +148,15 @@ jobs:
         continue-on-error: true
         shell: bash
         run: '"$UAPKG_OFFICIAL_NODE" tools/release/runRelease.ts build-native --format sea --output dist/native/sea'
+      - name: Validate the SBOM in the SEA release archive
+        id: sea-notices
+        if: steps.sea-build.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: vp exec node tools/release/verifyReleaseNotices.ts sea dist/native/sea/*.tar.gz '${{ matrix.platform }}'
       - name: Qualify SEA on Linux
         id: sea-linux
-        if: steps.sea-build.outcome == 'success' && runner.os == 'Linux'
+        if: steps.sea-notices.outcome == 'success' && runner.os == 'Linux'
         continue-on-error: true
         shell: bash
         run: |
@@ -162,7 +171,7 @@ jobs:
           '
       - name: Qualify SEA
         id: sea-other
-        if: steps.sea-build.outcome == 'success' && runner.os != 'Linux'
+        if: steps.sea-notices.outcome == 'success' && runner.os != 'Linux'
         continue-on-error: true
         shell: bash
         run: |
@@ -234,6 +243,8 @@ jobs:
         run: docker build --target build -t uapkg-musl-build -f tools/release/alpine/Dockerfile .
       - name: Build the bundled official Node candidate on musl
         run: docker run --rm -v "$PWD:/work" -e UAPKG_RELEASE_PUBLIC_KEY -e SMOKE_LAUNCHER_VERSION uapkg-musl-build sh tools/release/alpine/build.sh node
+      - name: Validate the SBOM in the Alpine Node release archive
+        run: vp exec node tools/release/verifyReleaseNotices.ts node dist/native/node/*.tar.gz linux-x64-musl
       - name: Qualify clean Alpine runtime, credentials, and real terminal behavior
         # GNOME Keyring locks secret memory; no privileged container or extra host access is needed.
         run: docker run --rm --network none --cap-add IPC_LOCK -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/smoke.sh node
@@ -251,8 +262,13 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/build.sh sea
           docker run --rm --network none --cap-add IPC_LOCK -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/smoke.sh sea
-      - uses: actions/upload-artifact@v7.0.2
+      - name: Validate the SBOM in the Alpine SEA release archive
         if: steps.sea.outcome == 'success'
+        id: sea-notices
+        continue-on-error: true
+        run: vp exec node tools/release/verifyReleaseNotices.ts sea dist/native/sea/*.tar.gz linux-x64-musl
+      - uses: actions/upload-artifact@v7.0.2
+        if: steps.sea-notices.outcome == 'success'
         with:
           name: candidate-sea-linux-x64-musl
           path: |

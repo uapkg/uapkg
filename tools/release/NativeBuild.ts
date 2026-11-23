@@ -21,19 +21,11 @@ import {
   type ReleaseBuild,
 } from './ReleaseArtifacts.ts';
 import { buildSea } from './SeaBuild.ts';
+import { NOTICE_FILENAME, npmCliPath, writeNpmSbom } from '../../packages/uapkg/build/Notices.ts';
 import { verifyOfficialNodeRuntime } from './OfficialNode.ts';
 import { readLauncherCargoVersion } from '../launcher/LauncherVersion.ts';
 
-export function npmCliPath(): string {
-  const executableDirectory = path.dirname(process.execPath);
-  const candidates = [
-    path.join(executableDirectory, 'node_modules/npm/bin/npm-cli.js'),
-    path.join(executableDirectory, '../lib/node_modules/npm/bin/npm-cli.js'),
-  ];
-  const found = candidates.find(existsSync);
-  if (!found) throw new Error('The release Node installation must include npm.');
-  return found;
-}
+export { npmCliPath } from '../../packages/uapkg/build/Notices.ts';
 
 export function installRuntimeDependencies(directory: string, npmVersion = BUILD_NPM_VERSION): void {
   assertExactVersion(npmVersion);
@@ -91,6 +83,7 @@ export async function buildNativeArtifacts(output: string, format: 'node' | 'sea
   await prepareNpmPackage();
   cpSync(NPM_PACKAGE_ROOT, packageRoot, { recursive: true });
   installRuntimeDependencies(packageRoot);
+  writeNpmSbom(packageRoot, 'installed', BUILD_NPM_VERSION);
 
   const executableName = process.platform === 'win32' ? 'node.exe' : 'node';
   if (format === 'node') {
@@ -102,6 +95,7 @@ export async function buildNativeArtifacts(output: string, format: 'node' | 'sea
   } else {
     buildSea(packageRoot, engineRoot, probeRoot, seaBuildRoot);
     cpSync(path.join(packageRoot, 'LICENSE'), path.join(engineRoot, 'LICENSE'));
+    cpSync(path.join(packageRoot, NOTICE_FILENAME), path.join(engineRoot, NOTICE_FILENAME));
   }
   const nodeRoot = path.dirname(process.execPath);
   const license = [path.join(nodeRoot, 'LICENSE'), path.join(nodeRoot, '../LICENSE')].find(existsSync);

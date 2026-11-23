@@ -49,6 +49,8 @@ jobs:
             package_directory="$(dirname "$package_manifest")"
             vp -C "$package_directory" pm pack --pack-destination "$RUNNER_TEMP/uapkg-packages"
           done
+      - name: Validate the SBOM in the packed npm CLI
+        run: vp exec node tools/release/verifyReleaseNotices.ts npm "$RUNNER_TEMP"/uapkg-packages/uapkg-cli-*.tgz
       - name: Upload packed workspace packages
         uses: actions/upload-artifact@v7.0.2
         with:

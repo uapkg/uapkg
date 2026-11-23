@@ -89,12 +89,37 @@ jobs:
       - run: vp run --cache -w cli:build -- --production
       - run: vp -C packages/uapkg run verify:production-build
       - run: vp run release:prepare
+      - name: Validate the SBOM in the packed npm CLI
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/uapkg-cli-pack"
+          vp -C packages/uapkg pm pack --pack-destination "$RUNNER_TEMP/uapkg-cli-pack"
+          vp exec node tools/release/verifyReleaseNotices.ts npm "$RUNNER_TEMP"/uapkg-cli-pack/uapkg-cli-*.tgz
+      - name: Check whether this run will publish the CLI version
+        id: npm-cli
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          exists=$(npm view @uapkg/cli versions --json | jq --arg version "$VERSION" 'index($version) != null')
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
       - name: Publish npm packages independently of native assets
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           PNPM_CONFIG_IGNORE_SCRIPTS: 'true'
         run: vp run release
+      - name: Verify the published CLI tarball's integrity and SBOM
+        if: steps.npm-cli.outputs.exists == 'false'
+        env:
+          PACKAGE: '@uapkg/cli@${{ inputs.version }}'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/uapkg-cli-published"
+          packed=$(npm pack "$PACKAGE" --ignore-scripts --json --pack-destination "$RUNNER_TEMP/uapkg-cli-published")
+          expected=$(npm view "$PACKAGE" dist.integrity)
+          test "$(jq -er '.[0].integrity' <<< "$packed")" = "$expected"
+          vp exec node tools/release/verifyReleaseNotices.ts npm "$RUNNER_TEMP"/uapkg-cli-published/uapkg-cli-*.tgz
 
   publish:
     needs: [preflight, cli, launcher]
