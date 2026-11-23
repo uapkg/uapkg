@@ -286,15 +286,18 @@ dispatcher command fields empty on a manual run.
 The production administrator can submit the same four operations through the
 workflow dispatcher. The workflow verifies that both the dispatch and the current
 attempt belong to dispatcher bot user ID `357194997`. Each dispatcher request
-carries a command UUID and the exact reviewed `catalog-release` revision. A newer
-head requires a fresh review and command. The native/npm `Release` workflow
+carries a command UUID, the exact reviewed `catalog-release` revision, and
+`issued_at` and `expires_at` UTC timestamps in the `YYYY-MM-DDTHH:mm:ss.sssZ`
+format. A newer head or an expired approval requires a fresh review and command.
+An accepted command, including a no-op, supersedes earlier or equally timed
+commands for the same product and exact version. The native/npm `Release` workflow
 checks the designated human's identity again in every publication attempt.
 
 The publisher records each dispatcher's intent digest, outcome and catalog
 revision under its UUID on the separate `catalog-status-commands` branch. An
 applied change pushes the release and command receipt atomically. An unchanged
 release or stale review writes only the receipt. Repeating a command returns
-its original receipt even after subsequent changes. Reusing its UUID for a
+its original receipt even after expiry or subsequent changes. Reusing its UUID for a
 different intent fails. The run records `applied`, `no_change` or `stale` and
 the catalog revision in its job steps and `release-status-result.json` artifact.
 The releases-site workflow separately verifies the public deployment.

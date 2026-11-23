@@ -10,6 +10,12 @@ on:
       expected_catalog_revision:
         description: Catalog revision approved for the dispatcher command
         type: string
+      issued_at:
+        description: Dispatcher command issuance time (UTC milliseconds)
+        type: string
+      expires_at:
+        description: Dispatcher command approval deadline (UTC milliseconds)
+        type: string
       product:
         type: choice
         options: [cli, launcher]
@@ -73,6 +79,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_STATUS_COMMAND_ID: ${{ inputs.command_id }}
           RELEASE_STATUS_EXPECTED_REVISION: ${{ inputs.expected_catalog_revision }}
+          RELEASE_STATUS_ISSUED_AT: ${{ inputs.issued_at }}
+          RELEASE_STATUS_EXPIRES_AT: ${{ inputs.expires_at }}
           RELEASE_PRODUCT: ${{ inputs.product }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_STATUS_OPERATION: ${{ inputs.operation }}

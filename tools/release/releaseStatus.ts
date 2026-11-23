@@ -16,11 +16,15 @@ export function runReleaseStatus(): void {
   };
   const commandId = process.env.RELEASE_STATUS_COMMAND_ID ?? '';
   const expectedCatalogRevision = process.env.RELEASE_STATUS_EXPECTED_REVISION ?? '';
+  const issuedAt = process.env.RELEASE_STATUS_ISSUED_AT ?? '';
+  const expiresAt = process.env.RELEASE_STATUS_EXPIRES_AT ?? '';
   if (actor === 'dispatcher') {
     const result = executeCatalogCommand('https://github.com/uapkg/uapkg.git', {
       ...request,
       commandId,
       expectedCatalogRevision,
+      issuedAt,
+      expiresAt,
     });
     const output = process.env.GITHUB_OUTPUT;
     const temporary = process.env.RUNNER_TEMP;
@@ -32,7 +36,8 @@ export function runReleaseStatus(): void {
     );
     return;
   }
-  if (commandId || expectedCatalogRevision) throw new Error('Command inputs belong to the dispatcher.');
+  if (commandId || expectedCatalogRevision || issuedAt || expiresAt)
+    throw new Error('Command inputs belong to the dispatcher.');
   const result = changeReleaseStatus(
     request,
     createCatalogAdapter('uapkg/uapkg', `${request.operation} ${request.product} ${request.version}`),

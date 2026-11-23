@@ -9,6 +9,8 @@ import { RELEASE_STATUS_OPERATIONS, updateReleaseEntry, type ReleaseStatusReques
 export interface CatalogCommand extends ReleaseStatusRequest {
   commandId: string;
   expectedCatalogRevision: string;
+  issuedAt: string;
+  expiresAt: string;
 }
 
 export interface CatalogCommandResult {
@@ -26,15 +28,30 @@ const receiptsBranch = 'refs/heads/catalog-status-commands';
 const revisionPattern = /^[0-9a-f]{40}$/u;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+function utcMillis(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value)) return false;
+  const millis = Date.parse(value);
+  return Number.isFinite(millis) && new Date(millis).toISOString() === value;
+}
+
 /** Retries can recover the original receipt after another publication or a lost push acknowledgement. */
 export function executeCatalogCommand(
   remote: string,
   input: CatalogCommand,
-  now = new Date().toISOString(),
+  clock: () => number = Date.now,
 ): CatalogCommandResult {
-  const { commandId, product, version, operation, expectedCatalogRevision } = input;
+  const { commandId, product, version, operation, expectedCatalogRevision, issuedAt, expiresAt } = input;
   if (!uuidPattern.test(commandId) || !revisionPattern.test(expectedCatalogRevision))
     throw new Error('Expected a command UUID and an exact reviewed catalog revision.');
+  if (!utcMillis(issuedAt) || !utcMillis(expiresAt) || issuedAt >= expiresAt)
+    throw new Error('Expected an ordered command approval window in UTC milliseconds.');
+  const start = Date.parse(issuedAt);
+  const deadline = Date.parse(expiresAt);
+  const approvalIsCurrent = () => {
+    const time = clock();
+    return start <= time && time < deadline;
+  };
+  const now = new Date(clock()).toISOString();
   assertProduct(product);
   assertExactVersion(version);
   if (!RELEASE_STATUS_OPERATIONS.includes(operation)) throw new Error('Unknown release status operation.');
@@ -42,9 +59,12 @@ export function executeCatalogCommand(
   if (operation === 'yank' || operation === 'quarantine') validateReleaseStatus({ at: now, reason });
   else if (reason) throw new Error('Clearing a release status does not accept a public reason.');
   const digest = createHash('sha256')
-    .update(JSON.stringify([1, commandId, expectedCatalogRevision, product, version, operation, reason]))
+    .update(
+      JSON.stringify([1, commandId, expectedCatalogRevision, product, version, operation, reason, issuedAt, expiresAt]),
+    )
     .digest('hex');
   const receiptPath = `commands/${commandId.slice(0, 2)}/${commandId}.json`;
+  const targetPath = `targets/${product}/${version}.json`;
   const identity = { schemaVersion: 1 as const, commandId, product, version, operation };
   for (let attempt = 0; attempt < 5; attempt++) {
     const work = mkdtempSync(path.join(os.tmpdir(), 'uapkg-status-command-'));
@@ -90,6 +110,7 @@ export function executeCatalogCommand(
           !result ||
           Object.entries(identity).some(([key, value]) => result[key] !== value) ||
           !['applied', 'no_change', 'stale'].includes(result.outcome) ||
+          typeof result.catalogRevision !== 'string' ||
           !revisionPattern.test(result.catalogRevision)
         )
           throw new Error('Invalid release status command receipt.');
@@ -97,7 +118,13 @@ export function executeCatalogCommand(
       }
       let outcome: CatalogCommandResult['outcome'] = 'stale';
       let catalogRevision = source;
-      if (source === expectedCatalogRevision) {
+      let lastIssuedAt: string | undefined;
+      if (previous && git(['ls-tree', previous, '--', targetPath])) {
+        const marker: unknown = JSON.parse(git(['show', previous + ':' + targetPath]));
+        if (!utcMillis(marker)) throw new Error('Invalid release status command ordering record.');
+        lastIssuedAt = marker;
+      }
+      if (source === expectedCatalogRevision && (!lastIssuedAt || issuedAt > lastIssuedAt) && approvalIsCurrent()) {
         git(['checkout', '--quiet', '--detach', source]);
         if (updateReleaseEntry(work, input, now)) {
           git(['add', '--', `${product}/${version}/entry.json`]);
@@ -112,6 +139,11 @@ export function executeCatalogCommand(
       const blob = git(['hash-object', '-w', '--stdin'], JSON.stringify({ digest, result }) + '\n');
       git(previous ? ['read-tree', previous] : ['read-tree', '--empty']);
       git(['update-index', '--add', '--cacheinfo', `100644,${blob},${receiptPath}`]);
+      if (outcome !== 'stale') {
+        // An accepted no-op also supersedes older, delayed commands on the same release.
+        const marker = git(['hash-object', '-w', '--stdin'], JSON.stringify(issuedAt) + '\n');
+        git(['update-index', '--add', '--cacheinfo', `100644,${marker},${targetPath}`]);
+      }
       const tree = git(['write-tree']);
       const nextReceipt = git([
         'commit-tree',
@@ -125,6 +157,9 @@ export function executeCatalogCommand(
       // An unchanged ref is omitted by the git push protocol. Observe both heads
       // again before recording a read-only outcome against the reviewed source.
       if (outcome !== 'applied' && heads() !== observed) continue;
+      // No unexpired approval means no new release effect. Refetch on expiry so an
+      // already published outcome can still win before recording a stale receipt.
+      if (outcome !== 'stale' && !approvalIsCurrent()) continue;
       if (command(['push', '--atomic', 'origin', ...refs]).status === 0) return result;
       // Never force either ref. A competing command, a publisher, or a successful
       // push with a lost acknowledgement will be observed on the next fresh fetch.
