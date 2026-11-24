@@ -11,5 +11,9 @@
     "darwin-arm64",
     "linux-x64",
     "linux-arm64"
-  ]
+  ],
+  "yanked": {
+    "at": "2026-11-24T02:29:13.239Z",
+    "reason": "This is a test yank."
+  }
 }
