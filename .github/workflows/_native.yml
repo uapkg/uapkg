@@ -101,6 +101,8 @@ jobs:
       - name: Build production CLI
         run: vp run --cache -w cli:build -- --production
       - name: Verify a managed Node runtime online for offline packaged lifecycle tests
+        env:
+          UAPKG_RELEASE_KEY_API_TOKEN: ${{ github.token }}
         shell: bash
         run: '"$UAPKG_OFFICIAL_NODE" tools/release/ManagedLifecycleSmoke.ts'
       - run: vp run release:prepare
@@ -250,7 +252,9 @@ jobs:
       - name: Validate the SBOM in the Alpine Node release archive
         run: vp exec node tools/release/verifyReleaseNotices.ts node dist/native/node/*.tar.gz linux-x64-musl
       - name: Verify a managed Node runtime online on Alpine
-        run: docker run --rm -v "$PWD:/work" -e UAPKG_RELEASE_SMOKE_NODE_CACHE=/work/dist/managed-node uapkg-musl-build /work/dist/native/node/cli/runtime/node tools/release/ManagedLifecycleSmoke.ts
+        env:
+          UAPKG_RELEASE_KEY_API_TOKEN: ${{ github.token }}
+        run: docker run --rm -v "$PWD:/work" -e UAPKG_RELEASE_KEY_API_TOKEN -e UAPKG_RELEASE_SMOKE_NODE_CACHE=/work/dist/managed-node uapkg-musl-build /work/dist/native/node/cli/runtime/node tools/release/ManagedLifecycleSmoke.ts
       - name: Qualify clean Alpine runtime, credentials, and real terminal behavior
         # GNOME Keyring locks secret memory; no privileged container or extra host access is needed.
         run: docker run --rm --network none --cap-add IPC_LOCK -v "$PWD:/work" uapkg-musl-build sh tools/release/alpine/smoke.sh node

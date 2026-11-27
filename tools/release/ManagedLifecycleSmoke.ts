@@ -5,14 +5,32 @@ import path from 'node:path';
 
 export const managedRuntimeSmokeMajor = process.env.UAPKG_RELEASE_SMOKE_NODE_MAJOR ?? '22';
 
+/** Use the runner's read quota only for Node's three official release-key API requests. */
+export function releaseKeySmokeFetch(env: NodeJS.ProcessEnv, request: typeof fetch = fetch): typeof fetch {
+  const token = env.UAPKG_RELEASE_KEY_API_TOKEN;
+  // Only the in-process API client needs the token. Never inherit it into the downloaded binary.
+  delete env.UAPKG_RELEASE_KEY_API_TOKEN;
+  const allowed =
+    /^https:\/\/api\.github\.com\/repos\/nodejs\/release-keys\/(?:git\/ref\/heads\/main|git\/trees\/[a-f0-9]{40}\?recursive=1|compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}\?per_page=1)$/;
+  return (input, init) => {
+    const outbound = new Request(input, { ...init, redirect: 'error' });
+    outbound.headers.delete('authorization');
+    if (token && outbound.method === 'GET' && allowed.test(outbound.url)) {
+      outbound.headers.set('authorization', 'Bearer ' + token);
+    }
+    return request(outbound);
+  };
+}
+
 /** Warm the verified cache on the runner whose platform and ABI the packaged worker must use. */
 if (import.meta.main) {
+  const apiFetch = releaseKeySmokeFetch(process.env);
   const cacheRoot = process.env.UAPKG_RELEASE_SMOKE_NODE_CACHE;
   if (!cacheRoot || !path.isAbsolute(cacheRoot))
     throw new Error('Set UAPKG_RELEASE_SMOKE_NODE_CACHE to an absolute path.');
   assert.match(managedRuntimeSmokeMajor, /^\d+$/);
   const { NodeVersionManager } = await import('../../packages/uapkg-node-version-manager/src/index.ts');
-  const manager = new NodeVersionManager({ cacheRoot });
+  const manager = new NodeVersionManager({ cacheRoot, fetch: apiFetch });
   const version = await manager.resolveVersion(managedRuntimeSmokeMajor);
   // Validate the signed checksum, download the host artifact, and execute it before the offline tests.
   const binary = await manager.ensureRuntime(version);
