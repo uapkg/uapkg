@@ -14,6 +14,7 @@ done
 format="$1"
 engine="/work/dist/native/$format/cli"
 driver=/work/dist/native/node/cli/runtime/node
+export UAPKG_RELEASE_SMOKE_NODE_CACHE=/work/dist/managed-node
 export UAPKG_TERMINAL_SMOKE_BINARY=/work/dist/terminal-smoke/packaged
 export UAPKG_SMOKE_LAUNCHER=/work/dist/smoke-launcher/uapkg
 test -x "$UAPKG_TERMINAL_SMOKE_BINARY"

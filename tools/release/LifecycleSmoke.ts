@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { smokeManagedRuntime } from './ManagedLifecycleSmoke.ts';
+import { managedRuntimeSmokeMajor, smokeManagedRuntime } from './ManagedLifecycleSmoke.ts';
 
 interface Output {
   pid: number;
@@ -70,7 +70,8 @@ export async function smokeLifecycle(executable: string, engineArgs: readonly st
       return (await fs.stat(arg).catch(() => undefined))?.isFile() ? path.resolve(arg) : arg;
     }),
   );
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'uapkg-release-lifecycle-'));
+  // macOS can spell the temporary directory differently from process.cwd() and process.execPath.
+  const temp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'uapkg-release-lifecycle-')));
   const home = path.join(temp, 'home');
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -383,7 +384,7 @@ export async function smokeLifecycle(executable: string, engineArgs: readonly st
     assert.equal(JSON.parse((await fs.readFile(otherRuns, 'utf8')).trim()).value, 'from the sibling module');
     const managedCache = process.env.UAPKG_RELEASE_SMOKE_NODE_CACHE;
     if (managedCache) {
-      const major = process.env.UAPKG_RELEASE_SMOKE_NODE_MAJOR ?? '22';
+      const major = managedRuntimeSmokeMajor;
       const name = 'smoke-managed-runtime';
       const authored = await author(name, 'ManagedRuntime', { lifecycle: { runtime: { node: major } } });
       await write(

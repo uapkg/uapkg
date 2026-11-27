@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+
+export const managedRuntimeSmokeMajor = process.env.UAPKG_RELEASE_SMOKE_NODE_MAJOR ?? '22';
+
+/** Warm the verified cache on the runner whose platform and ABI the packaged worker must use. */
+if (import.meta.main) {
+  const cacheRoot = process.env.UAPKG_RELEASE_SMOKE_NODE_CACHE;
+  if (!cacheRoot || !path.isAbsolute(cacheRoot))
+    throw new Error('Set UAPKG_RELEASE_SMOKE_NODE_CACHE to an absolute path.');
+  assert.match(managedRuntimeSmokeMajor, /^\d+$/);
+  const { NodeVersionManager } = await import('../../packages/uapkg-node-version-manager/src/index.ts');
+  const manager = new NodeVersionManager({ cacheRoot });
+  const version = await manager.resolveVersion(managedRuntimeSmokeMajor);
+  // Validate the signed checksum, download the host artifact, and execute it before the offline tests.
+  const binary = await manager.ensureRuntime(version);
+  const identity = execFileSync(binary, ['-p', 'JSON.stringify([process.version,process.platform,process.arch])'], {
+    encoding: 'utf8',
+  });
+  assert.deepEqual(JSON.parse(identity), ['v' + version, process.platform, process.arch]);
+  process.stdout.write(`Verified online managed Node ${version} (${process.platform}-${process.arch}).\n`);
+}
 
 interface ManagedRuntimeSmoke {
   readonly cache: string;
