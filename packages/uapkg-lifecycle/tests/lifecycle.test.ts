@@ -1,9 +1,16 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { INTERNAL_PROFILE_HOME_ENV } from '@uapkg/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
-import { discoverEntries, getLifecycleWorkDir, runLifecycleEntry, runLifecycleOnce } from '../src/index.ts';
+import {
+  discoverEntries,
+  getLifecycleWorkDir,
+  prepareLifecycleEntry,
+  runLifecycleEntry,
+  runLifecycleOnce,
+} from '../src/index.ts';
 
 const directories: string[] = [];
 let profile: string;
@@ -32,6 +39,29 @@ const identity = {
 };
 
 describe('lifecycle', () => {
+  it.skipIf(process.platform !== 'win32')(
+    'bundles verified files reached through a Windows short directory name',
+    async ({ skip }) => {
+      const root = await fixture();
+      const shortRoot = execFileSync('cmd.exe', ['/d', '/c', 'for %I in (.) do @echo %~fsI'], {
+        cwd: root,
+        encoding: 'utf8',
+        windowsHide: true,
+      }).trim();
+      if (shortRoot.toLowerCase() === (await fs.realpath(root)).toLowerCase()) {
+        skip('This temp volume does not assign 8.3 aliases');
+      }
+      const entry = '.uapkg/lifecycle/postinstall.ts';
+      await fs.writeFile(path.join(root, entry), "import './helper.mjs'; export default () => {};");
+      await fs.writeFile(path.join(root, '.uapkg/lifecycle/helper.mjs'), 'export default 1;');
+      expect(discoverEntries(shortRoot, {})).toEqual({ postinstall: entry });
+      expect((await prepareLifecycleEntry(shortRoot, entry)).files.sort()).toEqual([
+        '.uapkg/lifecycle/helper.mjs',
+        entry,
+      ]);
+    },
+  );
+
   it('discovers overrides without evaluating code, diagnoses ambiguous, missing and escaping entries', async () => {
     const root = await fixture();
     await fs.writeFile(path.join(root, '.uapkg/integration.ts'), 'throw new Error("evaluated")');

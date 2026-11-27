@@ -33,10 +33,10 @@ export function checkedEntry(packageRoot: string, value: unknown): string {
   ) {
     throw new Error('Lifecycle entry must be a package-relative .ts, .js, or .mjs file: ' + String(value));
   }
-  const root = fs.realpathSync(packageRoot);
+  const root = fs.realpathSync.native(packageRoot);
   const file = path.resolve(root, value);
   if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error('Lifecycle entry is missing: ' + value);
-  if (!within(root, fs.realpathSync(file))) throw new Error('Lifecycle entry is outside the package: ' + value);
+  if (!within(root, fs.realpathSync.native(file))) throw new Error('Lifecycle entry is outside the package: ' + value);
   return path.relative(root, file).split(path.sep).join('/');
 }
 

@@ -8,7 +8,8 @@ import { checkedEntry, within } from '#lifecycle/entries.ts';
 
 /** Resolve only the package's own runtime files, Node builtins, and the authoring helper. */
 export async function prepareLifecycleEntry(packageRoot: string, entry: string) {
-  const root = fs.realpathSync(packageRoot);
+  // Use native physical paths on both sides of the check, including Windows 8.3 aliases.
+  const root = await fs.promises.realpath(packageRoot);
   const source = checkedEntry(root, entry);
   const result = await build({
     entryPoints: [source],
