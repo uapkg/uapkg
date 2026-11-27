@@ -127,7 +127,16 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           PNPM_CONFIG_IGNORE_SCRIPTS: 'true'
-        run: vp run release
+        shell: bash
+        run: |
+          if [[ -n "${NPM_TOKEN:-}" ]]; then
+            export NPM_CONFIG_USERCONFIG
+            NPM_CONFIG_USERCONFIG=$(mktemp "$RUNNER_TEMP/npm-publish.XXXXXX")
+            trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
+            printf '%s\n' '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > "$NPM_CONFIG_USERCONFIG"
+            npm whoami --registry=https://registry.npmjs.org/ > /dev/null
+          fi
+          vp run release
       - name: Verify the published CLI tarball's integrity and SBOM
         if: steps.npm-cli.outputs.exists == 'false'
         env:
