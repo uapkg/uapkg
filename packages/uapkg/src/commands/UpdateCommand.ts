@@ -13,6 +13,7 @@ import { InstallCommand } from '#cli/commands/InstallCommand.ts';
 import { findDeclaredDependency, releaseAgeOverrideCommand } from '#cli/commands/PackageOperation.ts';
 
 export interface UpdateCommandOptions {
+  readonly ignoreScripts?: boolean;
   readonly specs: readonly string[];
   readonly force: boolean;
   readonly dryRun: boolean;
@@ -83,6 +84,7 @@ export class UpdateCommand implements Command {
     if (diagnostics.length > 0) return this.fail(diagnostics);
 
     return new InstallCommand(this.root, {
+      ignoreScripts: this.options.ignoreScripts,
       command: 'update',
       force: this.options.force,
       frozen: false,

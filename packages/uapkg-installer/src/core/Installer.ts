@@ -9,7 +9,9 @@ import type {
   InstallerOptions,
   InstallReport,
   PackageInstallOutcome,
+  VerifiedRelease,
 } from '#installer/contracts/InstallerTypes.ts';
+import { VerifiedReleaseStore } from '#installer/core/VerifiedReleaseStore.ts';
 import type { DownloadStatusSnapshot } from '#installer/contracts/StatusStreamTypes.ts';
 import { NoMarkerPolicy } from '#installer/safety/NoMarkerPolicy.ts';
 import { SafetyPolicyRegistry } from '#installer/safety/SafetyPolicyRegistry.ts';
@@ -53,6 +55,7 @@ export interface InstallerConstructorOptions {
  */
 export class Installer {
   private readonly inspector = new DiskStateInspector();
+  private readonly releases = new VerifiedReleaseStore();
   private readonly planner: InstallPlanner;
   private readonly downloader = new PackageDownloader();
   private readonly verifier = new IntegrityVerifier();
@@ -72,6 +75,26 @@ export class Installer {
   /** Expose the registry so consumers can register additional policies. */
   get safetyRegistry(): SafetyPolicyRegistry {
     return this.safety;
+  }
+
+  /** Inspect an existing activation without performing an installation or invoking any package code. */
+  async getVerifiedRelease(lockfile: Lockfile, workspace: string, name: string): Promise<VerifiedRelease> {
+    if (!Object.hasOwn(lockfile.packages, name)) throw new Error('Package is not locked: ' + name);
+    const item = lockfile.packages[name as InstallAction['packageName']];
+    const registry = this.deps.registryCore.getOrCreateRegistry(item.registry);
+    if (!registry.ok) throw new Error(registry.diagnostics.map((diagnostic) => diagnostic.message).join(' '));
+    const inspected = await this.inspector.inspect(workspace, { ...lockfile, packages: { [name]: item } });
+    const state = inspected.ok && inspected.value.get(name as InstallAction['packageName']);
+    if (state && state.installedName === name && state.installedVersion === item.version) {
+      const release = this.releases.release(workspace, name, item, registry.value.id, state.path);
+      const retained = await this.releases.retained(workspace, release);
+      if (retained) return retained;
+    }
+    throw new Error('Run uapkg install to verify and activate the locked release of ' + name + ' before approving it.');
+  }
+
+  withVerifiedSnapshot<T>(release: VerifiedRelease, use: (root: string) => Promise<T>): Promise<T> {
+    return this.releases.withSnapshot(release, use);
   }
 
   getStatusStream(): AsyncIterable<DownloadStatusSnapshot> {
@@ -112,8 +135,32 @@ export class Installer {
     const diskResult = await this.inspector.inspect(options.manifestRoot, lockfile);
     if (!diskResult.ok) return diskResult as Result<never>;
 
+    const releases = new Map<string, VerifiedRelease>();
+    for (const [name, state] of diskResult.value) {
+      const locked = lockfile.packages[name];
+      const registry = this.deps.registryCore.getOrCreateRegistry(locked.registry);
+      if (!registry.ok) return registry;
+      const release = this.releases.release(options.manifestRoot, name, locked, registry.value.id, state.path);
+      releases.set(name, release);
+      // A matching name/version in a mutable installation directory does not establish provenance.
+      if (state.installedVersion === locked.version && state.installedName === name) {
+        const retained = await this.releases.retained(options.manifestRoot, release);
+        if (retained) releases.set(name, retained);
+        else diskResult.value.set(name, { ...state, installedVersion: undefined });
+      }
+    }
+
     // 2. Plan
-    const planResult = await this.planner.plan(lockfile, previousLockfile, diskResult.value);
+    let orphaned;
+    try {
+      orphaned = await this.releases.orphaned(options.manifestRoot, Object.keys(lockfile.packages));
+    } catch (error) {
+      bag.addError('INSTALL_RECEIPT_READ_ERROR', 'Could not inspect installed package receipts: ' + String(error), {
+        workspace: options.manifestRoot,
+      });
+      return bag.toFailure();
+    }
+    const planResult = await this.planner.plan(lockfile, previousLockfile, diskResult.value, orphaned);
     if (!planResult.ok) return planResult as Result<never>;
     const plan = planResult.value;
 
@@ -153,19 +200,6 @@ export class Installer {
 
     for (const name of blockedNames) outcomes.set(name, 'failed');
 
-    // Removals and unchanged bookkeeping first.
-    await Promise.all(
-      allowedActions
-        .filter((action) => action.type === 'remove')
-        .map((action) =>
-          limit(async () => {
-            const result = await this.executeRemove(options.manifestRoot, action, runtime);
-            outcomes.set(action.packageName, result.ok ? 'removed' : 'failed');
-            if (!result.ok) failureDiagnostics.push(...result.diagnostics);
-          }),
-        ),
-    );
-
     // Dependency edges from the lockfile (equal to verified claims for
     // verified parents because claims comparison covers the buckets).
     const edges = new Map<string, readonly string[]>();
@@ -177,21 +211,12 @@ export class Installer {
     // lockfile entry when the caller supplied no seeds).
     const seeds = new Set(options.rootDependencies ?? Object.keys(lockfile.packages));
 
-    // Already-active packages are verified parents for edge admission.
     const verified = new Set<string>();
-    for (const action of allowedActions) {
-      if (action.type === 'unchanged') {
-        verified.add(action.packageName);
-        outcomes.set(action.packageName, 'unchanged');
-      }
-    }
 
     const pending = new Map<string, InstallAction>();
     for (const action of allowedActions) {
-      if (action.type === 'add' || action.type === 'update') pending.set(action.packageName, action);
+      if (action.type !== 'remove') pending.set(action.packageName, action);
     }
-
-    const failed = new Set<string>();
 
     while (pending.size > 0) {
       const eligible: InstallAction[] = [];
@@ -204,12 +229,22 @@ export class Installer {
         eligible.map((action) =>
           limit(async () => {
             pending.delete(action.packageName);
-            const result = await this.executeDownloadAction(options.manifestRoot, action, net, runtime);
+            if (action.type === 'unchanged') {
+              verified.add(action.packageName);
+              outcomes.set(action.packageName, 'unchanged');
+              return;
+            }
+            const result = await this.executeDownloadAction(
+              options.manifestRoot,
+              action,
+              net,
+              runtime,
+              releases.get(action.packageName)!,
+            );
             if (result.ok) {
               verified.add(action.packageName);
               outcomes.set(action.packageName, 'installed');
             } else {
-              failed.add(action.packageName);
               outcomes.set(action.packageName, 'failed');
               failureDiagnostics.push(...result.diagnostics);
             }
@@ -226,8 +261,32 @@ export class Installer {
       );
     }
 
-    const report = this.buildReport(plan, outcomes, edges, verified);
-    return ok(report, failureDiagnostics);
+    // Cleanup is destructive. Receipts for deferred or failed removals survive the changed lockfile.
+    let cleanupAllowed = ![...outcomes.values()].some(
+      (status) => status === 'failed' || status === 'skipped_no_verified_parent',
+    );
+    for (const action of allowedActions) {
+      if (action.type !== 'remove') continue;
+      if (!cleanupAllowed) {
+        outcomes.set(action.packageName, 'removal_deferred');
+        bag.addInfo(
+          'INSTALL_REMOVAL_DEFERRED',
+          'Kept ' +
+            action.packageName +
+            ' because installation is incomplete. A successful install will retry removal.',
+          { packageName: action.packageName },
+        );
+        continue;
+      }
+      const result = await this.executeRemove(options.manifestRoot, action, runtime);
+      outcomes.set(action.packageName, result.ok ? 'removed' : 'failed');
+      if (!result.ok) {
+        failureDiagnostics.push(...result.diagnostics);
+        cleanupAllowed = false;
+      }
+    }
+    const report = this.buildReport(plan, outcomes, edges, verified, releases);
+    return ok(report, [...failureDiagnostics, ...bag.all()]);
   }
 
   // -------------------------------------------------------------------
@@ -248,7 +307,16 @@ export class Installer {
   }
 
   private emptyReport(plan: InstallReport['plan']): InstallReport {
-    return { plan, outcomes: [], installed: [], failed: [], skipped: [], incompleteClosure: [] };
+    return {
+      plan,
+      outcomes: [],
+      installed: [],
+      failed: [],
+      skipped: [],
+      incompleteClosure: [],
+      verifiedReleases: [],
+      deferredRemovals: [],
+    };
   }
 
   private buildReport(
@@ -256,6 +324,7 @@ export class Installer {
     outcomes: ReadonlyMap<string, PackageInstallOutcome['status']>,
     edges: ReadonlyMap<string, readonly string[]>,
     verified: ReadonlySet<string>,
+    releases: ReadonlyMap<string, VerifiedRelease>,
   ): InstallReport {
     const outcomeList: PackageInstallOutcome[] = [];
     const installed: PackageInstallOutcome['packageName'][] = [];
@@ -274,9 +343,18 @@ export class Installer {
     // has an incomplete dependency closure.
     const unusable = new Set<string>([...failed, ...skipped]);
     const incompleteClosure: PackageInstallOutcome['packageName'][] = [];
-    for (const parent of verified) {
-      const children = edges.get(parent) ?? [];
-      if (children.some((child) => unusable.has(child))) {
+    const parents = new Map<string, string[]>();
+    for (const name of verified) {
+      for (const child of edges.get(name) ?? []) {
+        const dependants = parents.get(child) ?? [];
+        dependants.push(name);
+        parents.set(child, dependants);
+      }
+    }
+    for (const child of unusable) {
+      for (const parent of parents.get(child) ?? []) {
+        if (unusable.has(parent)) continue;
+        unusable.add(parent);
         incompleteClosure.push(parent as PackageInstallOutcome['packageName']);
       }
     }
@@ -288,6 +366,10 @@ export class Installer {
       failed,
       skipped,
       incompleteClosure,
+      deferredRemovals: outcomeList
+        .filter((item) => item.status === 'removal_deferred')
+        .map((item) => item.packageName),
+      verifiedReleases: [...verified].sort().map((name) => releases.get(name)!),
     };
   }
 
@@ -318,7 +400,9 @@ export class Installer {
     stream.publish();
 
     try {
-      const result = await this.remover.remove(action.packageName, manifestRoot, action.path);
+      const present = await this.releases.canRemove(manifestRoot, action.packageName, action.path);
+      const result = present ? await this.remover.remove(action.packageName, manifestRoot, action.path) : ok(undefined);
+      if (result.ok) await this.releases.forget(manifestRoot, action.packageName);
       slots.update(slotId, { state: result.ok ? 'done' : 'failed' });
       stream.publish();
       slots.release(slotId);
@@ -336,6 +420,7 @@ export class Installer {
     action: InstallAction,
     net: { readonly retries: number; readonly timeoutMs: number },
     runtime: ExecutionRuntime,
+    release: VerifiedRelease,
   ): Promise<Result<void>> {
     const { slots, stream } = runtime;
 
@@ -356,6 +441,7 @@ export class Installer {
       slots.release(slotId);
     };
 
+    let downloadedPath: string | undefined;
     try {
       if (
         !action.downloadUrl ||
@@ -388,13 +474,13 @@ export class Installer {
         failSlot();
         return dl as Result<never>;
       }
+      downloadedPath = dl.value.tempPath;
 
       // Verify: exact byte count, then SHA-256, then packaged-manifest claims.
       slots.update(slotId, { state: 'verifying' });
       stream.publish();
 
       if (dl.value.bytesDownloaded !== action.sizeBytes) {
-        await this.safeUnlink(dl.value.tempPath);
         failSlot();
         const bag = new DiagnosticBag();
         bag.addError(
@@ -407,7 +493,6 @@ export class Installer {
 
       const verify = await this.verifier.verify(action.packageName, dl.value.tempPath, action.integrity);
       if (!verify.ok) {
-        await this.safeUnlink(dl.value.tempPath);
         failSlot();
         return verify as Result<never>;
       }
@@ -420,7 +505,6 @@ export class Installer {
         registryType: action.registryType,
       });
       if (!claims.ok) {
-        await this.safeUnlink(dl.value.tempPath);
         failSlot();
         return claims as Result<never>;
       }
@@ -428,12 +512,13 @@ export class Installer {
       // Extract (activation) — only after every verification passed.
       slots.update(slotId, { state: 'extracting' });
       stream.publish();
+      await this.releases.keepArchive(release, dl.value.tempPath);
       const ex = await this.extractor.extract(action.packageName, dl.value.tempPath, manifestRoot, action.path);
-      await this.safeUnlink(dl.value.tempPath);
       if (!ex.ok) {
         failSlot();
         return ex as Result<never>;
       }
+      await this.releases.record(manifestRoot, release);
 
       if (action.sizeBytes) slots.addBytesDone(action.sizeBytes);
       slots.update(slotId, { state: 'done' });
@@ -444,6 +529,8 @@ export class Installer {
       failSlot();
       // Fail closed: an unexpected error is a failure, never silent success.
       return this.unexpectedFailure(action.packageName, err);
+    } finally {
+      if (downloadedPath) await this.safeUnlink(downloadedPath);
     }
   }
 

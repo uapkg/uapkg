@@ -8,10 +8,17 @@ import {
   type Result,
 } from '@uapkg/diagnostics';
 import semver from 'semver';
+import { IntegrationEntrySchema, LifecycleSchema } from '@uapkg/package-manifest-schema';
 import { z } from 'zod';
 import type { PackManifest } from '#pack/contracts/PackTypes.ts';
 
 const packManifestSchema = z.object({
+  integration: IntegrationEntrySchema.optional(),
+  lifecycle: LifecycleSchema.optional(),
+  dependencies: z.record(z.string(), z.unknown()).optional(),
+  devDependencies: z.record(z.string(), z.unknown()).optional(),
+  peerDependencies: z.record(z.string(), z.unknown()).optional(),
+  overrides: z.record(z.string(), z.unknown()).optional(),
   name: z.string().min(1),
   version: z
     .string()

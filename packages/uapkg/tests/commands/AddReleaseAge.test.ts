@@ -101,29 +101,89 @@ describe('add with a local registry and project files', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
-  it.each(['default', 'studio'])('names the selected registry %s when a package is missing', async (registry) => {
-    const source = { url: 'https://example.test/studio' };
-    await writeJson(join(project, '.uapkg/config.json'), { registry, registries: { default: source, studio: source } });
-    root.config.reload();
+  it.each(['default', 'studio'])(
+    'selects default when the configured registry is %s and the flag is omitted',
+    async (registry) => {
+      const source = { url: 'https://example.test/studio' };
+      await writeJson(join(project, '.uapkg/config.json'), {
+        registry,
+        registries: { default: source, studio: source },
+      });
+      root.config.reload();
 
-    const options = { spec: 'absent', registry: undefined };
-    const json = await add(options);
-    expect(json.code).toBe(1);
-    expect(JSON.parse(json.output)).toMatchObject({
+      const options = { spec: 'absent', registry: undefined };
+      const json = await add(options);
+      expect(json.code).toBe(1);
+      expect(JSON.parse(json.output)).toMatchObject({
+        status: 'error',
+        diagnostics: [
+          {
+            code: 'PACKAGE_NOT_FOUND',
+            message: 'Package "absent" not found in registry "default".',
+            data: { packageName: 'absent', registry: 'default' },
+          },
+        ],
+      });
+
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      expect((await add({ ...options, outputFormat: 'text' })).code).toBe(1);
+      const text = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+      expect(stripVTControlCharacters(text)).toContain('Could not find absent in registry default.');
+    },
+  );
+
+  it('asks which registry to use before changing a dependency found in default and declared in studio', async () => {
+    const defaultRegistry = root.registryCore.getOrCreateRegistry('default');
+    if (!defaultRegistry.ok) throw new Error(JSON.stringify(defaultRegistry.diagnostics));
+    vi.spyOn(defaultRegistry.value, 'ensureUpToDate').mockResolvedValue(ok('AlreadyFresh'));
+    const defaultRepo = getRegistryRepoPath(defaultRegistry.value.shortId);
+    await writeJson(join(defaultRepo, '.uapkg/registry.meta.json'), {
+      schemaVersion: 1,
+      registry: { id: '00000000-0000-4000-a000-000000000021', name: 'Default', registryType: 'private' },
+    });
+    await writeJson(join(defaultRepo, ...getRegistryPackagePathSegments('mesh')), {
+      name: 'mesh',
+      packageSource: { type: 'git', url: 'https://example.test/other-source' },
+      versions: { '1.0.0': release(10 * day) },
+    });
+    const files = ['uapkg.json', 'uapkg.lock'].map((file) => join(project, file));
+    const before = await Promise.all(files.map((path) => readFile(path, 'utf8')));
+    const ambiguous = await add({ spec: 'mesh', registry: undefined });
+    expect(ambiguous.code).toBe(1);
+    expect(JSON.parse(ambiguous.output)).toMatchObject({
       status: 'error',
+      command: 'add',
       diagnostics: [
         {
-          code: 'PACKAGE_NOT_FOUND',
-          message: `Package "absent" not found in registry "${registry}".`,
-          data: { packageName: 'absent', registry },
+          code: 'PACKAGE_REGISTRY_AMBIGUOUS',
+          message: expect.stringContaining('mesh'),
+          hint: expect.stringMatching(/--registry default[\s\S]*--registry studio/),
+          data: { packageName: 'mesh', registries: ['default', 'studio'] },
         },
       ],
     });
+    expect(await Promise.all(files.map((path) => readFile(path, 'utf8')))).toEqual(before);
+    expect((await add({ spec: 'mesh', registry: 'studio' })).code).toBe(0);
+    const selected = await add({ spec: 'mesh', registry: 'default' });
+    expect(selected.code, selected.output).toBe(0);
+    expect(JSON.parse(await readFile(files[1], 'utf8')).packages.mesh.registry).toBe('default');
+  });
 
-    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    expect((await add({ ...options, outputFormat: 'text' })).code).toBe(1);
-    const text = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
-    expect(stripVTControlCharacters(text)).toContain(`Could not find absent in registry ${registry}.`);
+  it('keeps an existing private override intact when default lacks the package', async () => {
+    const registry = root.registryCore.getOrCreateRegistry('default');
+    if (!registry.ok) throw new Error(JSON.stringify(registry.diagnostics));
+    vi.spyOn(registry.value, 'ensureUpToDate').mockResolvedValue(ok('AlreadyFresh'));
+    const manifestPath = join(project, 'uapkg.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifest.overrides = { mesh: manifest.dependencies.mesh };
+    await writeJson(manifestPath, manifest);
+
+    const result = await add({ spec: 'mesh', registry: undefined });
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.output).diagnostics).toEqual([
+      expect.objectContaining({ code: 'PACKAGE_NOT_FOUND', data: { packageName: 'mesh', registry: 'default' } }),
+    ]);
+    expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual(manifest);
   });
 
   it('writes the selected caret to the dev declaration and override, reporting the compatible newer major', async () => {

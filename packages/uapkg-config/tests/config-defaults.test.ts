@@ -14,7 +14,7 @@ import {
 // an entry when a default is added.
 const defaultFreePaths = {
   'registries.*.ttlSeconds': 'Inherits registryCache.ttlSeconds when omitted.',
-  'registries.*.postInstallPolicy': 'Inherits install.postInstallPolicy when omitted.',
+  'registries.*.lifecyclePolicy': 'Inherits install.lifecyclePolicy when omitted.',
 };
 
 function findMissingDefaults(schema: z.ZodType, defaults: unknown, path: string[] = []): string[] {

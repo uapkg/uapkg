@@ -11,7 +11,6 @@ export { defaultFormatters } from '#diagnostics-format/defaults/defaultFormatter
 export { installerFormatters } from '#diagnostics-format/formatters/installer/installerFormatters.ts';
 export { manifestFormatters } from '#diagnostics-format/formatters/manifest/manifestFormatters.ts';
 export { formatPlainText } from '#diagnostics-format/formatters/PlainTextFormatter.ts';
-export { postinstallFormatters } from '#diagnostics-format/formatters/postinstall/postinstallFormatters.ts';
 export {
   formatPublishRequestFailed,
   publishingFormatters,

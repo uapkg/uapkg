@@ -5,6 +5,7 @@ import { describeControlPlaneError } from '#cli/control-plane/AccountManager.ts'
 import { AuthenticationSelector } from '#cli/control-plane/AuthenticationSelector.ts';
 import { ControlPlaneClient } from '#cli/control-plane/ControlPlaneClient.ts';
 import { RequestWatch } from '#cli/control-plane/RequestWatch.ts';
+import { resolvePackageTrust } from '#cli/control-plane/resolvePackageTrust.ts';
 import {
   type ControlPlaneAuthMode,
   ControlPlaneError,
@@ -58,7 +59,7 @@ export class PackageLifecycleCommand implements Command {
         throw new Error(`uapkg ${operation} requires --reason describing why the version is changing state.`);
       }
 
-      const trust = await this.root.registryTrustResolver.resolve(this.options.registry);
+      const trust = await resolvePackageTrust(this.root, packageName.trim(), this.options.registry);
       const selector = new AuthenticationSelector(this.root.accountManager, new InkPromptService());
       const oidcTarget = { registryId: trust.registryId, packageName: packageName.trim() };
       const requestedScopes = this.options.detach

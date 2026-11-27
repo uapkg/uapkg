@@ -411,6 +411,7 @@ pub fn delegate(
     args: &[OsString],
     diagnostic: Option<&diagnostics::LauncherContext>,
     notices: &[String],
+    invocation: &crate::routing::Invocation,
 ) -> Result<i32> {
     known_policy(context, &installed.engine.version)?;
     let mut command = Command::new(
@@ -434,14 +435,30 @@ pub fn delegate(
         .env("UAPKG_LAUNCHER_VERSION", crate::model::VERSION)
         .env("UAPKG_LAUNCHER_EXECUTABLE", &context.executable)
         .env("UAPKG_CLI_VERSION", &installed.engine.version);
-    execute(command, diagnostic)
+    execute(command, diagnostic, invocation)
 }
 
 pub fn execute(
     mut command: Command,
     diagnostic: Option<&diagnostics::LauncherContext>,
+    invocation: &crate::routing::Invocation,
 ) -> Result<i32> {
     diagnostics::apply(&mut command, diagnostic)?;
+    if invocation.offline {
+        command.env("UAPKG_OFFLINE", "1");
+    } else {
+        command.env_remove("UAPKG_OFFLINE");
+    }
+    const RETRY_FLAGS: &str = "UAPKG_INTERNAL_RETRY_FLAGS";
+    command.env_remove(RETRY_FLAGS);
+    if !invocation.retry_flags.is_empty()
+        && matches!(
+            invocation.command.as_deref(),
+            Some("add" | "install" | "update" | "remove")
+        )
+    {
+        command.env(RETRY_FLAGS, serde_json::to_string(&invocation.retry_flags)?);
+    }
     command
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

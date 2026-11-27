@@ -1,0 +1,46 @@
+{
+  "name": "@uapkg/lifecycle",
+  "version": "1.7.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uapkg/uapkg.git",
+    "directory": "packages/uapkg-lifecycle"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vp pack",
+    "prepack": "vp run build",
+    "build:watch": "vp pack --watch"
+  },
+  "dependencies": {
+    "@uapkg/common": "workspace:^",
+    "@uapkg/config": "workspace:^",
+    "@uapkg/diagnostics": "workspace:^",
+    "@uapkg/installer": "workspace:^",
+    "@uapkg/integration": "workspace:^",
+    "@uapkg/package-manifest-schema": "workspace:^",
+    "esbuild": "0.28.0"
+  },
+  "imports": {
+    "#lifecycle/*.ts": {
+      "uapkg-source": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  }
+}

@@ -16,6 +16,11 @@ export class AddCommandModule implements UAPKGCommandModule {
             describe: 'Package name with an optional version range',
             demandOption: true,
           })
+          .option('ignore-scripts', {
+            type: 'boolean',
+            default: false,
+            describe: 'Skip executable lifecycle hooks and integrations',
+          })
           .option('force', {
             type: 'boolean',
             default: false,
@@ -27,7 +32,11 @@ export class AddCommandModule implements UAPKGCommandModule {
             describe: 'Add or replace the project override for this dependency',
           })
           .option('dev', { type: 'boolean', default: false, describe: 'Add to devDependencies' })
-          .option('registry', { type: 'string', describe: 'Registry name (defaults to config `registry`)' })
+          .option('registry', {
+            type: 'string',
+            requiresArg: true,
+            describe: 'Registry alias, uses "default" when omitted',
+          })
           .option('dry-run', {
             type: 'boolean',
             default: false,
@@ -43,6 +52,7 @@ export class AddCommandModule implements UAPKGCommandModule {
         sink.set(
           this.factory.createAdd(String(argv.source), {
             cwd: process.cwd(),
+            ignoreScripts: argv['ignore-scripts'],
             force: argv.force,
             pin: argv.pin,
             dev: argv.dev,

@@ -29,6 +29,7 @@ export class InstallPlanner {
     currentLockfile: Lockfile,
     previousLockfile: Lockfile | null,
     diskState: ReadonlyMap<PackageName, DiskStateEntry>,
+    orphanedActivations: ReadonlyMap<PackageName, PackageVersion> = new Map(),
   ): Promise<Result<InstallPlan>> {
     const bag = new DiagnosticBag();
     const actions: InstallAction[] = [];
@@ -98,18 +99,18 @@ export class InstallPlanner {
     }
 
     // Removals (in previous but not in current)
-    if (previous) {
-      for (const rawName of Object.keys(previous)) {
-        if (Object.hasOwn(current, rawName)) continue;
-        const name = rawName as PackageName;
-        const state = diskState.get(name);
-        actions.push({
-          type: 'remove',
-          packageName: name,
-          path: state?.path ?? (`Plugins/${name}` as unknown as InstallPath),
-          currentVersion: previous[rawName].version,
-        });
-      }
+    const removals = new Map(orphanedActivations);
+    for (const [name, entry] of Object.entries(previous ?? {})) {
+      if (!Object.hasOwn(current, name)) removals.set(name as PackageName, entry.version);
+    }
+    for (const [name, version] of removals) {
+      if (Object.hasOwn(current, name)) continue;
+      actions.push({
+        type: 'remove',
+        packageName: name,
+        path: `Plugins/${name}` as InstallPath,
+        currentVersion: version,
+      });
     }
 
     const summary = this.summarize(actions, totalBytes);

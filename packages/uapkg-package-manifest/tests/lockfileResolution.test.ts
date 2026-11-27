@@ -63,12 +63,15 @@ describe('lockfile resolution through PackageManifest', () => {
   });
 
   it('repairs stale edges without upgrading their valid locked parent', async () => {
-    const stale = LockfileSchema.parse(lock);
+    const pinned = { ...lock, lifecycleRuntimes: { node: { '22': '22.9.0' } } };
+    const stale = LockfileSchema.parse(pinned);
     Object.values(stale.packages)[0].dependencies = { orphan: '1.2.3' };
     await pm.writeLockfile(stale);
     expect((await pm.install({ frozen: true })).ok).toBe(false);
     const repaired = await pm.install({ nowMs: now * 1000 });
-    expect(repaired.ok && repaired.value).toEqual(lock);
+    expect(repaired.ok && repaired.value).toEqual(pinned);
+    expect(JSON.parse(await readFile(join(directory, 'uapkg.lock'), 'utf8'))).toEqual(pinned);
+    expect(LockfileSchema.safeParse({ ...lock, lifecycleRuntimes: { node: { '22': '24.0.0' } } }).success).toBe(false);
   });
 
   it('refuses frozen graph repair but persists the compatible downgrade required by an explicit manifest edit', async () => {

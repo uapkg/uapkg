@@ -1,7 +1,7 @@
 import type { Diagnostic } from '@uapkg/diagnostics';
 import type {
   PartialConfig,
-  PostInstallPolicyValue,
+  LifecyclePolicyValue,
   RegistryConfig,
   RegistryRef,
   ResolvedConfig,
@@ -79,4 +79,4 @@ export interface ConfigResolvedResult {
   diagnostics: readonly Diagnostic[];
 }
 
-export type { PartialConfig, PostInstallPolicyValue, RegistryConfig, RegistryRef, ResolvedConfig };
+export type { PartialConfig, LifecyclePolicyValue, RegistryConfig, RegistryRef, ResolvedConfig };

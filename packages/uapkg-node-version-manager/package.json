@@ -1,0 +1,41 @@
+{
+  "name": "@uapkg/node-version-manager",
+  "version": "1.7.5",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uapkg/uapkg.git",
+    "directory": "packages/uapkg-node-version-manager"
+  },
+  "files": [
+    "dist"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "vp pack",
+    "prepack": "vp run build",
+    "build:watch": "vp pack --watch"
+  },
+  "dependencies": {
+    "@uapkg/common": "workspace:^",
+    "openpgp": "6.3.3",
+    "tar": "7.5.13"
+  },
+  "imports": {
+    "#node-version-manager/*.ts": {
+      "uapkg-source": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  }
+}

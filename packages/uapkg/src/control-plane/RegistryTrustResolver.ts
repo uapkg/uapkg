@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeUrl } from '@uapkg/common';
+import { DEFAULT_REGISTRY_ALIAS } from '@uapkg/common-schema';
 import { getRegistryRepoPath } from '@uapkg/registry-core';
 import { RegistryMetaSchema } from '@uapkg/registry-schema';
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
@@ -16,7 +17,7 @@ export class RegistryTrustResolver {
   public constructor(private readonly root: CompositionRoot) {}
 
   public async resolve(requestedAlias?: string): Promise<RegistryTrust> {
-    const alias = requestedAlias ?? this.selectedAlias();
+    const alias = requestedAlias ?? DEFAULT_REGISTRY_ALIAS;
     const result = this.root.registryCore.getOrCreateRegistry(alias);
     if (!result.ok) {
       throw new Error(firstDiagnostic(result.diagnostics, `Registry "${alias}" is not configured.`));
@@ -79,14 +80,6 @@ export class RegistryTrustResolver {
     if (!updated.ok || updated.value === 'Failed') {
       throw new Error(firstDiagnostic(updated.diagnostics, `Unable to refresh registry "${trust.alias}".`));
     }
-  }
-
-  private selectedAlias(): string {
-    const selected = this.root.config.get('registry');
-    if (typeof selected !== 'string' || selected.trim().length === 0) {
-      throw new Error('No registry is selected. Configure one with `uapkg registry use <name>`.');
-    }
-    return selected;
   }
 }
 

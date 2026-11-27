@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ok } from '@uapkg/diagnostics';
-import type { Manifest } from '@uapkg/package-manifest-schema';
+import { ManifestSchema, type Manifest } from '@uapkg/package-manifest-schema';
 import { getRegistryRepoPath } from '@uapkg/registry-core';
 import { c as createTar } from 'tar';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
@@ -127,7 +127,8 @@ describe.each(['reduced', 'rich'] as const)('trusted registry metadata for publi
 });
 
 describe('PublishCommand (artifact-first)', () => {
-  it('lets a private packaged manifest reach trusted registry resolution before any policy call', async () => {
+  it('resolves default registry trust for a private artifact before applying registry policy', async () => {
+    const archivePath = await makeArchive({ name: 'private-package', version: '1.0.0', kind: 'plugin', private: true });
     const resolveTrust = vi.fn(async () => {
       throw new Error('trusted registry policy reached');
     });
@@ -147,6 +148,8 @@ describe('PublishCommand (artifact-first)', () => {
     } as unknown as CompositionRoot;
     const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const command = new PublishCommand(root, {
+      assetPath: archivePath,
+      repository: 'acme/private-package',
       auth: 'login',
       detach: true,
       outputFormat: 'text',
@@ -154,9 +157,53 @@ describe('PublishCommand (artifact-first)', () => {
 
     await expect(command.execute()).resolves.toBe(1);
 
-    expect(resolveTrust).toHaveBeenCalledWith(undefined);
+    expect(resolveTrust).toHaveBeenCalledWith('default');
     const output = stderr.mock.calls.map(([value]) => String(value)).join('');
     expect(output).toContain('trusted registry policy reached');
+  });
+
+  it.each([
+    { name: 'archived-plugin', publish: { registry: 'studio' } },
+    { name: 'local-plugin', dependencies: { 'archived-plugin': { version: '1.0.0', registry: 'studio' } } },
+  ])('requires an explicit registry for the archive package when the local manifest is $name', async (declaration) => {
+    const archivePath = await makeArchive({ name: 'archived-plugin', version: '1.0.0', kind: 'plugin' });
+    const root = publishRoot(registryTrust());
+    const resolveTrust = vi.spyOn(root.registryTrustResolver, 'resolve');
+    vi.spyOn(root.packageManifest, 'readManifest').mockResolvedValue(
+      ok(
+        ManifestSchema.parse({
+          kind: 'plugin',
+          version: '1.0.0',
+          ...declaration,
+        }),
+      ),
+    );
+    const lookup = vi.fn(async () => ok({ name: 'archived-plugin' }));
+    Object.assign(root, { registryCore: { getOrCreateRegistry: () => ok({ getPackageManifest: lookup }) } });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const select = vi
+      .spyOn(AuthenticationSelector.prototype, 'select')
+      .mockRejectedValue(new Error('unexpected credential request'));
+    const submit = vi
+      .spyOn(ControlPlaneClient.prototype, 'submitRegistryRequest')
+      .mockRejectedValue(new Error('unexpected submission'));
+
+    const command = new PublishCommand(root, {
+      assetPath: archivePath,
+      repository: 'acme/plugin',
+      auth: 'login',
+      detach: true,
+      outputFormat: 'json',
+    });
+    expect(await command.execute()).toBe(1);
+    expect(lookup).toHaveBeenCalledWith('archived-plugin', 'default');
+    const error = stderr.mock.calls.map(([line]) => String(line)).join('');
+    expect(error).toContain('archived-plugin');
+    expect(error).toContain('--registry');
+    expect(error).toContain('studio');
+    expect(resolveTrust).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('requests only create capability for a detached publication', async () => {

@@ -11,6 +11,11 @@ export class PackCommandModule implements UAPKGCommandModule {
       'Create a .tgz package archive and integrity file',
       (builder) =>
         builder
+          .option('ignore-scripts', {
+            type: 'boolean',
+            default: false,
+            describe: 'Skip executable lifecycle hooks and integrations',
+          })
           .option('dry-run', {
             type: 'boolean',
             default: false,
@@ -29,6 +34,7 @@ export class PackCommandModule implements UAPKGCommandModule {
         sink.set(
           this.factory.createPack({
             cwd: process.cwd(),
+            ignoreScripts: argv['ignore-scripts'],
             dryRun: argv['dry-run'],
             allowMissingLfs: argv['allow-missing-lfs'],
             outFile: typeof argv.outFile === 'string' ? argv.outFile : undefined,

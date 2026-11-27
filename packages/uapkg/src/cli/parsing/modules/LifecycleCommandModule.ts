@@ -34,7 +34,11 @@ export class LifecycleCommandModule implements UAPKGCommandModule {
             .positional('package', { type: 'string', describe: 'Package name' })
             .positional('version', { type: 'string', describe: 'Exact package version' })
             .option('reason', { type: 'string', describe: 'Reason recorded with the request' })
-            .option('registry', { type: 'string', describe: 'Configured registry alias' })
+            .option('registry', {
+              type: 'string',
+              requiresArg: true,
+              describe: 'Registry alias, uses "default" when omitted',
+            })
             .option('auth', {
               type: 'string',
               choices: AUTH_MODES,

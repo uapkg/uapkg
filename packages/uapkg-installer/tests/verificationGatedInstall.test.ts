@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -122,6 +122,7 @@ function buildRegistryCore(fixtures: Map<string, RegistryFixtureVersion>, shortI
     getOrCreateRegistry: () =>
       ok({
         shortId,
+        id: createHash('sha256').update(shortId).digest('hex'),
         getPackageManifest: async (packageName: string) => {
           const versions: Record<string, unknown> = {};
           for (const [key, fixture] of fixtures) {
@@ -223,6 +224,141 @@ function fixtureKey(name: string, version: string): string {
 }
 
 describe('verification-gated partial installation', () => {
+  it('preserves old directories during a partial install and cleans them on an unchanged-lock retry', async () => {
+    const version = '1.0.0';
+    const fixtures = new Map<string, RegistryFixtureVersion>();
+    for (const name of ['old-plugin', 'healthy', 'recovering']) {
+      fixtures.set(fixtureKey(name, version), {
+        artifact: await makeArtifact(name, version, { name, kind: 'plugin', version }),
+      });
+    }
+    const selected = (names: string[]) =>
+      buildLockfile(
+        Object.fromEntries(
+          names.map((name) => [name, { version, sha256: fixtures.get(fixtureKey(name, version))!.artifact.sha256 }]),
+        ),
+      );
+    const previous = selected(['old-plugin']);
+    const replacement = selected(['healthy', 'recovering']);
+    const workspace = await makeTempDir('uapkg-deferred-');
+    const installer = new Installer({
+      registryCore: buildRegistryCore(fixtures, 'testshortid'),
+      config: buildConfig(),
+    });
+    await installer.execute(previous, null, { manifestRoot: workspace, rootDependencies: ['old-plugin'] });
+    const old = await installer.getVerifiedRelease(previous, workspace, 'old-plugin');
+    const endpoint = new URL(fixtures.get(fixtureKey('recovering', version))!.artifact.url).pathname;
+    const bytes = artifacts.get(endpoint)!;
+    artifacts.set(endpoint, Buffer.from('incomplete download'));
+    const options = { manifestRoot: workspace, rootDependencies: ['healthy', 'recovering'] };
+    const partial = await installer.execute(replacement, previous, options);
+    expect(partial).toMatchObject({
+      ok: true,
+      value: { installed: ['healthy'], failed: ['recovering'], deferredRemovals: ['old-plugin'] },
+    });
+    expect(existsSync(old.installedPath)).toBe(true);
+    artifacts.set(endpoint, bytes);
+    const recovered = await installer.execute(replacement, replacement, options);
+    expect(recovered).toMatchObject({
+      ok: true,
+      value: { installed: ['recovering'], failed: [], deferredRemovals: [] },
+    });
+    expect(existsSync(old.installedPath)).toBe(false);
+    if (recovered.ok) expect(recovered.value.outcomes).toContainEqual({ packageName: 'old-plugin', status: 'removed' });
+    const again = await installer.execute(replacement, replacement, options);
+    expect(again).toMatchObject({ ok: true, value: { plan: { summary: { removed: 0 } } } });
+  });
+
+  it('retains the receipt after a failed removal and refuses to delete another directory at the same installed path', async () => {
+    const name = 'mesh';
+    const version = '1.0.0';
+    const artifact = await makeArtifact(name, version, { name, version, kind: 'plugin' });
+    const installer = new Installer({
+      registryCore: buildRegistryCore(new Map([[fixtureKey(name, version), { artifact }]]), 'testshortid'),
+      config: buildConfig(),
+    });
+    const locked = buildLockfile({ [name]: { version, sha256: artifact.sha256 } });
+    const empty = buildLockfile({});
+    const workspace = await makeTempDir('uapkg-owned-remove-');
+    await installer.execute(locked, null, { manifestRoot: workspace, rootDependencies: [name] });
+    const owned = await installer.getVerifiedRelease(locked, workspace, name);
+    const original = join(workspace, 'original-directory');
+    await rename(owned.installedPath, original);
+    await mkdir(owned.installedPath);
+    await writeFile(join(owned.installedPath, 'uapkg.json'), JSON.stringify({ name, version, kind: 'plugin' }));
+    const options = { manifestRoot: workspace, rootDependencies: [] };
+    expect(await installer.execute(empty, locked, options)).toMatchObject({ ok: true, value: { failed: [name] } });
+    expect(await installer.execute(empty, empty, options)).toMatchObject({ ok: true, value: { failed: [name] } });
+    expect(existsSync(join(owned.installedPath, 'uapkg.json'))).toBe(true);
+    await rename(owned.installedPath, join(workspace, 'unmanaged-directory'));
+    await rename(original, owned.installedPath);
+    expect(await installer.execute(empty, empty, options)).toMatchObject({
+      ok: true,
+      value: { failed: [], outcomes: [{ packageName: name, status: 'removed' }] },
+    });
+    expect(existsSync(owned.installedPath)).toBe(false);
+  });
+  it('retains a verified release across unchanged installs and snapshots its archived bytes independently of local edits', async () => {
+    const name = 'mesh';
+    const artifact = await makeArtifact(name, '1.0.0', { kind: 'plugin', name, version: '1.0.0' });
+    const fixtures = new Map([[fixtureKey(name, '1.0.0'), { artifact }]]);
+    const lockfile = buildLockfile({ [name]: { version: '1.0.0', sha256: artifact.sha256 } });
+    const workspace = await makeTempDir('uapkg-retry-');
+    const options = { manifestRoot: workspace, rootDependencies: [name] };
+    const installer = new Installer({
+      registryCore: buildRegistryCore(fixtures, 'testshortid'),
+      config: buildConfig(),
+    });
+    const installed = await installer.execute(lockfile, null, options);
+    expect(installed.ok).toBe(true);
+    if (!installed.ok) return;
+    const original = await installer.getVerifiedRelease(lockfile, workspace, name);
+    expect(original.activationId).toBe(installed.value.verifiedReleases[0].activationId);
+    await writeFile(join(original.installedPath, 'payload.txt'), 'locally edited');
+    artifacts.clear();
+    const retried = await installer.execute(lockfile, lockfile, options);
+    expect(retried.ok).toBe(true);
+    if (!retried.ok) return;
+    expect(retried.value.outcomes).toEqual([{ packageName: name, status: 'unchanged' }]);
+    expect(retried.value.verifiedReleases).toEqual([original]);
+    let temporaryPath = '';
+    const contents = await installer.withVerifiedSnapshot(original, async (root) => {
+      temporaryPath = root;
+      return readFile(join(root, 'payload.txt'), 'utf8');
+    });
+    expect(contents).toBe('content of mesh@1.0.0');
+    expect(existsSync(temporaryPath)).toBe(false);
+    const redirected = new Installer({
+      registryCore: buildRegistryCore(fixtures, 'other-registry'),
+      config: buildConfig(),
+    });
+    await expect(redirected.getVerifiedRelease(lockfile, workspace, name)).rejects.toThrow('Run uapkg install');
+    await writeFile(original.archivePath, 'replacement');
+    await expect(installer.withVerifiedSnapshot(original, async () => true)).rejects.toThrow('archive changed');
+    await expect(installer.getVerifiedRelease(lockfile, workspace, name)).rejects.toThrow('Run uapkg install');
+  });
+
+  it('starts a distinct lifecycle activation when the same verified release is removed and installed again', async () => {
+    const name = 'mesh';
+    const version = '1.0.0';
+    const artifact = await makeArtifact(name, version, { kind: 'plugin', name, version });
+    const fixtures = new Map([[fixtureKey(name, version), { artifact }]]);
+    const installer = new Installer({
+      registryCore: buildRegistryCore(fixtures, 'testshortid'),
+      config: buildConfig(),
+    });
+    const lock = buildLockfile({ [name]: { version, sha256: artifact.sha256 } });
+    const empty = buildLockfile({});
+    const options = { manifestRoot: await makeTempDir('uapkg-reactivate-'), rootDependencies: [name] };
+    expect((await installer.execute(lock, null, options)).ok).toBe(true);
+    const before = await installer.getVerifiedRelease(lock, options.manifestRoot, name);
+    expect((await installer.execute(empty, lock, { ...options, rootDependencies: [] })).ok).toBe(true);
+    await expect(installer.getVerifiedRelease(lock, options.manifestRoot, name)).rejects.toThrow('Run uapkg install');
+    expect((await installer.execute(lock, empty, options)).ok).toBe(true);
+    const after = await installer.getVerifiedRelease(lock, options.manifestRoot, name);
+    expect(after.activationId).not.toBe(before.activationId);
+    expect({ ...after, activationId: before.activationId }).toEqual(before);
+  });
   it('finishes a progress subscription attached before execution', async () => {
     const installer = new Installer({
       registryCore: buildRegistryCore(new Map(), 'testshortid'),
@@ -601,7 +737,7 @@ describe('verification-gated partial installation', () => {
     },
   );
 
-  it('reports an incomplete closure for a verified parent whose child failed', async () => {
+  it('reports an incomplete closure through every ancestor of a failed child', async () => {
     const brokenChildBytes = Buffer.from('broken child bytes');
     const childArtifact = serveRawArtifact('broken-child', '1.0.0', brokenChildBytes);
     const parentArtifact = await makeArtifact('sturdy-parent', '1.0.0', {
@@ -610,7 +746,17 @@ describe('verification-gated partial installation', () => {
       kind: 'plugin',
       dependencies: { 'broken-child': '^1.0.0' },
     });
+    const rootArtifact = await makeArtifact('sturdy-root', '1.0.0', {
+      name: 'sturdy-root',
+      version: '1.0.0',
+      kind: 'plugin',
+      dependencies: { 'sturdy-parent': '^1.0.0' },
+    });
     const fixtures = new Map<string, RegistryFixtureVersion>([
+      [
+        fixtureKey('sturdy-root', '1.0.0'),
+        { artifact: rootArtifact, recordDependencies: { 'sturdy-parent': '^1.0.0' } },
+      ],
       [
         fixtureKey('sturdy-parent', '1.0.0'),
         { artifact: parentArtifact, recordDependencies: { 'broken-child': '^1.0.0' } },
@@ -618,6 +764,7 @@ describe('verification-gated partial installation', () => {
       [fixtureKey('broken-child', '1.0.0'), { artifact: childArtifact }],
     ]);
     const lockfile = buildLockfile({
+      'sturdy-root': { version: '1.0.0', sha256: rootArtifact.sha256, dependencies: { 'sturdy-parent': '1.0.0' } },
       'sturdy-parent': {
         version: '1.0.0',
         sha256: parentArtifact.sha256,
@@ -626,11 +773,11 @@ describe('verification-gated partial installation', () => {
       'broken-child': { version: '1.0.0', sha256: childArtifact.sha256 },
     });
 
-    const { result } = await runInstall(fixtures, lockfile, ['sturdy-parent']);
+    const { result } = await runInstall(fixtures, lockfile, ['sturdy-root']);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.installed).toEqual(['sturdy-parent']);
+    expect([...result.value.installed].sort()).toEqual(['sturdy-parent', 'sturdy-root']);
     expect(result.value.failed).toEqual(['broken-child']);
-    expect(result.value.incompleteClosure).toEqual(['sturdy-parent']);
+    expect([...result.value.incompleteClosure].sort()).toEqual(['sturdy-parent', 'sturdy-root']);
   });
 });

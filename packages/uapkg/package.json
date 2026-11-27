@@ -35,7 +35,6 @@
     "verify:production-build": "vp exec node build/verifyProductionBuild.ts"
   },
   "dependencies": {
-    "@amplication/csharp-ast": "0.1.0",
     "@napi-rs/keyring": "1.3.0",
     "@types/yargs": "17.0.35",
     "@uapkg/common": "workspace:^",
@@ -43,6 +42,9 @@
     "@uapkg/config": "workspace:^",
     "@uapkg/diagnostics": "workspace:^",
     "@uapkg/diagnostics-format": "workspace:^",
+    "@uapkg/integration": "workspace:^",
+    "@uapkg/lifecycle": "workspace:^",
+    "@uapkg/node-version-manager": "workspace:^",
     "@uapkg/installer": "workspace:^",
     "@uapkg/log": "workspace:^",
     "@uapkg/pack": "workspace:^",

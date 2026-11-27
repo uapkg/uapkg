@@ -76,8 +76,6 @@ export {
   fingerprintRegistryGitOrigin,
   RegistryTrustResolver,
 } from '#cli/control-plane/RegistryTrustResolver.ts';
-// Postinstall — new subsystem (Phase 7)
-export * from '#cli/postinstall/index.ts';
 // Prompt abstractions (used by init)
 export { InkPromptService } from '#cli/prompts/InkPromptService.tsx';
 export { type ProjectContextDetection, ProjectContextDetector } from '#cli/prompts/ProjectContextDetector.ts';

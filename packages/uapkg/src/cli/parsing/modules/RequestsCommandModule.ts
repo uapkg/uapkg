@@ -26,7 +26,11 @@ export class RequestsCommandModule implements UAPKGCommandModule {
             'List your publishing requests',
             (listBuilder) =>
               listBuilder
-                .option('registry', { type: 'string', describe: 'Configured registry alias' })
+                .option('registry', {
+                  type: 'string',
+                  requiresArg: true,
+                  describe: 'Registry alias, uses "default" when omitted',
+                })
                 .option('status', {
                   type: 'string',
                   choices: REQUEST_STATUSES,

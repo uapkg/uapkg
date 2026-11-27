@@ -20,11 +20,14 @@ pub struct Invocation {
     pub command_index: Option<usize>,
     pub override_version: Option<String>,
     pub offline: bool,
+    /// Offsets into the delegated argv and only the launcher switches removed there.
+    pub retry_flags: Vec<(usize, Vec<String>)>,
 }
 
 impl Invocation {
     pub fn parse(input: Vec<OsString>) -> Result<Self> {
         let mut args = Vec::new();
+        let mut retry_flags = Vec::new();
         let mut override_version = None;
         let mut iter = input.into_iter();
         let mut option_value = false;
@@ -43,6 +46,7 @@ impl Invocation {
             }
             if text == "--offline" {
                 offline = true;
+                retry_flags.push((args.len(), vec![text.to_owned()]));
                 continue;
             }
             if text == "--cli-version" || text.starts_with("--cli-version=") {
@@ -59,6 +63,12 @@ impl Invocation {
                         .map_err(|_| anyhow::anyhow!("CLI versions must be UTF-8."))?
                 };
                 selector(&value)?;
+                let tokens = if text == "--cli-version" {
+                    vec![text.to_owned(), value.clone()]
+                } else {
+                    vec![text.to_owned()]
+                };
+                retry_flags.push((args.len(), tokens));
                 override_version = Some(value);
             } else {
                 if matches!(text, "--registry" | "--config") {
@@ -96,6 +106,7 @@ impl Invocation {
             command_index,
             override_version,
             offline,
+            retry_flags,
         })
     }
 

@@ -252,6 +252,11 @@ export async function prepareNpmPackage(): Promise<string> {
   const bundledSemver = createRequire(path.join(WORKSPACE_ROOT, 'package.json')).resolve('semver/package.json');
   mkdirSync(path.join(destination, 'dist/licenses'), { recursive: true });
   cpSync(path.join(path.dirname(bundledSemver), 'LICENSE'), path.join(destination, 'dist/licenses/semver-LICENSE'));
+  // The WASM package carries its packager's license and references the grammar's separate upstream notice.
+  cpSync(
+    path.join(WORKSPACE_ROOT, 'packages/uapkg-integration/licenses/tree-sitter-c-sharp-LICENSE'),
+    path.join(destination, 'dist/licenses/tree-sitter-c-sharp-LICENSE'),
+  );
   cpSync(path.join(WORKSPACE_ROOT, 'LICENSE'), path.join(destination, 'LICENSE'));
   writeFileSync(
     path.join(destination, 'README.md'),

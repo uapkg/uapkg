@@ -6,6 +6,14 @@
 export { type LockDependency, LockDependencySchema } from '#package-manifest-schema/lockfile/LockDependencySchema.ts';
 export { type Lockfile, LockfileSchema } from '#package-manifest-schema/lockfile/LockfileSchema.ts';
 export { type BaseManifest, BaseManifestSchema } from '#package-manifest-schema/manifest/BaseManifestSchema.ts';
+export {
+  LifecycleSchema,
+  IntegrationEntrySchema,
+  CapabilitySchema,
+  type Capability,
+  type ReleasePermission,
+  ReleasePermissionSchema,
+} from '#package-manifest-schema/manifest/Lifecycle.ts';
 // Manifest schemas
 export {
   type Dependency,
@@ -25,7 +33,5 @@ export { type PluginManifest, PluginManifestSchema } from '#package-manifest-sch
 export {
   type ProjectManifest,
   ProjectManifestSchema,
-  type ProjectPostinstall,
-  ProjectPostinstallSchema,
 } from '#package-manifest-schema/manifest/ProjectManifestSchema.ts';
 export { type Publish, PublishSchema } from '#package-manifest-schema/manifest/PublishSchema.ts';

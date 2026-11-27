@@ -3,34 +3,23 @@ import type { ManifestInstallOptions } from '@uapkg/package-manifest';
 import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
 import { InstallProgressReporter } from '#cli/reporting/InstallProgressReporter.ts';
 import type { Command } from '#cli/commands/Command.ts';
-import { PostinstallCandidateBuilder } from '#cli/commands/PostinstallCandidateBuilder.ts';
+import type { RetryTarget } from '@uapkg/lifecycle';
 import { releaseAgeOverrideCommand, type PackageOperationName } from '#cli/commands/PackageOperation.ts';
 
 export interface InstallCommandOptions {
+  readonly ignoreScripts?: boolean;
   readonly force: boolean;
   readonly frozen: boolean;
   readonly dryRun: boolean;
   readonly outputFormat: 'text' | 'json';
   readonly ignoreReleaseAge?: boolean;
+  readonly retry?: RetryTarget;
   readonly command?: PackageOperationName;
   readonly resolution?: ManifestInstallOptions;
   readonly diagnostics?: readonly Diagnostic[];
 }
 
-/**
- * `uapkg install` — resolve → plan → download/extract/remove → postinstall.
- *
- * Pipeline (never throws; errors become diagnostics):
- *
- *   1. Select package versions using the requested dependencies and the existing lockfile.
- *   2. Save changes to the manifest and lockfile once those versions are known.
- *   3. `Installer.execute(...)` → executes the install plan.
- *   4. Consume installer's status stream in parallel via `InstallProgressReporter`.
- *   5. On success (non-dryRun), `PostinstallOrchestrator.run()` for added/updated plugins.
- *   6. Report summary + diagnostics.
- *
- * `--force` and `--frozen` are mutually exclusive; the parser layer enforces this.
- */
+/** Materialize the resolved graph, execute granted hooks, and reconcile the active workspace. */
 export class InstallCommand implements Command {
   public constructor(
     private readonly root: CompositionRoot,
@@ -83,28 +72,22 @@ export class InstallCommand implements Command {
     const plan = report.plan;
     const hasBranchFailures = report.failed.length > 0 || report.skipped.length > 0;
 
-    const builder = new PostinstallCandidateBuilder();
-    const candidates = builder.build(this.root, plan, lockfile, new Set(report.installed));
-    const manifestType = builder.resolveManifestType(manifest);
-
-    let postDiagnostics: readonly Diagnostic[] = [];
-    if (!this.options.dryRun && candidates.length > 0) {
-      const moduleNameOverride = manifest.kind === 'project' ? manifest.postinstall?.modules : undefined;
-      const postResult = await this.root.postinstall.run({
-        projectRoot: this.root.cwd,
-        manifestType,
-        candidates,
-        moduleNameOverride,
-      });
-      postDiagnostics = postResult.diagnostics;
-      if (!postResult.ok) {
-        return this.fail([...commandDiagnostics, ...executeResult.diagnostics, ...postResult.diagnostics]);
-      }
-    }
+    const postDiagnostics = this.options.dryRun
+      ? []
+      : await this.root.lifecycle.install({
+          report,
+          manifest,
+          frozen: this.options.frozen,
+          ignoreScripts: this.options.ignoreScripts === true,
+          refresh: this.commandName === 'update',
+          retry: this.options.retry,
+          invocation: this.root.invocation ?? [this.commandName],
+        });
+    const hasFailures = hasBranchFailures || postDiagnostics.some((d) => d.level === 'error');
 
     if (this.options.outputFormat === 'json') {
       this.root.json.emit({
-        status: hasBranchFailures ? 'error' : 'ok',
+        status: hasFailures ? 'error' : 'ok',
         command: this.commandName,
         data: {
           plan: plan.summary,
@@ -112,23 +95,27 @@ export class InstallCommand implements Command {
           failed: report.failed,
           skipped: report.skipped,
           incompleteClosure: report.incompleteClosure,
+          deferredRemovals: report.deferredRemovals,
           heldBack,
           ...(this.commandName === 'update' ? { heldBackCount: heldBack.length } : {}),
           minimumReleaseAge,
         },
         diagnostics: [...commandDiagnostics, ...executeResult.diagnostics, ...postDiagnostics],
       });
-      return hasBranchFailures ? 1 : 0;
+      return hasFailures ? 1 : 0;
     }
 
     this.root.diagnostics.reportAll([...commandDiagnostics, ...executeResult.diagnostics, ...postDiagnostics]);
-    progress.renderSummary(plan.summary);
+    progress.renderSummary(
+      plan.summary,
+      this.options.dryRun || hasBranchFailures || report.incompleteClosure.length > 0,
+    );
     progress.renderHeldBack(heldBack, minimumReleaseAge, {
       showEmpty: this.commandName === 'update',
       // A successful bare add saves a caret range. Repeating it may no longer allow the held-back major version.
       retryCommand: this.options.resolution?.bareAdd ? undefined : overrideCommand,
     });
-    return hasBranchFailures ? 1 : 0;
+    return hasFailures ? 1 : 0;
   }
 
   private fail(diagnostics: readonly Diagnostic[]): number {

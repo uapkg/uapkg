@@ -5,9 +5,9 @@ import { z } from 'zod';
 const DEVELOPMENT_REGISTRY_URL = 'https://github.com/uapkg/registry-dev-tmp';
 const PRODUCTION_REGISTRY_URL = 'https://github.com/uapkg/registry';
 
-// Accepted postinstall policy values. The `prompt` value is intentionally
+// Accepted lifecycle policy values. The `prompt` value is intentionally
 // omitted — uapkg commands must remain non-interactive.
-const postInstallPolicySchema = z.enum(['allow', 'deny']);
+const lifecyclePolicySchema = z.enum(['allow', 'deny']);
 const registryUrlConfigSchema = RegistryURLSchema.transform((value): string => value);
 
 // Shared with the native reader through the generated slim schema.
@@ -63,11 +63,11 @@ const registryConfigSchema = z
     }),
     ttlSeconds: z.number().optional(),
     /**
-     * Per-registry override of `install.postInstallPolicy`. When omitted the
+     * Per-registry override of `install.lifecyclePolicy`. When omitted the
      * global policy applies. Resolution is "nearest wins": per-registry
      * overrides the global value.
      */
-    postInstallPolicy: postInstallPolicySchema.optional(),
+    lifecyclePolicy: lifecyclePolicySchema.optional(),
   })
   .strict();
 
@@ -83,7 +83,7 @@ const partialRegistryConfigSchema = z
     url: registryUrlConfigSchema.optional(),
     ref: partialRegistryRefSchema.optional(),
     ttlSeconds: z.number().optional(),
-    postInstallPolicy: postInstallPolicySchema.optional(),
+    lifecyclePolicy: lifecyclePolicySchema.optional(),
   })
   .strict();
 
@@ -124,11 +124,10 @@ export const configSchema = z
     install: z
       .object({
         /**
-         * Global postinstall policy. Default: `deny` (postinstall hooks are
-         * treated as authoritative bootstrap documentation and require explicit
-         * opt-in). Per-registry overrides apply via `registries.<name>.postInstallPolicy`.
+         * Default permission for a verified release without a workspace rule.
+         * A configured registry can override this fallback.
          */
-        postInstallPolicy: postInstallPolicySchema,
+        lifecyclePolicy: lifecyclePolicySchema,
       })
       .strict(),
     term: z
@@ -176,7 +175,7 @@ export const partialConfigSchema = z
       .optional(),
     install: z
       .object({
-        postInstallPolicy: postInstallPolicySchema.optional(),
+        lifecyclePolicy: lifecyclePolicySchema.optional(),
       })
       .strict()
       .optional(),
@@ -194,7 +193,7 @@ export type ResolvedConfig = z.infer<typeof configSchema>;
 export type PartialConfig = z.infer<typeof partialConfigSchema>;
 export type RegistryConfig = ResolvedConfig['registries'][string];
 export type RegistryRef = RegistryConfig['ref'];
-export type PostInstallPolicyValue = ResolvedConfig['install']['postInstallPolicy'];
+export type LifecyclePolicyValue = ResolvedConfig['install']['lifecyclePolicy'];
 
 function resolveEditorDefault() {
   if (process.env.EDITOR) {
@@ -260,7 +259,7 @@ export function getDefaultConfig(): ResolvedConfig {
       maxConcurrentDownloads: 5,
     },
     install: {
-      postInstallPolicy: 'deny',
+      lifecyclePolicy: 'deny',
     },
     term: {
       quiet: false,

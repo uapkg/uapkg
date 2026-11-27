@@ -1,6 +1,11 @@
 import { PackageNameSchema, PackageVersionSchema } from '@uapkg/common-schema';
 import { z } from 'zod';
 import { DependencySchema } from '#package-manifest-schema/manifest/DependencySchema.ts';
+import {
+  IntegrationEntrySchema,
+  LifecycleSchema,
+  PermissionsSchema,
+} from '#package-manifest-schema/manifest/Lifecycle.ts';
 import { ManifestKindSchema } from '#package-manifest-schema/manifest/ManifestKind.ts';
 import { PublishSchema } from '#package-manifest-schema/manifest/PublishSchema.ts';
 
@@ -15,6 +20,9 @@ export const BaseManifestSchema = z.looseObject({
   name: PackageNameSchema,
   version: PackageVersionSchema,
   kind: ManifestKindSchema,
+  permissions: PermissionsSchema.optional(),
+  integration: IntegrationEntrySchema.optional(),
+  lifecycle: LifecycleSchema.optional(),
   private: z.boolean().optional(),
   publish: PublishSchema.optional(),
   dependencies: z.record(z.string(), DependencySchema).optional(),

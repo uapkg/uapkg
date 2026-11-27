@@ -107,20 +107,6 @@ const require = createRequire(path.join(engineRoot, 'package.json'));
 const api = await import(${virtual ? "new URL('./dist/index.js', import.meta.url)" : JSON.stringify(pathToFileURL(path.join(engineRoot, 'dist/index.js')).href)});
 assert.equal(typeof api.runUAPKGCLI, 'function');
 assert.equal(typeof api.CredentialStore, 'function');
-const fixture = path.join(process.cwd(), 'postinstall.mjs');
-const sibling = path.join(process.cwd(), 'sibling.mjs');
-fs.writeFileSync(sibling, 'export const value = 42;');
-fs.writeFileSync(fixture, 'import {value} from "./sibling.mjs"; export default {value};');
-const imported = await new api.ModuleImporter().import('release-fixture', {kind:'file', path:fixture});
-assert.equal(imported.ok, true, JSON.stringify(imported));
-assert.equal(imported.value.default.value, 42);
-const tsFixture = path.join(process.cwd(), 'postinstall.ts');
-fs.writeFileSync(tsFixture, 'const value: number = 42; export default { value };');
-const transpiled = await new api.EsbuildTranspiler().transpile('release-fixture', tsFixture);
-assert.equal(transpiled.ok, true, JSON.stringify(transpiled));
-const loaded = await new api.ModuleImporter().import('release-fixture', {kind:'transpiled', code:transpiled.value, originalPath:tsFixture});
-assert.equal(loaded.ok, true, JSON.stringify(loaded));
-assert.equal(loaded.value.default.value, 42);
 const browser = await import(pathToFileURL(require.resolve('open')).href);
 assert.equal(typeof browser.default, 'function');
 if (process.platform === 'linux') assert.equal(fs.existsSync(path.join(path.dirname(require.resolve('open')), 'xdg-open')), true);
@@ -187,6 +173,13 @@ export function smokeEngine(
       if (!cliPath) throw new Error('Packaged diagnostics have no expected CLI location.');
       assertPackagedDiagnostics(diagnostic, { cliPath, secret: diagnosticSentinel, utilitiesAvailable });
     }
+    process.stdout.write(
+      runChecked(
+        process.execPath,
+        [path.join(import.meta.dirname, 'LifecycleSmoke.ts'), command.executable, ...command.args],
+        scratch,
+      ),
+    );
     const invalid = spawnSync(command.executable, [...command.args, 'release-smoke-unknown-command'], {
       cwd,
       env,

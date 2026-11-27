@@ -12,7 +12,6 @@
 // Family component maps — exported individually so consumers can cherry-pick.
 export { installerInkComponents } from '#diagnostics-format/ink/components/installerInkComponents.tsx';
 export { manifestInkComponents } from '#diagnostics-format/ink/components/manifestInkComponents.tsx';
-export { postinstallInkComponents } from '#diagnostics-format/ink/components/postinstallInkComponents.tsx';
 export { publishingInkComponents } from '#diagnostics-format/ink/components/publishingInkComponents.tsx';
 export { registryInkComponents } from '#diagnostics-format/ink/components/registryInkComponents.tsx';
 export { resolverInkComponents } from '#diagnostics-format/ink/components/resolverInkComponents.tsx';

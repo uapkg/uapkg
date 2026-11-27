@@ -16,6 +16,8 @@ const noActions: InstallReport = {
   failed: [],
   skipped: [],
   incompleteClosure: [],
+  deferredRemovals: [],
+  verifiedReleases: [],
 };
 const emptyLock: Lockfile = { lockfileVersion: 1, packages: {} };
 const resolutionFailure: Diagnostic = {
@@ -56,7 +58,7 @@ function fixture(input: Record<string, unknown> = {}, previousLockfile: Lockfile
     json,
     diagnostics,
     config: { get: vi.fn(() => 'official') },
-    postinstall: { run: vi.fn() },
+    lifecycle: { install: vi.fn(async () => []) },
   } as unknown as CompositionRoot;
   const add = (options: Partial<AddCommandOptions> = {}) =>
     new AddCommand(root, {
@@ -91,7 +93,7 @@ describe('package resolution command integration', () => {
       nowMs: 123456,
       previousLockfile: null,
     });
-    expect(request.stagedManifest?.dependencies?.example).toEqual({ version: '*', registry: 'official' });
+    expect(request.stagedManifest?.dependencies?.example).toEqual({ version: '*' });
     expect(f.packageManifest.addDependency).not.toHaveBeenCalled();
     expect(f.original.dependencies).toBeUndefined();
     expect(f.json.emit).toHaveBeenCalledWith(expect.objectContaining({ command: 'add', status: 'ok' }));
@@ -154,12 +156,28 @@ describe('package resolution command integration', () => {
 
   it('treats an existing project override as existing intent without a new-add bypass', async () => {
     const f = fixture({ overrides: { example: { version: '^1.0.0', registry: 'private' } } });
-    expect(await f.add()).toBe(0);
+    expect(await f.add({ registry: 'private' })).toBe(0);
     const request = f.packageManifest.installWithReport.mock.calls[0][0];
     expect(request).toMatchObject({ newRoots: [], requiredVersions: undefined, updateTargets: ['example'] });
     expect(ManifestSchema.parse(request.stagedManifest).dependencies?.example).toMatchObject({
       version: '^1.0.0',
       registry: 'private',
+    });
+  });
+
+  it('preserves peer and override requirements when switching registries explicitly', async () => {
+    const f = fixture({
+      dependencies: { example: { version: '^1.0.0', registry: 'private' } },
+      peerDependencies: { example: { version: '>=1.1.0', registry: 'private' } },
+      overrides: { example: { version: '1.2.3', registry: 'private', path: 'Plugins/Custom' } },
+    });
+    expect(await f.add({ registry: 'default' })).toBe(0);
+    const request = f.packageManifest.installWithReport.mock.calls[0][0];
+    expect(request.stagedManifest?.dependencies?.example).toEqual({ version: '^1.0.0' });
+    expect(request.stagedManifest?.peerDependencies?.example).toEqual({ version: '>=1.1.0' });
+    expect(request.stagedManifest?.kind === 'project' && request.stagedManifest.overrides?.example).toEqual({
+      version: '1.2.3',
+      path: 'Plugins/Custom',
     });
   });
 
@@ -187,7 +205,7 @@ describe('package resolution command integration', () => {
     const f = fixture({
       devDependencies: { example: { version: '^1.0.0', registry: 'private', path: 'Plugins/Custom' } },
     });
-    expect(await f.add()).toBe(0);
+    expect(await f.add({ registry: 'private' })).toBe(0);
     const request = f.packageManifest.installWithReport.mock.calls[0][0];
     expect(request).toMatchObject({ updateTargets: ['example'], newRoots: [], requiredVersions: undefined });
     expect(request).not.toHaveProperty('stagedManifest');
@@ -200,7 +218,7 @@ describe('package resolution command integration', () => {
       packages: { example: { version: '1.0.0', registry: 'private', integrity: 'hash' } },
     } as unknown as Lockfile;
     const f = fixture({}, previous);
-    expect(await f.add()).toBe(0);
+    expect(await f.add({ registry: 'private' })).toBe(0);
     const request = f.packageManifest.installWithReport.mock.calls[0][0];
     expect(request).toMatchObject({
       newRoots: [],
@@ -212,6 +230,18 @@ describe('package resolution command integration', () => {
       version: '^1.0.0',
       registry: 'private',
     });
+  });
+
+  it('starts a bare add in default independently of a transitive lock entry from another registry', async () => {
+    const previous = {
+      lockfileVersion: 1,
+      packages: { example: { version: '1.0.0', registry: 'private', integrity: 'hash' } },
+    } as unknown as Lockfile;
+    const f = fixture({}, previous);
+    expect(await f.add()).toBe(0);
+    const request = f.packageManifest.installWithReport.mock.calls[0][0];
+    expect(request.bareAdd?.name).toBe('example');
+    expect(request.stagedManifest?.dependencies?.example).toEqual({ version: '*' });
   });
 
   it('validates every update spec before writing or installing any range changes', async () => {

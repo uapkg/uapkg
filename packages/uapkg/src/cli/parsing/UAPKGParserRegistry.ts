@@ -10,6 +10,7 @@ import { ListCommandModule } from '#cli/cli/parsing/modules/ListCommandModule.ts
 import { LoginCommandModule } from '#cli/cli/parsing/modules/LoginCommandModule.ts';
 import { LogoutCommandModule } from '#cli/cli/parsing/modules/LogoutCommandModule.ts';
 import { OutdatedCommandModule } from '#cli/cli/parsing/modules/OutdatedCommandModule.ts';
+import { PermissionsCommandModule } from '#cli/cli/parsing/modules/PermissionsCommandModule.ts';
 import { PackCommandModule } from '#cli/cli/parsing/modules/PackCommandModule.ts';
 import { ProjectGetNameCommandModule } from '#cli/cli/parsing/modules/ProjectGetNameCommandModule.ts';
 import { PublishCommandModule } from '#cli/cli/parsing/modules/PublishCommandModule.ts';
@@ -32,6 +33,7 @@ export class UAPKGParserRegistry {
       new WhyCommandModule(),
       new ListCommandModule(),
       new PackCommandModule(),
+      new PermissionsCommandModule(),
       new ProjectGetNameCommandModule(),
       new ConfigCommandModule(),
       new RegistryCommandModule(),

@@ -12,6 +12,11 @@ export class RemoveCommandModule implements UAPKGCommandModule {
       (builder) =>
         builder
           .positional('package', { type: 'string', demandOption: true, describe: 'Package name to remove' })
+          .option('ignore-scripts', {
+            type: 'boolean',
+            default: false,
+            describe: 'Skip executable lifecycle hooks and integrations',
+          })
           .option('json', { type: 'boolean', default: false, describe: 'Emit JSON on stdout' })
           .option('ignore-release-age', {
             type: 'boolean',
@@ -22,6 +27,7 @@ export class RemoveCommandModule implements UAPKGCommandModule {
         sink.set(
           this.factory.createRemove(String(argv.package), {
             cwd: process.cwd(),
+            ignoreScripts: argv['ignore-scripts'],
             ignoreReleaseAge: argv['ignore-release-age'],
             outputFormat: argv.json ? 'json' : 'text',
           }),

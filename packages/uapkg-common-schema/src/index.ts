@@ -29,8 +29,6 @@ export type { PackageSpec } from '#common-schema/primitives/PackageSpec.ts';
 export { PackageSpecSchema } from '#common-schema/primitives/PackageSpec.ts';
 export type { PackageVersion } from '#common-schema/primitives/PackageVersion.ts';
 export { PackageVersionSchema } from '#common-schema/primitives/PackageVersion.ts';
-export type { PostInstallPolicy } from '#common-schema/primitives/PostInstallPolicy.ts';
-export { POSTINSTALL_POLICY_DEFAULT, PostInstallPolicySchema } from '#common-schema/primitives/PostInstallPolicy.ts';
 export type { RegistryIdentifier, RegistryIdentifierShort } from '#common-schema/primitives/RegistryIdentifier.ts';
 export {
   RegistryIdentifierSchema,

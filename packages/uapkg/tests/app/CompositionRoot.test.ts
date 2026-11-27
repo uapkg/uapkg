@@ -29,9 +29,9 @@ describe('CompositionRoot', () => {
     expect(root.installer).toBe(root.installer);
   });
 
-  it('postinstall getter is memoized', () => {
+  it('lifecycle getter is memoized', () => {
     const root = new CompositionRoot({ cwd: process.cwd() });
-    expect(root.postinstall).toBe(root.postinstall);
+    expect(root.lifecycle).toBe(root.lifecycle);
   });
 
   it('diagnostics and json reporters are memoized', () => {

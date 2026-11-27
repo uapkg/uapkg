@@ -90,7 +90,9 @@ export class PackageManifest {
   }
 
   async writeManifest(manifest: Manifest): Promise<Result<void>> {
-    return this.writer.write(this.manifestRoot, manifest);
+    return this.installWriter.write(this.manifestRoot, [
+      { name: 'uapkg.json', contents: this.writer.serialize(manifest) },
+    ]);
   }
 
   async readLockfile(): Promise<Result<Lockfile>> {
@@ -102,7 +104,9 @@ export class PackageManifest {
   }
 
   async writeLockfile(lockfile: Lockfile): Promise<Result<void>> {
-    return this.lockWriter.write(this.manifestRoot, lockfile);
+    return this.installWriter.write(this.manifestRoot, [
+      { name: 'uapkg.lock', contents: this.lockWriter.serialize(lockfile) },
+    ]);
   }
 
   // -------------------------------------------------------------------
@@ -182,7 +186,7 @@ export class PackageManifest {
     bag.mergeArray(graph.diagnostics);
     if (!graph.ok) return bag.toFailure();
 
-    const lockfile = this.lockSync.buildLockfile(graph.value);
+    const lockfile = this.lockSync.buildLockfile(graph.value, previous.value);
     const diff = this.differ.diff(previous.value, lockfile);
     // Updating a dependency can change a package's lockfile entry even when the package itself stays at the same version.
     // For the same package version from the same registry, the archive hash and Git tree must still match.

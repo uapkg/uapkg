@@ -1,3 +1,6 @@
+import { join } from 'node:path';
+import { FileRegistryGrantLock } from '#cli/control-plane/RegistryGrantLock.ts';
+import { PermissionsCommand } from '#cli/commands/PermissionsCommand.ts';
 import type { UAPKGCommandLine } from '#cli/cli/UAPKGCommandLine.ts';
 import { AddCommand } from '#cli/commands/AddCommand.ts';
 import { ConfigCommand } from '#cli/commands/ConfigCommand.ts';
@@ -31,16 +34,34 @@ import { CompositionRoot } from '#cli/app/CompositionRoot.ts';
  * folders in Phase 10).
  */
 export class UAPKGApplication {
-  async run(commandLine: UAPKGCommandLine): Promise<number> {
-    const root = new CompositionRoot({ cwd: commandLine.cwd });
+  async run(commandLine: UAPKGCommandLine, invocation?: readonly string[]): Promise<number> {
+    const root = new CompositionRoot({ cwd: commandLine.cwd, invocation });
 
+    const changingWorkspace = ['add', 'install', 'update', 'remove', 'pack', 'lifecycle-retry', 'permissions'].includes(
+      commandLine.command,
+    );
+    if (
+      changingWorkspace &&
+      !('dryRun' in commandLine && commandLine.dryRun) &&
+      !(commandLine.command === 'permissions' && commandLine.action === 'list')
+    ) {
+      const lock = new FileRegistryGrantLock(join(root.cwd, '.uapkg', 'locks'));
+      return lock.withLock('workspace', 'install', () => this.dispatch(commandLine, root));
+    }
+    return this.dispatch(commandLine, root);
+  }
+  private async dispatch(commandLine: UAPKGCommandLine, root: CompositionRoot): Promise<number> {
     switch (commandLine.command) {
+      case 'permissions':
+      case 'lifecycle-retry':
+        return new PermissionsCommand(root, commandLine).execute();
       case 'install':
         return new InstallCommand(root, {
           force: commandLine.force,
           frozen: commandLine.frozen,
           dryRun: commandLine.dryRun,
           ignoreReleaseAge: commandLine.ignoreReleaseAge,
+          ignoreScripts: commandLine.ignoreScripts,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
@@ -53,6 +74,7 @@ export class UAPKGApplication {
           force: commandLine.force,
           dryRun: commandLine.dryRun,
           ignoreReleaseAge: commandLine.ignoreReleaseAge,
+          ignoreScripts: commandLine.ignoreScripts,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
@@ -63,6 +85,7 @@ export class UAPKGApplication {
           dryRun: commandLine.dryRun,
           recursive: commandLine.recursive,
           ignoreReleaseAge: commandLine.ignoreReleaseAge,
+          ignoreScripts: commandLine.ignoreScripts,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
@@ -70,6 +93,7 @@ export class UAPKGApplication {
         return new RemoveCommand(root, {
           packageName: commandLine.packageName,
           ignoreReleaseAge: commandLine.ignoreReleaseAge,
+          ignoreScripts: commandLine.ignoreScripts,
           outputFormat: commandLine.outputFormat,
         }).execute();
 
@@ -93,6 +117,7 @@ export class UAPKGApplication {
           cwd: commandLine.cwd,
           dryRun: commandLine.dryRun,
           allowMissingLfs: commandLine.allowMissingLfs,
+          ignoreScripts: commandLine.ignoreScripts,
           outFile: commandLine.outFile,
         }).execute();
 

@@ -59,6 +59,8 @@ export class ConfigInstance {
     return this.getValueFromObject(this.resolved, pathToProperty);
   }
 
+  getAll(): ResolvedConfig;
+  getAll(options?: ConfigListOptions): ResolvedConfig | Record<string, unknown> | null;
   getAll(options: ConfigListOptions = {}): ResolvedConfig | Record<string, unknown> | null {
     if (options.scope) {
       const result = this.writer.listRaw(this.cwd, options);

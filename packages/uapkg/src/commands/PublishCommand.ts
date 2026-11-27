@@ -14,6 +14,7 @@ import { ArtifactObserver } from '#cli/control-plane/ArtifactObserver.ts';
 import { AuthenticationSelector } from '#cli/control-plane/AuthenticationSelector.ts';
 import { ControlPlaneClient } from '#cli/control-plane/ControlPlaneClient.ts';
 import { RequestWatch } from '#cli/control-plane/RequestWatch.ts';
+import { resolvePackageTrust } from '#cli/control-plane/resolvePackageTrust.ts';
 import {
   type ControlPlaneAuthMode,
   ControlPlaneError,
@@ -69,8 +70,6 @@ export class PublishCommand implements Command {
       }
       const manifest = manifestResult.value;
 
-      const registryAlias = this.options.registry ?? manifest.publish?.registry;
-      const trust = await this.root.registryTrustResolver.resolve(registryAlias);
       const source = await this.resolveSource(manifest.version, manifest.publish);
 
       const observer = new ArtifactObserver();
@@ -86,6 +85,7 @@ export class PublishCommand implements Command {
           );
         }
         const claims = claimsResult.value;
+        const trust = await resolvePackageTrust(this.root, claims.name, this.options.registry, manifest);
         if (
           this.options.outputFormat === 'text' &&
           (claims.name !== manifest.name || claims.version !== manifest.version)

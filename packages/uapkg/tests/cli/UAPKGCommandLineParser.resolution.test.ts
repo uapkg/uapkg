@@ -4,6 +4,19 @@ import { UAPKGCommandLineParser } from '../../src/cli/parsing/UAPKGCommandLinePa
 
 describe('package resolution command options', () => {
   it.each([
+    ['permissions', 'approve'],
+    ['permissions', 'revoke'],
+    ['lifecycle', 'retry'],
+  ])('preserves an omitted or explicit registry for %s %s', async (command, action) => {
+    const parser = new UAPKGCommandLineParser();
+    const args = ['node', 'uapkg', command, action, '@studio/tool', '--capability', 'postinstall'];
+    await expect(parser.parse(args)).resolves.toMatchObject({ packageName: '@studio/tool', registry: undefined });
+    for (const registry of ['default', 'studio']) {
+      await expect(parser.parse([...args, '--registry', registry])).resolves.toMatchObject({ registry });
+    }
+  });
+
+  it.each([
     ['install', []],
     ['add', ['example@^1.0.0']],
     ['update', ['example']],

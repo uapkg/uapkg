@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { InstallPath } from '@uapkg/common-schema';
 import { createExtractionFailedDiagnostic, DiagnosticBag, ok, type Result } from '@uapkg/diagnostics';
 import { extract as tarExtract } from 'tar';
+import { workspaceInstallPath } from '#installer/core/WorkspaceInstallPath.ts';
 
 /**
  * Extracts a downloaded .tgz into its target install path atomically.
@@ -23,15 +24,15 @@ export class PackageExtractor {
     installPath: InstallPath,
   ): Promise<Result<void>> {
     const bag = new DiagnosticBag();
-    const targetAbs = resolve(manifestRoot, installPath);
-    const parentDir = dirname(targetAbs);
     let tempDir: string | undefined;
 
     try {
+      const targetAbs = await workspaceInstallPath(manifestRoot, installPath);
+      const parentDir = dirname(targetAbs);
       await mkdir(parentDir, { recursive: true });
       tempDir = await mkdtemp(join(parentDir, '.uapkg-extract-'));
       await tarExtract({ file: tgzPath, cwd: tempDir, strip: 1 });
-
+      await workspaceInstallPath(manifestRoot, installPath);
       await rm(targetAbs, { recursive: true, force: true });
       await rename(tempDir, targetAbs);
 

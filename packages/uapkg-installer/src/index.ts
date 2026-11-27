@@ -12,6 +12,7 @@ export type {
   InstallSummary,
   PackageInstallOutcome,
   PackageInstallStatus,
+  VerifiedRelease,
 } from '#installer/contracts/InstallerTypes.ts';
 export type {
   BuiltInSafetyPolicyId,

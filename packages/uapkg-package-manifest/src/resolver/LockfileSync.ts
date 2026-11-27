@@ -6,7 +6,7 @@ import type { PackageNode, ResolvedGraph } from '#package-manifest/contracts/Man
  */
 export class LockfileSync {
   /** Build a lockfile from the resolved graph. */
-  buildLockfile(graph: ResolvedGraph): Lockfile {
+  buildLockfile(graph: ResolvedGraph, previous?: Lockfile | null): Lockfile {
     const packages: Record<string, LockDependency> = {};
 
     for (const node of graph.nodes.values()) {
@@ -16,6 +16,7 @@ export class LockfileSync {
 
     return {
       lockfileVersion: 1,
+      ...(previous?.lifecycleRuntimes ? { lifecycleRuntimes: previous.lifecycleRuntimes } : {}),
       packages: packages as Lockfile['packages'],
     };
   }

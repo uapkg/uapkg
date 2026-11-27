@@ -2,7 +2,6 @@ import { configInkComponents } from '#diagnostics-format/ink/components/configIn
 import { installerInkComponents } from '#diagnostics-format/ink/components/installerInkComponents.tsx';
 import { manifestInkComponents } from '#diagnostics-format/ink/components/manifestInkComponents.tsx';
 import { packInkComponents } from '#diagnostics-format/ink/components/packInkComponents.tsx';
-import { postinstallInkComponents } from '#diagnostics-format/ink/components/postinstallInkComponents.tsx';
 import { publishingInkComponents } from '#diagnostics-format/ink/components/publishingInkComponents.tsx';
 import { registryInkComponents } from '#diagnostics-format/ink/components/registryInkComponents.tsx';
 import { resolverInkComponents } from '#diagnostics-format/ink/components/resolverInkComponents.tsx';
@@ -25,7 +24,6 @@ export const defaultInkComponents: DiagnosticInkComponentMap = {
   ...installerInkComponents,
   ...manifestInkComponents,
   ...packInkComponents,
-  ...postinstallInkComponents,
   ...publishingInkComponents,
   ...registryInkComponents,
   ...resolverInkComponents,

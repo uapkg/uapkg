@@ -19,6 +19,7 @@ import { IntegrityWriter } from '#pack/core/IntegrityWriter.ts';
 import { LFSPointerDetector } from '#pack/core/LFSPointerDetector.ts';
 import { PackArtifactExcluder } from '#pack/core/PackArtifactExcluder.ts';
 import { PackManifestReader } from '#pack/core/PackManifestReader.ts';
+import { excludedPackagePaths, releaseEntryFiles, runPrepack } from '#pack/core/PackLifecycle.ts';
 import { PluginDescriptorGuard } from '#pack/core/PluginDescriptorGuard.ts';
 import { PluginRootResolver } from '#pack/core/PluginRootResolver.ts';
 import { TarArchiveWriter } from '#pack/core/TarArchiveWriter.ts';
@@ -55,9 +56,19 @@ export class PackService {
       bag.mergeArray(manifestResult.diagnostics);
       return bag.toFailure();
     }
-    const manifest = manifestResult.value;
+    try {
+      await runPrepack(roots.pluginRoot, manifestResult.value, options);
+    } catch (error) {
+      bag.addError('PACK_PREPACK_FAILED', String(error), { pluginRoot: roots.pluginRoot });
+      return bag.toFailure();
+    }
+    // The author hook may generate metadata or change package contents.
+    const releaseManifest = this.manifestReader.read(roots.pluginRoot);
+    if (!releaseManifest.ok) return releaseManifest;
+    const manifest = releaseManifest.value;
 
-    const rootPrefix = `${manifest.name}-${semver.clean(manifest.version)}`;
+    // Installers strip one archive component, including for scoped package names.
+    const rootPrefix = `${encodeURIComponent(manifest.name)}-${semver.clean(manifest.version)}`;
 
     const archivePathResult = this.resolveArchivePath(roots.cwd, options.outFile);
     if (!archivePathResult.ok) {
@@ -66,7 +77,16 @@ export class PackService {
     }
     const archivePath = archivePathResult.value;
 
-    const crawlResult = this.fileCrawler.collect(roots.pluginRoot);
+    let excluded: (file: string) => boolean;
+    let runtimeFiles: Set<string>;
+    try {
+      excluded = excludedPackagePaths(roots.pluginRoot, manifest);
+      runtimeFiles = await releaseEntryFiles(roots.pluginRoot, manifest, excluded);
+    } catch (error) {
+      bag.addError('PACK_LIFECYCLE_INVALID', String(error), { pluginRoot: roots.pluginRoot });
+      return bag.toFailure();
+    }
+    const crawlResult = this.fileCrawler.collect(roots.pluginRoot, excluded);
     if (!crawlResult.ok) {
       bag.mergeArray(crawlResult.diagnostics);
       return bag.toFailure();
@@ -93,7 +113,7 @@ export class PackService {
         return true;
       }
 
-      return this.isEnforcedInclude(file.relativePath);
+      return runtimeFiles.has(file.relativePath);
     });
 
     const included: string[] = [];
@@ -122,6 +142,24 @@ export class PackService {
 
     if (!included.includes('uapkg.json')) {
       included.unshift('uapkg.json');
+    }
+    for (const entry of runtimeFiles) {
+      if (!included.includes(entry)) {
+        bag.addError(
+          'PACK_LIFECYCLE_INPUT_MISSING',
+          'Required lifecycle file cannot be included in the archive: ' + entry,
+          { file: entry },
+        );
+        return bag.toFailure();
+      }
+    }
+    if (!included.some((file) => !file.includes('/') && file.toLowerCase().endsWith('.uplugin'))) {
+      bag.addError(
+        'PACK_DESCRIPTOR_EXCLUDED',
+        'The plugin descriptor in the package root must be included in the archive.',
+        { pluginRoot: roots.pluginRoot },
+      );
+      return bag.toFailure();
     }
 
     const withoutManifest = included.filter((file) => file !== 'uapkg.json');
@@ -188,9 +226,5 @@ export class PackService {
     }
 
     return ok(resolved);
-  }
-
-  private isEnforcedInclude(relativePath: string): boolean {
-    return relativePath === '.uapkg/postinstall.ts' || relativePath === '.uapkg/postinstall.js';
   }
 }

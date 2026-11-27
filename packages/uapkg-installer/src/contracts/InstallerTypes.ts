@@ -51,11 +51,31 @@ export interface InstallPlan {
 }
 
 /** Terminal status of one package after a partial, verification-gated install. */
-export type PackageInstallStatus = 'installed' | 'failed' | 'skipped_no_verified_parent' | 'removed' | 'unchanged';
+export type PackageInstallStatus =
+  | 'installed'
+  | 'failed'
+  | 'skipped_no_verified_parent'
+  | 'removed'
+  | 'removal_deferred'
+  | 'unchanged';
 
 export interface PackageInstallOutcome {
   readonly packageName: PackageName;
   readonly status: PackageInstallStatus;
+}
+
+/** A reachable release activated by this installer, bound to the configured registry source and archive. */
+export interface VerifiedRelease {
+  /** Unique to this physical activation; grants remain bound to registry and release identity. */
+  readonly activationId: string;
+  readonly packageName: string;
+  readonly registry: string;
+  readonly registryId: string;
+  readonly version: string;
+  readonly integrity: AssetHash;
+  readonly installedPath: string;
+  readonly archivePath: string;
+  readonly dependencies: readonly string[];
 }
 
 /**
@@ -63,6 +83,7 @@ export interface PackageInstallOutcome {
  * one failed branch never rolls back or blocks unrelated verified branches.
  */
 export interface InstallReport {
+  readonly verifiedReleases: readonly VerifiedRelease[];
   readonly plan: InstallPlan;
   readonly outcomes: readonly PackageInstallOutcome[];
   /** Packages newly installed (verified add/update actions). */
@@ -73,6 +94,8 @@ export interface InstallReport {
   readonly skipped: readonly PackageName[];
   /** Installed/retained packages whose dependency closure is incomplete. */
   readonly incompleteClosure: readonly PackageName[];
+  /** Owned package directories retained until the complete dependency graph is available. */
+  readonly deferredRemovals: readonly PackageName[];
 }
 
 /**

@@ -56,7 +56,7 @@ if (process.env.UAPKG_TEST_CONFIG_WRITER === '1' && args[0] === 'config' && args
   config.launcher = {...config.launcher, defaultCliVersion: args[3]};
   fs.writeFileSync(file, JSON.stringify(config));
 }
-process.stdout.write(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),version:process.env.UAPKG_CLI_VERSION,sentinel:process.env.UAPKG_TEST_SENTINEL,input:fs.readFileSync(0,'utf8'),debugContext:process.env.UAPKG_LAUNCHER_CONTEXT ? JSON.parse(process.env.UAPKG_LAUNCHER_CONTEXT) : null}));
+process.stdout.write(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),version:process.env.UAPKG_CLI_VERSION,sentinel:process.env.UAPKG_TEST_SENTINEL,offline:process.env.UAPKG_OFFLINE,retryFlags:JSON.parse(process.env.UAPKG_INTERNAL_RETRY_FLAGS || 'null'),input:fs.readFileSync(0,'utf8'),debugContext:process.env.UAPKG_LAUNCHER_CONTEXT ? JSON.parse(process.env.UAPKG_LAUNCHER_CONTEXT) : null}));
 process.stderr.write('fixture-stderr');
 process.exit(Number(process.env.UAPKG_TEST_EXIT || '0'));
 "#).unwrap();
@@ -106,6 +106,7 @@ fn run(home: &Path, cwd: &Path, args: &[&str]) -> Output {
             .env("HOME", home.parent().unwrap())
             .env("USERPROFILE", home.parent().unwrap())
             .env("UAPKG_TEST_SENTINEL", "unchanged")
+            .env("UAPKG_INTERNAL_RETRY_FLAGS", "stale-parent-retry-flags")
             .env(
                 "UAPKG_LAUNCHER_CONTEXT",
                 "stale-parent-context-must-not-survive",
@@ -406,7 +407,54 @@ fn two_project_pins_global_commands_unknown_commands_and_override_delegate_corre
         &b.join(".uapkg/config.json"),
         json!({"launcher":{"defaultCliVersion":"99.0.0"}}),
     );
-    selected(run(&home, &a, &["--offline", "install"]), "1.2.3");
+    let plain = selected(run(&home, &a, &["install"]), "1.2.3");
+    assert!(plain["retryFlags"].is_null());
+    let offline = selected(run(&home, &a, &["--offline", "install"]), "1.2.3");
+    assert_eq!(offline["retryFlags"], json!([[0, ["--offline"]]]));
+    let retry = selected(
+        run(
+            &home,
+            &a,
+            &[
+                "--offline",
+                "add",
+                "mesh",
+                "--cli-version=2.0.0",
+                "--json",
+                "--",
+                "--offline",
+                "literal",
+            ],
+        ),
+        "2.0.0",
+    );
+    assert_eq!(
+        retry["args"],
+        json!(["add", "mesh", "--json", "--", "--offline", "literal"])
+    );
+    assert_eq!(
+        retry["retryFlags"],
+        json!([[0, ["--offline"]], [2, ["--cli-version=2.0.0"]]])
+    );
+    let retry = selected(
+        run(
+            &home,
+            &a,
+            &[
+                "install",
+                "--cli-version",
+                "2.0.0",
+                "--offline",
+                "--registry",
+                "--offline",
+            ],
+        ),
+        "2.0.0",
+    );
+    assert_eq!(
+        retry["retryFlags"],
+        json!([[1, ["--cli-version", "2.0.0"]], [1, ["--offline"]]])
+    );
     let body = selected(
         run(
             &home,
@@ -440,7 +488,9 @@ fn two_project_pins_global_commands_unknown_commands_and_override_delegate_corre
         ])
     );
     assert_eq!(body["sentinel"], "unchanged");
+    assert_eq!(body["offline"], "1");
     assert!(body["debugContext"].is_null());
+    assert!(body["retryFlags"].is_null());
     assert_eq!(
         Path::new(body["cwd"].as_str().unwrap())
             .canonicalize()

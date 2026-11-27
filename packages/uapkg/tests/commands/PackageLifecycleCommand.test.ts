@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ok } from '@uapkg/diagnostics';
+import { ManifestSchema } from '@uapkg/package-manifest-schema';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { CompositionRoot } from '../../src/app/CompositionRoot.ts';
 import { PackageLifecycleCommand } from '../../src/commands/PackageLifecycleCommand.ts';
 import { AuthenticationSelector } from '../../src/control-plane/AuthenticationSelector.ts';
@@ -10,10 +15,60 @@ function requestUrl(input: string | URL | Request): string {
   return input instanceof URL ? input.href : input.url;
 }
 
-afterEach(() => {
+let cwd: string;
+beforeEach(async () => {
+  cwd = await mkdtemp(join(tmpdir(), 'uapkg-lifecycle-command-'));
+});
+afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  await rm(cwd, { recursive: true, force: true });
+});
+
+it('requires a registry for an ambiguous package before authenticating and accepts the explicit choice', async () => {
+  const manifest = ManifestSchema.parse({
+    kind: 'project',
+    name: 'game',
+    version: '1.0.0',
+    dependencies: { example: { version: '1.2.3', registry: 'studio' } },
+  });
+  await writeFile(join(cwd, 'uapkg.json'), JSON.stringify(manifest));
+  const readManifest = vi.fn(async () => ok(manifest));
+  const lookup = vi.fn(async () => ok({ name: 'example' }));
+  const resolve = vi.fn(async () => {
+    throw new Error('explicit trust selection reached');
+  });
+  const root = {
+    cwd,
+    packageManifest: { readManifest },
+    registryCore: { getOrCreateRegistry: () => ok({ getPackageManifest: lookup }) },
+    registryTrustResolver: { resolve },
+  } as unknown as CompositionRoot;
+  const select = vi
+    .spyOn(AuthenticationSelector.prototype, 'select')
+    .mockRejectedValue(new Error('unexpected credential request'));
+  const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  const options = {
+    operation: 'unyank',
+    packageName: 'example',
+    packageVersion: '1.2.3',
+    reason: 'fixed',
+    auth: 'login',
+    detach: true,
+    outputFormat: 'text',
+  } as const;
+  expect(await new PackageLifecycleCommand(root, options).execute()).toBe(1);
+  expect(lookup).toHaveBeenCalledWith('example', 'default');
+  expect(stderr.mock.calls.flat().join('')).toContain('--registry');
+  expect(stderr.mock.calls.flat().join('')).toContain('studio');
+  expect(resolve).not.toHaveBeenCalled();
+  expect(select).not.toHaveBeenCalled();
+
+  expect(await new PackageLifecycleCommand(root, { ...options, registry: 'studio' }).execute()).toBe(1);
+  expect(readManifest).toHaveBeenCalledOnce();
+  expect(lookup).toHaveBeenCalledOnce();
+  expect(resolve).toHaveBeenCalledWith('studio');
 });
 
 describe('PackageLifecycleCommand request-scoped OTP', () => {
@@ -79,12 +134,14 @@ describe('PackageLifecycleCommand request-scoped OTP', () => {
       }),
     );
     const root = {
+      cwd,
       registryTrustResolver: {
         resolve: vi.fn(async () => trust),
         forceRefresh: vi.fn(async () => undefined),
       },
       accountManager: {},
     } as unknown as CompositionRoot;
+    const resolveTrust = vi.spyOn(root.registryTrustResolver, 'resolve');
     const command = new PackageLifecycleCommand(root, {
       operation: 'yank',
       packageName: 'example',
@@ -99,6 +156,7 @@ describe('PackageLifecycleCommand request-scoped OTP', () => {
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(execution).resolves.toBe(0);
 
+    expect(resolveTrust).toHaveBeenCalledWith('default');
     expect(select).toHaveBeenCalledOnce();
     expect(select).toHaveBeenCalledWith(
       'login',
@@ -200,6 +258,7 @@ describe('PackageLifecycleCommand request-scoped OTP', () => {
     );
     const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const root = {
+      cwd,
       registryTrustResolver: {
         resolve: vi.fn(async () => trust),
         forceRefresh: vi.fn(async () => undefined),

@@ -3,7 +3,6 @@ import { configFormatters } from '#diagnostics-format/formatters/config/configFo
 import { installerFormatters } from '#diagnostics-format/formatters/installer/installerFormatters.ts';
 import { manifestFormatters } from '#diagnostics-format/formatters/manifest/manifestFormatters.ts';
 import { packFormatters } from '#diagnostics-format/formatters/pack/packFormatters.ts';
-import { postinstallFormatters } from '#diagnostics-format/formatters/postinstall/postinstallFormatters.ts';
 import { publishingFormatters } from '#diagnostics-format/formatters/publishing/publishingFormatters.ts';
 import { registryFormatters } from '#diagnostics-format/formatters/registry/registryFormatters.ts';
 import { registryToolsFormatters } from '#diagnostics-format/formatters/registryTools/registryToolsFormatters.ts';
@@ -22,7 +21,6 @@ export const defaultFormatters: FormatterMap = {
   ...manifestFormatters,
   ...packFormatters,
   ...installerFormatters,
-  ...postinstallFormatters,
   ...publishingFormatters,
   ...safetyFormatters,
   ...specFormatters,

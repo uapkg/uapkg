@@ -1,7 +1,7 @@
 import { rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import type { InstallPath } from '@uapkg/common-schema';
 import { createDiskRemoveFailedDiagnostic, DiagnosticBag, ok, type Result } from '@uapkg/diagnostics';
+import { workspaceInstallPath } from '#installer/core/WorkspaceInstallPath.ts';
 
 /**
  * Removes a package directory from disk.
@@ -12,8 +12,8 @@ import { createDiskRemoveFailedDiagnostic, DiagnosticBag, ok, type Result } from
 export class PackageRemover {
   async remove(packageName: string, manifestRoot: string, installPath: InstallPath): Promise<Result<void>> {
     const bag = new DiagnosticBag();
-    const target = resolve(manifestRoot, installPath);
     try {
+      const target = await workspaceInstallPath(manifestRoot, installPath);
       await rm(target, { recursive: true, force: true });
       return ok(undefined);
     } catch (err) {

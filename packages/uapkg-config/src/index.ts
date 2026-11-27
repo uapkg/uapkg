@@ -33,12 +33,12 @@ export type {
   ConfigCreateOptions,
   ConfigTraceEntry,
   ConfigValueWithOrigin,
-  PostInstallPolicyValue,
+  LifecyclePolicyValue,
   RegistryConfig,
   RegistryRef,
   ResolvedConfig,
 } from '#config/contracts/ConfigTypes.ts';
-export { PostInstallPolicyResolver } from '#config/core/PostInstallPolicyResolver.ts';
+export { LifecyclePolicyResolver } from '#config/core/LifecyclePolicyResolver.ts';
 export {
   getConfigSchemaAtPath,
   isLeafConfigPath,

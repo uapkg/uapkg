@@ -22,7 +22,8 @@ export class WhoamiCommandModule implements UAPKGCommandModule {
           })
           .option('registry', {
             type: 'string',
-            describe: 'Configured registry alias (defaults to the selected registry)',
+            requiresArg: true,
+            describe: 'Registry alias, uses "default" when omitted',
           })
           .option('json', {
             type: 'boolean',

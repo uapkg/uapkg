@@ -105,7 +105,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
             "--cli-version is unavailable for a development checkout binding. Use an official launcher for released CLI versions."
         );
         let diagnostic = diagnostics::for_development(&context, &invocation);
-        return delegate_development(&context, &invocation.args, diagnostic.as_ref());
+        return delegate_development(&context, &invocation.args, diagnostic.as_ref(), &invocation);
     };
     let cwd = std::env::current_dir()?;
     let preparation::PreparedCli {
@@ -128,6 +128,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32> {
         &invocation.args,
         diagnostic.as_ref(),
         &resolution.messages,
+        &invocation,
     )
 }
 
@@ -137,7 +138,7 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
     match (invocation.command.as_deref(), args.as_slice()) {
         (Some("launcher"), ["--help"] | ["-h"] | []) => {
             println!(
-                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  launcher --license\n  version install <version-selector>\n  version list [available]\n  version default [version-selector]\n  version current\n  launcher-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg version list --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline prohibits launcher downloads.\nArguments after -- are passed to the CLI unchanged."
+                "UAPKG launcher\n\n  launcher --version\n  launcher --platform\n  launcher --license\n  version install <version-selector>\n  version list [available]\n  version default [version-selector]\n  version current\n  launcher-update [launcher-version]\n\nSelectors: exact versions, latest, or a base-scoped preview such as 1.6.0-alpha.\n\nLauncher options may appear anywhere after uapkg, before --:\n  uapkg install --cli-version <version-selector>\n  uapkg --version --cli-version <version-selector>\n  uapkg version list --cli-version <version-selector>\n  uapkg install --offline\n\n--cli-version overrides CLI version selection.\n--offline requires cached launcher and lifecycle Node runtime artifacts.\nArguments after -- are passed to the CLI unchanged."
             );
         }
         (Some("version"), ["install", version]) => {
@@ -192,9 +193,16 @@ fn launcher_command(context: &ContextPaths, invocation: &Invocation) -> Result<i
                 .as_ref()
                 .is_some_and(|receipt| receipt.development.is_some())
             {
-                return delegate_development(context, &args, None);
+                return delegate_development(context, &args, None, invocation);
             }
-            return engines::delegate(context, &installed, &args, None, &resolution.messages);
+            return engines::delegate(
+                context,
+                &installed,
+                &args,
+                None,
+                &resolution.messages,
+                invocation,
+            );
         }
         (Some("version"), ["current"]) => {
             let settings = context.settings_at(
@@ -273,6 +281,7 @@ fn delegate_development(
     context: &ContextPaths,
     args: &[OsString],
     diagnostic: Option<&diagnostics::LauncherContext>,
+    invocation: &Invocation,
 ) -> Result<i32> {
     let development = context
         .receipt
@@ -292,5 +301,5 @@ fn delegate_development(
         .env("UAPKG_LAUNCHER_VERSION", VERSION)
         .env("UAPKG_LAUNCHER_EXECUTABLE", &context.executable);
     catalog::apply_notices(&mut command, &[])?;
-    engines::execute(command, diagnostic)
+    engines::execute(command, diagnostic, invocation)
 }

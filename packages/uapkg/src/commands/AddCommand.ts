@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { parsePackageSpec } from '@uapkg/common';
-import { DEFAULT_REGISTRY_ALIAS, RegistryNameSchema, VersionRangeSchema } from '@uapkg/common-schema';
-import { createRegistryNotFoundDiagnostic, type Diagnostic } from '@uapkg/diagnostics';
+import { DEFAULT_REGISTRY_ALIAS, VersionRangeSchema } from '@uapkg/common-schema';
+import type { Diagnostic } from '@uapkg/diagnostics';
 import { DependencyMutator } from '@uapkg/package-manifest';
 import { exactDeclaredVersion } from '@uapkg/registry-core';
 import type { Dependency } from '@uapkg/package-manifest-schema';
@@ -9,8 +9,10 @@ import type { CompositionRoot } from '#cli/app/CompositionRoot.ts';
 import type { Command } from '#cli/commands/Command.ts';
 import { InstallCommand } from '#cli/commands/InstallCommand.ts';
 import { findDeclaredDependency, releaseAgeOverrideCommand } from '#cli/commands/PackageOperation.ts';
+import { resolvePackageRegistry } from '#cli/commands/resolvePackageRegistry.ts';
 
 export interface AddCommandOptions {
+  readonly ignoreScripts?: boolean;
   readonly spec: string;
   readonly pin: boolean;
   readonly dev: boolean;
@@ -39,6 +41,8 @@ export class AddCommand implements Command {
     if (!lockResult.ok) return this.fail(lockResult.diagnostics);
     const original = manifestResult.value;
     const name = spec.name;
+    const registry = await resolvePackageRegistry(this.root, original, name, this.options.registry);
+    if (!registry.ok) return this.fail(registry.diagnostics);
     const declared = findDeclaredDependency(original, name);
     const overrides = original.kind === 'project' ? original.overrides : undefined;
     const override = overrides && Object.hasOwn(overrides, name) ? overrides[name] : undefined;
@@ -49,34 +53,46 @@ export class AddCommand implements Command {
     const existing: Dependency | undefined =
       declared?.dependency ??
       override ??
-      (locked ? { version: VersionRangeSchema.parse(`^${locked.version}`), registry: locked.registry } : undefined);
+      (locked?.registry === registry.value ? { version: VersionRangeSchema.parse(`^${locked.version}`) } : undefined);
     const newRoot = existing === undefined;
 
-    const registryInput =
-      this.options.registry ??
-      (existing
-        ? (existing.registry ?? DEFAULT_REGISTRY_ALIAS)
-        : ((this.root.config.get('registry') as string | null) ?? DEFAULT_REGISTRY_ALIAS));
-    const registry = RegistryNameSchema.safeParse(registryInput);
-    if (!registry.success) return this.fail([createRegistryNotFoundDiagnostic(registryInput)]);
     const dependency: Dependency = {
       version: spec.range ?? existing?.version ?? VersionRangeSchema.parse('*'),
-      ...(registry.data !== DEFAULT_REGISTRY_ALIAS ? { registry: registry.data } : {}),
+      ...(registry.value !== DEFAULT_REGISTRY_ALIAS ? { registry: registry.value } : {}),
       ...(existing?.path !== undefined ? { path: existing.path } : {}),
     };
     const requiredVersion = spec.range === undefined ? undefined : exactDeclaredVersion(spec.range);
     const bucket = this.options.dev ? 'devDependencies' : (declared?.bucket ?? 'dependencies');
     const pin = this.options.pin;
-    const stagedManifest = new DependencyMutator().addDependency(original, name, dependency, { bucket, pin });
+    const mutator = new DependencyMutator();
+    let stagedManifest = mutator.addDependency(original, name, dependency, { bucket, pin });
+    // Every direct requirement for a package must resolve to the selected source.
+    for (const otherBucket of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
+      const entries = original[otherBucket];
+      if (otherBucket === bucket || !entries || !Object.hasOwn(entries, name)) continue;
+      const other = entries[name];
+      if ((other.registry ?? DEFAULT_REGISTRY_ALIAS) !== registry.value) {
+        stagedManifest = mutator.addDependency(
+          stagedManifest,
+          name,
+          { ...other, registry: registry.value },
+          { bucket: otherBucket },
+        );
+      }
+    }
+    if (!pin && override && (override.registry ?? DEFAULT_REGISTRY_ALIAS) !== registry.value) {
+      stagedManifest = mutator.setPin(stagedManifest, name, { ...override, registry: registry.value });
+    }
 
     const install = new InstallCommand(this.root, {
+      ignoreScripts: this.options.ignoreScripts,
       force: this.options.force,
       frozen: false,
       dryRun: this.options.dryRun,
       outputFormat: this.options.outputFormat,
       ignoreReleaseAge: this.options.ignoreReleaseAge,
       command: 'add',
-      diagnostics: [...manifestResult.diagnostics, ...lockResult.diagnostics],
+      diagnostics: [...manifestResult.diagnostics, ...lockResult.diagnostics, ...registry.diagnostics],
       resolution: {
         originalManifest: original,
         ...(!isDeepStrictEqual(stagedManifest, original) ? { stagedManifest } : {}),

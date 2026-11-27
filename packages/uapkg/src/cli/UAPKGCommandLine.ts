@@ -1,4 +1,7 @@
+import type { Capability } from '@uapkg/package-manifest-schema';
 export type UAPKGCommandName =
+  | 'permissions'
+  | 'lifecycle-retry'
   | 'init'
   | 'add'
   | 'install'
@@ -50,6 +53,7 @@ export interface InitCommandLine extends BaseCommandLine {
 }
 
 export interface AddCommandLine extends BaseCommandLine {
+  ignoreScripts?: boolean;
   command: 'add';
   source: string;
   force: boolean;
@@ -62,6 +66,7 @@ export interface AddCommandLine extends BaseCommandLine {
 }
 
 export interface InstallCommandLine extends BaseCommandLine {
+  ignoreScripts?: boolean;
   command: 'install';
   force: boolean;
   frozen: boolean;
@@ -71,6 +76,7 @@ export interface InstallCommandLine extends BaseCommandLine {
 }
 
 export interface UpdateCommandLine extends BaseCommandLine {
+  ignoreScripts?: boolean;
   command: 'update';
   specs: string[];
   force: boolean;
@@ -107,6 +113,7 @@ export interface RegistryCommandLine extends BaseCommandLine {
 }
 
 export interface PackCommandLine extends BaseCommandLine {
+  ignoreScripts?: boolean;
   command: 'pack';
   dryRun: boolean;
   allowMissingLfs: boolean;
@@ -131,6 +138,7 @@ export interface ListCommandLine extends BaseCommandLine {
 }
 
 export interface RemoveCommandLine extends BaseCommandLine {
+  ignoreScripts?: boolean;
   command: 'remove';
   packageName: string;
   ignoreReleaseAge: boolean;
@@ -196,6 +204,7 @@ export interface RequestsCommandLine extends BaseCommandLine {
 }
 
 export type UAPKGCommandLine =
+  | PermissionCommandLine
   | InitCommandLine
   | AddCommandLine
   | InstallCommandLine
@@ -215,11 +224,26 @@ export type UAPKGCommandLine =
   | LifecycleCommandLine
   | RequestsCommandLine;
 
+export type PermissionCommandLine =
+  | { command: 'permissions'; action: 'list'; cwd: string }
+  | {
+      command: 'permissions';
+      action: 'approve' | 'revoke';
+      integrity?: string;
+      registryId?: string;
+      packageName: string;
+      registry?: string;
+      capability: Capability;
+      cwd: string;
+    }
+  | { command: 'lifecycle-retry'; packageName: string; registry?: string; capability: Capability; cwd: string };
+
 export interface CommonCommandLineOptions {
   cwd?: string;
 }
 
 export interface AddCommandLineOptions extends CommonCommandLineOptions {
+  ignoreScripts?: boolean;
   force?: boolean;
   pin?: boolean;
   dev?: boolean;
@@ -230,6 +254,7 @@ export interface AddCommandLineOptions extends CommonCommandLineOptions {
 }
 
 export interface InstallOrUpdateCommandLineOptions extends CommonCommandLineOptions {
+  ignoreScripts?: boolean;
   force?: boolean;
   frozen?: boolean;
   dryRun?: boolean;
@@ -256,6 +281,7 @@ export interface ListFactoryOptions extends CommonCommandLineOptions {
 }
 
 export interface RemoveFactoryOptions extends CommonCommandLineOptions {
+  ignoreScripts?: boolean;
   ignoreReleaseAge?: boolean;
   outputFormat?: UAPKGOutputFormat;
 }
@@ -318,6 +344,7 @@ export interface ConfigGetOptions extends ConfigCommonOptions {
 }
 
 export interface PackCommandLineOptions extends CommonCommandLineOptions {
+  ignoreScripts?: boolean;
   dryRun?: boolean;
   allowMissingLfs?: boolean;
   outFile?: string;
@@ -338,6 +365,7 @@ export class UAPKGCommandLineFactory {
   createAdd(source: string, options: AddCommandLineOptions = {}): AddCommandLine {
     return {
       command: 'add',
+      ...(options.ignoreScripts ? { ignoreScripts: true } : {}),
       cwd: this.resolveCwd(options.cwd),
       source,
       force: options.force === true,
@@ -353,6 +381,7 @@ export class UAPKGCommandLineFactory {
   createInstall(options: InstallOrUpdateCommandLineOptions = {}): InstallCommandLine {
     return {
       command: 'install',
+      ...(options.ignoreScripts ? { ignoreScripts: true } : {}),
       cwd: this.resolveCwd(options.cwd),
       force: options.force === true,
       frozen: options.frozen === true,
@@ -365,6 +394,7 @@ export class UAPKGCommandLineFactory {
   createUpdate(options: UpdateFactoryOptions = {}): UpdateCommandLine {
     return {
       command: 'update',
+      ...(options.ignoreScripts ? { ignoreScripts: true } : {}),
       cwd: this.resolveCwd(options.cwd),
       specs: options.specs ?? [],
       force: options.force === true,
@@ -404,6 +434,7 @@ export class UAPKGCommandLineFactory {
   createRemove(packageName: string, options: RemoveFactoryOptions = {}): RemoveCommandLine {
     return {
       command: 'remove',
+      ...(options.ignoreScripts ? { ignoreScripts: true } : {}),
       cwd: this.resolveCwd(options.cwd),
       packageName,
       ignoreReleaseAge: options.ignoreReleaseAge === true,
@@ -578,6 +609,7 @@ export class UAPKGCommandLineFactory {
   createPack(options: PackCommandLineOptions = {}): PackCommandLine {
     return {
       command: 'pack',
+      ...(options.ignoreScripts ? { ignoreScripts: true } : {}),
       cwd: this.resolveCwd(options.cwd),
       dryRun: options.dryRun === true,
       allowMissingLfs: options.allowMissingLfs === true,

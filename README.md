@@ -33,6 +33,12 @@ Use `uapkg update mesh --recursive` to check its dependencies for optional upgra
 `uapkg update` to check the whole project. The update summary lists releases held back
 by age. Add `--ignore-release-age` to bypass the cooldown for that command.
 
+UAPKG enables direct Unreal dependencies in the writable project or plugin descriptor.
+Package-authored host integration and postinstall hooks require permission by default.
+For example, `uapkg permissions approve mesh --capability integration` approves Mesh's
+integration from `default`. Repeat the original install command to apply it. For authoring,
+see the [integration package](packages/uapkg-integration/README.md).
+
 ## Prerequisites
 
 - [Git](https://git-scm.com/)

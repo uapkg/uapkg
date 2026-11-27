@@ -28,6 +28,8 @@
     "build:watch": "vp pack --watch"
   },
   "dependencies": {
+    "@uapkg/lifecycle": "workspace:^",
+    "@uapkg/package-manifest-schema": "workspace:^",
     "@uapkg/diagnostics": "workspace:^",
     "@uapkg/log": "workspace:^",
     "ignore": "7.0.5",

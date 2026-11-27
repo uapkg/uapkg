@@ -11,6 +11,11 @@ export class InstallCommandModule implements UAPKGCommandModule {
       'Install dependencies from uapkg.json',
       (builder) =>
         builder
+          .option('ignore-scripts', {
+            type: 'boolean',
+            default: false,
+            describe: 'Skip executable lifecycle hooks and integrations',
+          })
           .option('force', {
             type: 'boolean',
             default: false,
@@ -40,6 +45,7 @@ export class InstallCommandModule implements UAPKGCommandModule {
         sink.set(
           this.factory.createInstall({
             cwd: process.cwd(),
+            ignoreScripts: argv['ignore-scripts'],
             force: argv.force,
             frozen: argv.frozen,
             dryRun: argv['dry-run'],

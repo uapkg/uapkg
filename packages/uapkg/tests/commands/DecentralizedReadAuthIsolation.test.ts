@@ -38,6 +38,8 @@ const report: InstallReport = {
   failed: [],
   skipped: [],
   incompleteClosure: [],
+  deferredRemovals: [],
+  verifiedReleases: [],
 };
 
 afterEach(() => {
@@ -91,7 +93,7 @@ describe('decentralized read command authentication isolation', () => {
         },
         json: { emit: vi.fn() },
         diagnostics: { reportAll: vi.fn() },
-        postinstall: { run: vi.fn() },
+        lifecycle: { install: vi.fn(async () => []) },
       } as unknown as CompositionRoot;
 
       const command =

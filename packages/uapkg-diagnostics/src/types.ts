@@ -4,7 +4,7 @@ import type { GeneralDiagnostic } from '#diagnostics/general/GeneralDiagnostics.
 import type { InstallerDiagnostic } from '#diagnostics/installer/InstallerDiagnostics.ts';
 import type { ManifestDiagnostic } from '#diagnostics/manifest/ManifestDiagnostics.ts';
 import type { PackDiagnostic } from '#diagnostics/pack/PackDiagnostics.ts';
-import type { PostinstallDiagnostic } from '#diagnostics/postinstall/PostinstallDiagnostics.ts';
+import type { LifecycleDiagnostic } from '#diagnostics/lifecycle/LifecycleDiagnostics.ts';
 import type { PublishingDiagnostic } from '#diagnostics/publishing/PublishingDiagnostics.ts';
 import type { RegistryDiagnostic } from '#diagnostics/registry/RegistryDiagnostics.ts';
 import type { RegistryToolsDiagnostic } from '#diagnostics/registryTools/RegistryToolsDiagnostics.ts';
@@ -31,7 +31,7 @@ export type Diagnostic =
   | PackDiagnostic
   | GeneralDiagnostic
   | InstallerDiagnostic
-  | PostinstallDiagnostic
+  | LifecycleDiagnostic
   | PublishingDiagnostic
   | SafetyDiagnostic
   | SpecParseDiagnostic;

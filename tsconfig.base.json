@@ -32,6 +32,10 @@
       "@uapkg/package-manifest": ["./packages/uapkg-package-manifest/src/index.ts"],
       "@uapkg/package-claims": ["./packages/uapkg-package-claims/src/index.ts"],
       "@uapkg/package-claims/schema": ["./packages/uapkg-package-claims/src/schema/index.ts"],
+      "@uapkg/integration": ["./packages/uapkg-integration/src/index.ts"],
+      "@uapkg/integration/runtime": ["./packages/uapkg-integration/src/runtime.ts"],
+      "@uapkg/lifecycle": ["./packages/uapkg-lifecycle/src/index.ts"],
+      "@uapkg/node-version-manager": ["./packages/uapkg-node-version-manager/src/index.ts"],
       "@uapkg/installer": ["./packages/uapkg-installer/src/index.ts"],
       "@uapkg/cli": ["./packages/uapkg/src/index.ts"]
     }

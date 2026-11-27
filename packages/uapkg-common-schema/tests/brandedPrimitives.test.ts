@@ -11,8 +11,6 @@ import {
   type PackageName,
   PackageNameSchema,
   PackageVersionSchema,
-  type PostInstallPolicy,
-  PostInstallPolicySchema,
   RegistryIdentifierSchema,
   RegistryIdentifierShortSchema,
   RegistryNameSchema,
@@ -33,7 +31,6 @@ describe('composable branded primitives', () => {
       OrgNameSchema,
       PackageNameSchema,
       PackageVersionSchema,
-      PostInstallPolicySchema,
       RegistryIdentifierSchema,
       RegistryIdentifierShortSchema,
       RegistryNameSchema,
@@ -51,7 +48,6 @@ describe('composable branded primitives', () => {
   it('preserves branded inferred output types', () => {
     expectTypeOf(PackageNameSchema.parse('tool')).toEqualTypeOf<PackageName>();
     expectTypeOf(UnixTimestampSchema.parse(1)).toEqualTypeOf<UnixTimestamp>();
-    expectTypeOf(PostInstallPolicySchema.parse('deny')).toEqualTypeOf<PostInstallPolicy>();
   });
 
   it('emits non-empty JSON Schema constraints for versions and ranges', () => {

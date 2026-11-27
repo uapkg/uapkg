@@ -122,24 +122,7 @@ export {
   createUnresolvedLfsDiagnostic,
   createUpluginMissingDiagnostic,
 } from '#diagnostics/pack/PackDiagnostics.ts';
-// --- Postinstall family ---
-export type {
-  PostinstallDiagnostic,
-  PostinstallDuplicateEntryDiagnostic,
-  PostinstallEsbuildErrorDiagnostic,
-  PostinstallInvalidExportDiagnostic,
-  PostinstallLoadFailedDiagnostic,
-  PostinstallMarkerCorruptDiagnostic,
-  PostinstallPolicyDeniedDiagnostic,
-} from '#diagnostics/postinstall/PostinstallDiagnostics.ts';
-export {
-  createPostinstallDuplicateEntryDiagnostic,
-  createPostinstallEsbuildErrorDiagnostic,
-  createPostinstallInvalidExportDiagnostic,
-  createPostinstallLoadFailedDiagnostic,
-  createPostinstallMarkerCorruptDiagnostic,
-  createPostinstallPolicyDeniedDiagnostic,
-} from '#diagnostics/postinstall/PostinstallDiagnostics.ts';
+export type { LifecycleDiagnostic } from '#diagnostics/lifecycle/LifecycleDiagnostics.ts';
 // --- Publishing family ---
 export type {
   PublishDiagnosticFact,
@@ -157,6 +140,7 @@ export type {
   GitErrorDiagnostic,
   LockAcquisitionFailedDiagnostic,
   NetworkErrorDiagnostic,
+  PackageRegistryAmbiguousDiagnostic,
   RegistryDiagnostic,
   RegistryNotFoundDiagnostic,
   RegistryUnreachableDiagnostic,
@@ -169,6 +153,7 @@ export {
   createGitErrorDiagnostic,
   createLockAcquisitionFailedDiagnostic,
   createNetworkErrorDiagnostic,
+  createPackageRegistryAmbiguousDiagnostic,
   createRegistryNotFoundDiagnostic,
   createRegistryUnreachableDiagnostic,
   createSchemaInvalidDiagnostic,

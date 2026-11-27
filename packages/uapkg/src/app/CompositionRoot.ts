@@ -4,12 +4,13 @@ import { PackageManifest } from '@uapkg/package-manifest';
 import { RegistryCore } from '@uapkg/registry-core';
 import { AccountManager } from '#cli/control-plane/AccountManager.ts';
 import { RegistryTrustResolver } from '#cli/control-plane/RegistryTrustResolver.ts';
-import { PostinstallOrchestrator } from '#cli/postinstall/runner/PostinstallOrchestrator.ts';
+import { WorkspaceLifecycle } from '#cli/lifecycle/WorkspaceLifecycle.ts';
 import { DiagnosticReporter } from '#cli/reporting/DiagnosticReporter.ts';
 import { JsonReporter } from '#cli/reporting/JsonReporter.ts';
 
 export interface CompositionRootOptions {
   readonly cwd: string;
+  readonly invocation?: readonly string[];
 }
 
 /**
@@ -26,7 +27,7 @@ export interface CompositionRootOptions {
  *   ConfigInstance ──► RegistryCore ──► PackageManifest
  *                     │                   │
  *                     └──► Installer ◄────┘
- *                          PostinstallOrchestrator
+ *                          WorkspaceLifecycle
  *                          DiagnosticReporter / JsonReporter
  */
 export class CompositionRoot {
@@ -34,13 +35,17 @@ export class CompositionRoot {
   private _registryCore?: RegistryCore;
   private _packageManifest?: PackageManifest;
   private _installer?: Installer;
-  private _postinstall?: PostinstallOrchestrator;
+  private _lifecycle?: WorkspaceLifecycle;
   private _diagnostics?: DiagnosticReporter;
   private _json?: JsonReporter;
   private _accountManager?: AccountManager;
   private _registryTrustResolver?: RegistryTrustResolver;
 
   public constructor(private readonly options: CompositionRootOptions) {}
+
+  public get invocation(): readonly string[] | undefined {
+    return this.options.invocation;
+  }
 
   public get cwd(): string {
     return this.options.cwd;
@@ -90,11 +95,11 @@ export class CompositionRoot {
     return this._installer;
   }
 
-  public get postinstall(): PostinstallOrchestrator {
-    if (!this._postinstall) {
-      this._postinstall = new PostinstallOrchestrator();
+  public get lifecycle(): WorkspaceLifecycle {
+    if (!this._lifecycle) {
+      this._lifecycle = new WorkspaceLifecycle(this);
     }
-    return this._postinstall;
+    return this._lifecycle;
   }
 
   public get diagnostics(): DiagnosticReporter {

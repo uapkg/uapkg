@@ -68,7 +68,7 @@ describe('registry control-plane source identity', () => {
     const trust = await new RegistryTrustResolver(root).resolve();
 
     expect(trust).toMatchObject({
-      alias: 'official',
+      alias: 'default',
       registryId: '00000000-0000-4000-a000-000000000020',
       registryName: 'Official',
       repositoryUrl: 'https://github.com/uapkg/registry.git',

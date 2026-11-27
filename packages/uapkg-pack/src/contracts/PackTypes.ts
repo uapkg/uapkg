@@ -1,5 +1,8 @@
 export interface PackOptions {
   cwd?: string;
+  ignoreScripts?: boolean;
+  resolveNode?: (selector: string, workspaceRoot: string) => Promise<string>;
+  nodeExecutable?: string;
   outFile?: string;
   dryRun?: boolean;
   allowMissingLfs?: boolean;
@@ -17,6 +20,12 @@ export interface PackResult {
 export interface PackManifest {
   name: string;
   version: string;
+  integration?: { entry?: string };
+  lifecycle?: { scripts?: { prepack?: string; postinstall?: string }; runtime?: { node: string } };
+  dependencies?: Record<string, unknown>;
+  devDependencies?: Record<string, unknown>;
+  peerDependencies?: Record<string, unknown>;
+  overrides?: Record<string, unknown>;
 }
 
 export interface CollectedFile {

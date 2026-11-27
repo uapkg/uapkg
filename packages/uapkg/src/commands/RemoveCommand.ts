@@ -6,6 +6,7 @@ import { InstallCommand } from '#cli/commands/InstallCommand.ts';
 import { releaseAgeOverrideCommand } from '#cli/commands/PackageOperation.ts';
 
 export interface RemoveCommandOptions {
+  readonly ignoreScripts?: boolean;
   readonly packageName: string;
   readonly outputFormat: 'text' | 'json';
   readonly dryRun?: boolean;
@@ -59,6 +60,7 @@ export class RemoveCommand implements Command {
 
     // Reconcile on-disk state by delegating to the installer pipeline.
     const install = new InstallCommand(this.root, {
+      ignoreScripts: this.options.ignoreScripts,
       force: false,
       frozen: false,
       dryRun: this.options.dryRun === true,

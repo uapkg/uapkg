@@ -51,15 +51,18 @@ export class InstallProgressReporter {
    * Emit the post-install one-liner. The caller passes the installer's plan
    * summary directly; this class does not retain it.
    */
-  public renderSummary(summary: {
-    added: number;
-    updated: number;
-    removed: number;
-    unchanged: number;
-    totalBytes: number;
-  }): void {
+  public renderSummary(
+    summary: {
+      added: number;
+      updated: number;
+      removed: number;
+      unchanged: number;
+      totalBytes: number;
+    },
+    planned = false,
+  ): void {
     this.sink.writeLine(
-      `${summary.added} added, ${summary.updated} updated, ${summary.removed} removed, ${summary.unchanged} unchanged (${prettyBytes(summary.totalBytes)})`,
+      `${planned ? 'Install plan: ' : ''}${summary.added} added, ${summary.updated} updated, ${summary.removed} removed, ${summary.unchanged} unchanged (${prettyBytes(summary.totalBytes)})`,
     );
   }
 

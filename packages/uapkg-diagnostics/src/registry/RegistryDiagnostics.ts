@@ -40,6 +40,11 @@ export type RegistryNotFoundDiagnostic = DiagnosticBase<
   }
 >;
 
+export type PackageRegistryAmbiguousDiagnostic = DiagnosticBase<
+  'PACKAGE_REGISTRY_AMBIGUOUS',
+  { readonly packageName: string; readonly registries: readonly string[] }
+>;
+
 /** Failed to acquire the registry update lock. */
 export type LockAcquisitionFailedDiagnostic = DiagnosticBase<
   'LOCK_ACQUISITION_FAILED',
@@ -95,6 +100,7 @@ export type RegistryDiagnostic =
   | GitErrorDiagnostic
   | SchemaInvalidDiagnostic
   | RegistryNotFoundDiagnostic
+  | PackageRegistryAmbiguousDiagnostic
   | LockAcquisitionFailedDiagnostic
   | CacheReadErrorDiagnostic
   | CacheCorruptDiagnostic
@@ -148,6 +154,28 @@ Or configure manually:
   uapkg config set registries.${registryName}.ref.type branch
   uapkg config set registries.${registryName}.ref.value main`,
     data: { registryName },
+  };
+}
+
+export function createPackageRegistryAmbiguousDiagnostic(
+  packageName: string,
+  registries: readonly string[],
+): PackageRegistryAmbiguousDiagnostic {
+  const declared = registries
+    .slice(1)
+    .map((alias) => JSON.stringify(alias))
+    .join(', ');
+  const flags = registries.map((alias) => {
+    if (/^[A-Za-z0-9_.-]+$/.test(alias)) return `--registry ${alias}`;
+    const quoted = process.platform === 'win32' ? alias.replaceAll("'", "''") : alias.replaceAll("'", "'\\''");
+    return `--registry '${quoted}'`;
+  });
+  return {
+    level: 'error',
+    code: 'PACKAGE_REGISTRY_AMBIGUOUS',
+    message: `Package "${packageName}" exists in the default registry. uapkg.json also lists it under ${declared}.`,
+    hint: `Choose a registry and retry with ${flags.join(' or ')}.`,
+    data: { packageName, registries },
   };
 }
 

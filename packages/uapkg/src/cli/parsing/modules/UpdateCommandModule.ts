@@ -12,6 +12,11 @@ export class UpdateCommandModule implements UAPKGCommandModule {
       (builder) =>
         builder
           .positional('specs', { type: 'string', array: true, describe: 'Package names with optional version ranges' })
+          .option('ignore-scripts', {
+            type: 'boolean',
+            default: false,
+            describe: 'Skip executable lifecycle hooks and integrations',
+          })
           .option('force', {
             type: 'boolean',
             default: false,
@@ -39,6 +44,7 @@ export class UpdateCommandModule implements UAPKGCommandModule {
         sink.set(
           this.factory.createUpdate({
             cwd: process.cwd(),
+            ignoreScripts: argv['ignore-scripts'],
             specs,
             force: argv.force,
             dryRun: argv['dry-run'],

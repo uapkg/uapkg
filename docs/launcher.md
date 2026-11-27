@@ -200,8 +200,10 @@ a completion notice.
 
 ## Offline execution and recovery
 
-`--offline` (or `UAPKG_OFFLINE=1`) prohibits launcher network requests. Installed
-exact stable CLIs run locally. Preview and alias selection uses the last verified
+`--offline` (or `UAPKG_OFFLINE=1`) prohibits launcher network requests. The
+launcher forwards this setting to lifecycle Node selection and provisioning.
+An explicitly selected Node runtime needs a verified cached distribution.
+Installed exact stable CLIs run locally. Preview and alias selection uses the last verified
 metadata and remembered resolution when the site is unavailable. Metadata does
 not expire because a local clock crosses a retirement deadline. If known metadata
 requires a replacement that is not installed, the launcher fails instead of

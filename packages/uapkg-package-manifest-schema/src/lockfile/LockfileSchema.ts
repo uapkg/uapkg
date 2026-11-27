@@ -13,6 +13,23 @@ export const SUPPORTED_LOCKFILE_VERSIONS = [1] as const;
 export const LockfileSchema = z.object({
   lockfileVersion: z.literal(SUPPORTED_LOCKFILE_VERSIONS),
   packages: z.record(PackageNameSchema, LockDependencySchema),
+  lifecycleRuntimes: z
+    .object({
+      node: z
+        .record(
+          z.string().regex(/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))?$/),
+          z.string().regex(/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/),
+        )
+        .refine(
+          (pins) =>
+            Object.entries(pins).every(([selector, version]) =>
+              selector.includes('.') ? selector === version : selector === version.split('.')[0],
+            ),
+          'Node pin must satisfy its selector',
+        ),
+    })
+    .strict()
+    .optional(),
 });
 
 export type Lockfile = z.infer<typeof LockfileSchema>;
