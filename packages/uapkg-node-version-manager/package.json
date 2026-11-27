@@ -1,6 +1,6 @@
 {
   "name": "@uapkg/node-version-manager",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "type": "module",
   "sideEffects": false,
   "engines": {

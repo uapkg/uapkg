@@ -1,5 +1,14 @@
 # @uapkg/diagnostics-format
 
+## 1.7.6
+
+### Patch Changes
+
+- [`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Show the configured registry name when a package lookup fails or registry metadata is invalid. When an update targets a package missing from `uapkg.json`, identify the missing project dependency.
+
+- Updated dependencies [[`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79)]:
+  - @uapkg/diagnostics@1.7.6
+
 ## 1.7.5
 
 ### Patch Changes

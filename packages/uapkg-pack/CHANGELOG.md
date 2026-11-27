@@ -1,5 +1,15 @@
 # @uapkg/pack
 
+## 1.7.6
+
+### Patch Changes
+
+- Updated dependencies [[`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79), [`2139934`](https://github.com/uapkg/uapkg/commit/21399340ab8e8088bcabaf3429a76dd5d90f405e)]:
+  - @uapkg/diagnostics@1.7.6
+  - @uapkg/lifecycle@1.7.6
+  - @uapkg/log@1.7.6
+  - @uapkg/package-manifest-schema@1.7.6
+
 ## 1.7.5
 
 ### Patch Changes

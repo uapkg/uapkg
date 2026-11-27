@@ -1,5 +1,22 @@
 # @uapkg/installer
 
+## 1.7.6
+
+### Patch Changes
+
+- [`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Show the configured registry name when a package lookup fails or registry metadata is invalid. When an update targets a package missing from `uapkg.json`, identify the missing project dependency.
+
+- Updated dependencies [[`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79)]:
+  - @uapkg/diagnostics@1.7.6
+  - @uapkg/registry-core@1.7.6
+  - @uapkg/common@1.7.6
+  - @uapkg/common-schema@1.7.6
+  - @uapkg/config@1.7.6
+  - @uapkg/package-claims@1.7.6
+  - @uapkg/package-manifest@1.7.6
+  - @uapkg/package-manifest-schema@1.7.6
+  - @uapkg/registry-schema@1.7.6
+
 ## 1.7.5
 
 ### Patch Changes

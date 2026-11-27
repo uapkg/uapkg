@@ -1,5 +1,12 @@
 # @uapkg/common-schema
 
+## 1.7.6
+
+### Patch Changes
+
+- Updated dependencies [[`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79)]:
+  - @uapkg/diagnostics@1.7.6
+
 ## 1.7.5
 
 ### Patch Changes

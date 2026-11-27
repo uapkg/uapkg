@@ -1,5 +1,40 @@
 # uapkg
 
+## 1.7.6
+
+### Patch Changes
+
+- [`260a6c1`](https://github.com/uapkg/uapkg/commit/260a6c1b175d7ca9c8fe070fa7a651f2de23968f) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Include a CycloneDX dependency inventory in CLI tarballs.
+  Print the launcher's embedded Cargo dependency inventory with `uapkg launcher --license`, including when offline.
+
+- [`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Show the configured registry name when a package lookup fails or registry metadata is invalid. When an update targets a package missing from `uapkg.json`, identify the missing project dependency.
+
+- [`2139934`](https://github.com/uapkg/uapkg/commit/21399340ab8e8088bcabaf3429a76dd5d90f405e) Thanks [@MaximDevoir](https://github.com/MaximDevoir)! - Add exact-release permissions for plugin lifecycle scripts and Unreal host integration. Install direct native plugin references, run approved hooks from verified package bytes, and reconcile owned workspace edits across installs and removals. Package authors can generate files during prepack and pin a Node runtime. Pass offline mode through the launcher for lifecycle runtime selection.
+
+  Commands that accept `--registry` use the `default` alias when the option is omitted. If the default registry contains the package and `uapkg.json` names another registry for it, the CLI lists the aliases to choose from.
+
+  Managed Node runtimes refresh release keys from the official Node.js key repository and cache them for offline signature verification. A CLI with this updater can recognize newly authorized signers and revocations without a new UAPKG release.
+
+  Parse Unreal C# rules when applying host integrations. Resolve inherited project targets, honor conditional compilation and using directive order, and give each package's constructor statements a separate local scope.
+
+- Updated dependencies [[`51ad620`](https://github.com/uapkg/uapkg/commit/51ad62059fe69d741cadb1760522d5785401cd79), [`2139934`](https://github.com/uapkg/uapkg/commit/21399340ab8e8088bcabaf3429a76dd5d90f405e)]:
+  - @uapkg/diagnostics@1.7.6
+  - @uapkg/diagnostics-format@1.7.6
+  - @uapkg/installer@1.7.6
+  - @uapkg/registry-core@1.7.6
+  - @uapkg/integration@1.7.6
+  - @uapkg/lifecycle@1.7.6
+  - @uapkg/node-version-manager@1.7.6
+  - @uapkg/common@1.7.6
+  - @uapkg/common-schema@1.7.6
+  - @uapkg/config@1.7.6
+  - @uapkg/log@1.7.6
+  - @uapkg/pack@1.7.6
+  - @uapkg/package-claims@1.7.6
+  - @uapkg/package-manifest@1.7.6
+  - @uapkg/package-manifest-schema@1.7.6
+  - @uapkg/registry-schema@1.7.6
+
 ## 1.7.5
 
 ### Patch Changes
